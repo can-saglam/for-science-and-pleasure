@@ -1,0 +1,12 @@
+{
+  "name": "For Science and Pleasure",
+  "short_name": "Science & Pleasure",
+  "description": "Things worth leaving the house for — a shared London events and places list.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

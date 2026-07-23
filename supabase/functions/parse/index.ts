@@ -1,0 +1,44 @@
+// parse: authenticated in-app endpoint. Takes {text?, image_base64?, image_media_type?}
+// and returns a parsed card. The client inserts the row itself (RLS enforces membership).
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { corsHeaders, extractCard } from "../_shared/extract.ts";
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+  try {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const { data: isMember, error: memberErr } = await supabase.rpc("is_member");
+    if (memberErr || !isMember) {
+      return new Response(JSON.stringify({ error: "not a member" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const body = await req.json();
+    if (!body.text && !body.image_base64) {
+      return new Response(JSON.stringify({ error: "text or image_base64 required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const card = await extractCard(body);
+    return new Response(JSON.stringify({ card }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error(e);
+    return new Response(JSON.stringify({ error: String(e) }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
