@@ -23,7 +23,7 @@ import { ItemCard } from "./ItemCard";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-const MAX_LANES = 3;
+const MAX_LANES = 4;
 
 interface Bar {
   item: Item;
@@ -49,7 +49,9 @@ function weekBars(items: Item[], weekStart: Date): { bars: Bar[]; overflow: numb
       return { item: i, s, e };
     })
     .filter(({ s, e }) => s <= weekEnd && e >= weekStart)
-    .sort((a, b) => a.s.getTime() - b.s.getTime() || b.e.getTime() - a.e.getTime());
+    // most urgent first: the soonest-ending runs always get a visible bar,
+    // long background exhibitions are the ones that drop into "+n more"
+    .sort((a, b) => a.e.getTime() - b.e.getTime() || a.s.getTime() - b.s.getTime());
 
   const laneEnds: Date[] = [];
   const bars: Bar[] = [];
@@ -91,6 +93,7 @@ export function CalendarMonth({
 }) {
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [selectedWeek, setSelectedWeek] = useState<Date | null>(null);
 
   const weeks = useMemo(
     () =>
@@ -102,6 +105,19 @@ export function CalendarMonth({
   );
 
   const planned = items.filter((i) => i.status === "planned" && i.planned_for);
+
+  const weekItems = useMemo(() => {
+    if (!selectedWeek) return [];
+    const weekEnd = endOfWeek(selectedWeek, { weekStartsOn: 1 });
+    return items
+      .filter((i) => i.kind === "event" && isActive(i) && (i.starts_on || i.ends_on))
+      .filter((i) => {
+        const s = parseISO(i.starts_on ?? i.ends_on!);
+        const e = parseISO(i.ends_on ?? i.starts_on!);
+        return s <= weekEnd && e >= selectedWeek;
+      })
+      .sort((a, b) => (a.ends_on ?? "9999").localeCompare(b.ends_on ?? "9999"));
+  }, [items, selectedWeek]);
 
   const dayItems = useMemo(() => {
     if (!selectedDay) return [];
@@ -164,7 +180,10 @@ export function CalendarMonth({
                 return (
                   <button
                     key={i}
-                    onClick={() => setSelectedDay(day)}
+                    onClick={() => {
+                      setSelectedWeek(null);
+                      setSelectedDay(day);
+                    }}
                     className={cn(
                       "mx-auto flex size-8 flex-col items-center justify-center rounded-full text-sm",
                       !isSameMonth(day, month) && "text-muted-foreground/40",
@@ -197,17 +216,32 @@ export function CalendarMonth({
                 </button>
               ))}
               {overflow > 0 && (
-                <div
+                <button
+                  onClick={() => {
+                    setSelectedDay(null);
+                    setSelectedWeek(weekStart);
+                  }}
                   style={{ gridColumn: "1 / 8", gridRow: MAX_LANES + 2 }}
-                  className="px-1 text-[10px] text-muted-foreground"
+                  className="px-1 text-left text-[10px] font-medium text-muted-foreground underline underline-offset-2"
                 >
-                  +{overflow} more
-                </div>
+                  +{overflow} more this week
+                </button>
               )}
             </div>
           );
         })}
       </div>
+
+      {selectedWeek && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-muted-foreground">
+            Running in the week of {format(selectedWeek, "d MMMM")}
+          </h3>
+          {weekItems.map((i) => (
+            <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
+          ))}
+        </div>
+      )}
 
       {selectedDay && (
         <div className="space-y-2">

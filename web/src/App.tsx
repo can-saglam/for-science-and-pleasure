@@ -167,8 +167,10 @@ export default function App() {
 
       <ItemSheet
         item={selected}
+        allItems={items}
         onClose={() => setSelected(null)}
         onChanged={refresh}
+        onSwitch={setSelected}
       />
       <Toaster position="top-center" />
     </div>
