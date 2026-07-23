@@ -206,22 +206,6 @@ export function ItemSheet({
                 )}
               </div>
 
-              <div className="mt-4 space-y-1.5">
-                <Label className="text-muted-foreground">Plan for a day</Label>
-                <Input
-                  type="date"
-                  value={draft.planned_for ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value || null;
-                    set({ planned_for: v, status: v ? "planned" : "saved" });
-                    persist(
-                      { planned_for: v, status: v ? "planned" : "saved" },
-                      false,
-                    );
-                  }}
-                />
-              </div>
-
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => setEditing(true)}>
                   <Pencil /> Edit
