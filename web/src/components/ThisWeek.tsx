@@ -43,6 +43,11 @@ export function ThisWeek({
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
 
   const active = useMemo(() => items.filter(isActive), [items]);
+  // planned items live in their own section only
+  const unplanned = useMemo(
+    () => active.filter((i) => i.status !== "planned"),
+    [active],
+  );
 
   const plannedThisWeek = active
     .filter(
@@ -52,15 +57,15 @@ export function ThisWeek({
     )
     .sort((a, b) => a.planned_for!.localeCompare(b.planned_for!));
 
-  const lastChance = active
+  const lastChance = unplanned
     .filter((i) => timeBucket(i, now) === "last-chance")
     .sort((a, b) => (daysUntilClose(a, now) ?? 99) - (daysUntilClose(b, now) ?? 99));
 
-  const closingSoon = active
+  const closingSoon = unplanned
     .filter((i) => timeBucket(i, now) === "closing-soon")
     .sort((a, b) => (daysUntilClose(a, now) ?? 99) - (daysUntilClose(b, now) ?? 99));
 
-  const openingThisWeek = active
+  const openingThisWeek = unplanned
     .filter((i) => {
       const d = daysUntilOpen(i, now);
       return d !== null && d >= 0 && d <= 7;

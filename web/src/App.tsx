@@ -12,25 +12,31 @@ import { ThisWeek } from "@/components/ThisWeek";
 import { ItemSheet } from "@/components/ItemSheet";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
+import { DEMO_ITEMS } from "@/lib/demo";
 import {
   CalendarDays,
+  Inbox as InboxIcon,
   LibraryBig,
   LogOut,
   Plus,
   Sparkles,
 } from "lucide-react";
 
-import { DEMO_ITEMS } from "@/lib/demo";
-
 const DEMO = new URLSearchParams(window.location.search).has("demo");
 
-type Tab = "week" | "calendar" | "add" | "library";
+type Tab = "week" | "calendar" | "inbox" | "library";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "week", label: "This Week", icon: Sparkles },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
-  { id: "add", label: "Add", icon: Plus },
+  { id: "inbox", label: "Inbox", icon: InboxIcon },
   { id: "library", label: "Library", icon: LibraryBig },
 ];
 
@@ -40,6 +46,7 @@ export default function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [tab, setTab] = useState<Tab>("week");
   const [selected, setSelected] = useState<Item | null>(null);
+  const [captureOpen, setCaptureOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -101,28 +108,24 @@ export default function App() {
         </Button>
       </header>
 
-      <main className="flex-1 space-y-6 px-4 pb-28 pt-2">
-        {tab === "week" && (
-          <>
-            <Inbox items={items} onSelect={setSelected} />
-            <ThisWeek items={items} onSelect={setSelected} />
-          </>
-        )}
+      <main className="flex-1 space-y-6 px-4 pb-32 pt-2">
+        {tab === "week" && <ThisWeek items={items} onSelect={setSelected} />}
         {tab === "calendar" && (
           <CalendarMonth items={items} onSelect={setSelected} />
         )}
-        {tab === "add" && (
-          <Capture
-            onCreated={(item) => {
-              refresh();
-              setSelected(item);
-            }}
-          />
-        )}
+        {tab === "inbox" && <Inbox items={items} onSelect={setSelected} />}
         {tab === "library" && <Library items={items} onSelect={setSelected} />}
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <button
+        aria-label="Add"
+        onClick={() => setCaptureOpen(true)}
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform active:scale-95"
+      >
+        <Plus className="size-6" strokeWidth={2.2} />
+      </button>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="mx-auto grid max-w-xl grid-cols-4 pb-[env(safe-area-inset-bottom)]">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -135,7 +138,7 @@ export default function App() {
             >
               <Icon className="size-5" strokeWidth={tab === id ? 2.4 : 1.8} />
               {label}
-              {id === "week" && inboxCount > 0 && (
+              {id === "inbox" && inboxCount > 0 && (
                 <span className="absolute right-[22%] top-1.5 flex size-4 items-center justify-center rounded-full bg-foreground text-[9px] font-semibold text-background">
                   {inboxCount}
                 </span>
@@ -144,6 +147,23 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      <Drawer open={captureOpen} onOpenChange={setCaptureOpen}>
+        <DrawerContent className="max-h-[92dvh]">
+          <div className="overflow-y-auto px-4 pb-8">
+            <DrawerHeader className="px-0">
+              <DrawerTitle className="text-left">Add something</DrawerTitle>
+            </DrawerHeader>
+            <Capture
+              onCreated={(item) => {
+                setCaptureOpen(false);
+                refresh();
+                setSelected(item);
+              }}
+            />
+          </div>
+        </DrawerContent>
+      </Drawer>
 
       <ItemSheet
         item={selected}

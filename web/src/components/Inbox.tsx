@@ -9,20 +9,22 @@ export function Inbox({
   onSelect: (item: Item) => void;
 }) {
   const inbox = items.filter((i) => i.status === "inbox");
-  if (inbox.length === 0) return null;
   return (
     <section className="space-y-2">
-      <h3 className="font-heading text-base font-semibold">
-        Inbox <span className="text-muted-foreground">({inbox.length})</span>
-      </h3>
       <p className="text-xs text-muted-foreground">
         Freshly dumped — tap to check the details and confirm.
       </p>
-      <div className="space-y-2">
-        {inbox.map((i) => (
-          <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
-        ))}
-      </div>
+      {inbox.length === 0 ? (
+        <p className="pt-8 text-center text-sm text-muted-foreground">
+          Inbox zero. Dump something with the + button.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {inbox.map((i) => (
+            <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
