@@ -56,6 +56,8 @@ const seeds: Partial<Item>[] = [
     price: "Free",
     starts_on: past(80),
     ends_on: d(3),
+    lat: 51.4655,
+    lng: -0.138,
   },
   {
     title: "Marina Abramović",
@@ -82,6 +84,8 @@ const seeds: Partial<Item>[] = [
     venue: "Café Deco",
     area: "Bloomsbury",
     category: "cafe",
+    lat: 51.5205,
+    lng: -0.125,
   },
   {
     title: "Marcella",
@@ -109,6 +113,8 @@ const seeds: Partial<Item>[] = [
     price: "£20",
     starts_on: past(30),
     ends_on: d(8),
+    lat: 51.5076,
+    lng: -0.0994,
   },
   {
     title: "Dirty Looks",
@@ -118,6 +124,8 @@ const seeds: Partial<Item>[] = [
     price: "£16",
     starts_on: past(10),
     ends_on: d(14),
+    lat: 51.5202,
+    lng: -0.0937,
   },
   {
     title: "London Design Festival",
@@ -143,6 +151,8 @@ const seeds: Partial<Item>[] = [
     planned_for: d(3),
     starts_on: d(3),
     ends_on: d(3),
+    lat: 51.529,
+    lng: -0.0692,
   },
 ];
 
