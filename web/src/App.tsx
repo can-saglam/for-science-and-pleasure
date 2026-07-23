@@ -130,8 +130,8 @@ export default function App() {
       <main className="flex-1 space-y-6 px-4 pb-32 pt-2">
         {tab === "week" && (
           <>
-            <PlanDay items={items} onChanged={refresh} />
             <ThisWeek items={items} onSelect={setSelected} />
+            <PlanDay items={items} onChanged={refresh} />
           </>
         )}
         {tab === "calendar" && (
