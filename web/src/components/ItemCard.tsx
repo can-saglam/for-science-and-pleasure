@@ -50,7 +50,7 @@ export function ItemCard({
     <button
       onClick={onClick}
       className={cn(
-        "w-full rounded-xl border bg-card px-4 py-3 text-left transition-colors active:bg-accent",
+        "w-full rounded-xl border bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent/50 active:bg-accent",
         item.status === "done" && "opacity-50",
       )}
     >

@@ -146,7 +146,7 @@ export function ThisWeek({
       {view === "map" ? (
         <MapWeek items={mapItems} onSelect={onSelect} />
       ) : (
-        <>
+        <div className="grid gap-6 md:grid-cols-2 md:items-start">
       <Section title="Planned" items={plannedThisWeek} onSelect={onSelect} />
       <Section
         title="Last chance"
@@ -174,11 +174,11 @@ export function ThisWeek({
       />
 
       {empty && (
-        <p className="pt-8 text-center text-sm text-muted-foreground">
+        <p className="pt-8 text-center text-sm text-muted-foreground md:col-span-2">
           Nothing on the radar this week. Dump something with the + button.
         </p>
       )}
-        </>
+        </div>
       )}
     </div>
   );

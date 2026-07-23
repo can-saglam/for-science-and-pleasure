@@ -145,7 +145,7 @@ export function ItemSheet({
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent className="max-h-[92dvh]">
-        <div className="overflow-y-auto px-4 pb-8">
+        <div className="mx-auto w-full max-w-lg overflow-y-auto px-4 pb-8">
           {!editing ? (
             /* ---------------- read-only view ---------------- */
             <>

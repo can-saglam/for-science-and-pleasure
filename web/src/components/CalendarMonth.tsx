@@ -138,7 +138,7 @@ export function CalendarMonth({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-heading text-lg font-semibold">
+        <h2 className="font-heading text-lg font-semibold md:text-xl">
           {format(month, "MMMM yyyy")}
         </h2>
         <div className="flex gap-1">
@@ -158,7 +158,7 @@ export function CalendarMonth({
         </div>
       </div>
 
-      <div className="grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:text-xs">
         {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
           <div key={i}>{d}</div>
         ))}
@@ -185,7 +185,7 @@ export function CalendarMonth({
                       setSelectedDay(day);
                     }}
                     className={cn(
-                      "mx-auto flex size-8 flex-col items-center justify-center rounded-full text-sm",
+                      "mx-auto flex size-8 flex-col items-center justify-center rounded-full text-sm transition-colors hover:bg-accent md:size-10 md:text-base",
                       !isSameMonth(day, month) && "text-muted-foreground/40",
                       isToday(day) && "bg-foreground font-semibold text-background",
                       selectedDay && isSameDay(day, selectedDay) && !isToday(day) && "bg-accent",
@@ -207,7 +207,7 @@ export function CalendarMonth({
                   onClick={() => onSelect(bar.item)}
                   style={{ gridColumn: `${bar.colStart} / ${bar.colEnd}`, gridRow: bar.lane + 2 }}
                   className={cn(
-                    "h-5 truncate border border-foreground/25 bg-secondary px-1.5 text-left text-[10px] leading-5",
+                    "h-5 truncate border border-foreground/25 bg-secondary px-1.5 text-left text-[10px] leading-5 transition-colors hover:bg-accent md:h-6 md:px-2 md:text-[11px] md:leading-6",
                     bar.openStart ? "rounded-l-none border-l-0" : "rounded-l-md",
                     bar.openEnd ? "rounded-r-none border-r-0" : "rounded-r-md",
                   )}

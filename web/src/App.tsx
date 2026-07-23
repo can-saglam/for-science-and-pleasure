@@ -112,11 +112,40 @@ export default function App() {
   const inboxCount = items.filter((i) => i.status === "inbox").length;
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-xl flex-col">
-      <header className="flex items-center justify-between px-4 pb-2 pt-5">
-        <h1 className="font-heading text-xl font-semibold tracking-tight">
+    <div className="mx-auto flex min-h-dvh max-w-xl flex-col md:max-w-3xl lg:max-w-5xl">
+      <header className="flex items-center justify-between gap-4 px-4 pb-2 pt-5 md:pt-8">
+        <h1 className="font-heading text-xl font-semibold tracking-tight md:text-2xl">
           For Science and Pleasure
         </h1>
+        {/* desktop nav — the bottom bar is mobile-only */}
+        <nav className="hidden items-center gap-1 md:flex">
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={cn(
+                "relative rounded-full px-4 py-1.5 text-sm transition-colors",
+                tab === id
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {label}
+              {id === "inbox" && inboxCount > 0 && (
+                <span
+                  className={cn(
+                    "ml-1.5 inline-flex size-4 items-center justify-center rounded-full text-[9px] font-semibold",
+                    tab === id
+                      ? "bg-background text-foreground"
+                      : "bg-foreground text-background",
+                  )}
+                >
+                  {inboxCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
         <Button
           variant="ghost"
           size="icon"
@@ -127,7 +156,7 @@ export default function App() {
         </Button>
       </header>
 
-      <main className="flex-1 space-y-6 px-4 pb-32 pt-2">
+      <main className="flex-1 space-y-6 px-4 pb-32 pt-2 md:pb-16 md:pt-4">
         {tab === "week" && (
           <>
             <ThisWeek items={items} onSelect={setSelected} />
@@ -144,12 +173,12 @@ export default function App() {
       <button
         aria-label="Add"
         onClick={() => setCaptureOpen(true)}
-        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform active:scale-95"
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 active:scale-95 md:bottom-10 md:right-10"
       >
         <Plus className="size-6" strokeWidth={2.2} />
       </button>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-4 pb-[env(safe-area-inset-bottom)]">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -174,7 +203,7 @@ export default function App() {
 
       <Drawer open={captureOpen} onOpenChange={setCaptureOpen}>
         <DrawerContent className="max-h-[92dvh]">
-          <div className="overflow-y-auto px-4 pb-8">
+          <div className="mx-auto w-full max-w-lg overflow-y-auto px-4 pb-8">
             <DrawerHeader className="px-0">
               <DrawerTitle className="text-left">Add something</DrawerTitle>
             </DrawerHeader>

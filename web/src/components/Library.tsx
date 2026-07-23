@@ -115,9 +115,11 @@ export function Library({
           {done.length > 0 && (
             <section className="space-y-2">
               <h3 className="text-sm font-medium text-muted-foreground">Done</h3>
-              {done.map((i) => (
-                <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
-              ))}
+              <div className="grid gap-2 md:grid-cols-2">
+                {done.map((i) => (
+                  <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
+                ))}
+              </div>
             </section>
           )}
           {missed.length > 0 && (
@@ -125,9 +127,11 @@ export function Library({
               <h3 className="text-sm font-medium text-muted-foreground">
                 Missed — ended before you made it
               </h3>
-              {missed.map((i) => (
-                <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
-              ))}
+              <div className="grid gap-2 md:grid-cols-2">
+                {missed.map((i) => (
+                  <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
+                ))}
+              </div>
             </section>
           )}
           {done.length + missed.length === 0 && (
@@ -137,7 +141,7 @@ export function Library({
           )}
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-2 md:grid-cols-2">
           {visible.length === 0 ? (
             <p className="pt-8 text-center text-sm text-muted-foreground">
               Nothing here yet.

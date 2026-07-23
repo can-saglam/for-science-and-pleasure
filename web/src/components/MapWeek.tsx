@@ -34,7 +34,7 @@ export function MapWeek({
 
   return (
     <div className="space-y-2">
-      <div className="overflow-hidden rounded-xl border">
+      <div className="h-[55dvh] overflow-hidden rounded-xl border md:h-[65dvh]">
         <MapContainer
           {...(bounds
             ? { bounds, boundsOptions: { padding: [40, 40] } }
@@ -42,7 +42,7 @@ export function MapWeek({
                 center: pins[0] ? [pins[0].lat!, pins[0].lng!] : LONDON,
                 zoom: 13,
               })}
-          style={{ height: "55dvh", width: "100%" }}
+          style={{ height: "100%", width: "100%" }}
           scrollWheelZoom
         >
           <TileLayer url={TILES} attribution={ATTRIBUTION} />

@@ -66,7 +66,7 @@ export function PlanDay({
         </Button>
       </DrawerTrigger>
       <DrawerContent className="max-h-[92dvh]">
-        <div className="overflow-y-auto px-4 pb-8">
+        <div className="mx-auto w-full max-w-lg overflow-y-auto px-4 pb-8">
           <DrawerHeader className="px-0">
             <DrawerTitle className="text-left">Plan a day</DrawerTitle>
           </DrawerHeader>

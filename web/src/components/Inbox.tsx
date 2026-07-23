@@ -19,7 +19,7 @@ export function Inbox({
           Inbox zero. Dump something with the + button.
         </p>
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-2 md:grid-cols-2">
           {inbox.map((i) => (
             <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
           ))}
