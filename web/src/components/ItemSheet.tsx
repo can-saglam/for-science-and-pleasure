@@ -41,10 +41,42 @@ import {
   Pencil,
   Trash2,
   Undo2,
+  X,
 } from "lucide-react";
 
 function normalizeArea(area: string | null): string | null {
   return area ? area.trim().toLowerCase() : null;
+}
+
+// Native date inputs (especially on iOS) auto-fill today and are hard to
+// empty again — so every date field gets an explicit clear button.
+function ClearableDate({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  return (
+    <div className="relative">
+      <Input
+        type="date"
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        className={value ? "pr-8" : undefined}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label="Clear date"
+          onClick={() => onChange(null)}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function ItemSheet({
@@ -330,18 +362,16 @@ export function ItemSheet({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label>Opens</Label>
-                      <Input
-                        type="date"
-                        value={draft.starts_on ?? ""}
-                        onChange={(e) => set({ starts_on: e.target.value || null })}
+                      <ClearableDate
+                        value={draft.starts_on}
+                        onChange={(v) => set({ starts_on: v })}
                       />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Closes</Label>
-                      <Input
-                        type="date"
-                        value={draft.ends_on ?? ""}
-                        onChange={(e) => set({ ends_on: e.target.value || null })}
+                      <ClearableDate
+                        value={draft.ends_on}
+                        onChange={(v) => set({ ends_on: v })}
                       />
                     </div>
                   </div>
@@ -354,13 +384,12 @@ export function ItemSheet({
                   </div>
                   <div className="space-y-1.5">
                     <Label>Planned for</Label>
-                    <Input
-                      type="date"
-                      value={draft.planned_for ?? ""}
-                      onChange={(e) =>
+                    <ClearableDate
+                      value={draft.planned_for}
+                      onChange={(v) =>
                         set({
-                          planned_for: e.target.value || null,
-                          status: e.target.value
+                          planned_for: v,
+                          status: v
                             ? "planned"
                             : draft.status === "planned"
                               ? "saved"
