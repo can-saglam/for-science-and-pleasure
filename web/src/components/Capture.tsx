@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { insertItem, parseInput } from "@/lib/api";
+import { findByUrl, insertItem, parseInput } from "@/lib/api";
 import type { Item } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,6 +33,18 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
         payload.image_media_type = file.type || "image/jpeg";
       }
       const card = await parseInput(payload);
+
+      if (card.url) {
+        const existing = await findByUrl(card.url);
+        if (existing) {
+          toast(`Already saved: ${existing.title}`);
+          setText("");
+          setFile(null);
+          onCreated(existing);
+          return;
+        }
+      }
+
       const item = await insertItem({
         kind: card.kind,
         status: "inbox",
@@ -47,6 +59,8 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
         booking_url: card.booking_url,
         starts_on: card.starts_on,
         ends_on: card.ends_on,
+        lat: card.lat,
+        lng: card.lng,
         source: card.source,
         raw_input: text.trim() || "(screenshot)",
       });

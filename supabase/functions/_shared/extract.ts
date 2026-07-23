@@ -103,13 +103,35 @@ async function fetchPageText(url: string): Promise<string | null> {
   }
 }
 
+// Free OSM geocoder — used only server-side to attach coordinates so the app
+// can do distance-based "nearby" suggestions and Google Maps directions.
+export async function geocode(query: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`,
+      {
+        headers: { "User-Agent": "for-science-and-pleasure/1.0" },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+    if (!res.ok) return null;
+    const arr = await res.json();
+    if (!arr?.[0]?.lat) return null;
+    return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
+  } catch {
+    return null;
+  }
+}
+
 export interface ExtractInput {
   text?: string;          // pasted text, forwarded message, or a bare URL
   image_base64?: string;  // screenshot (e.g. of an Instagram post)
   image_media_type?: string;
 }
 
-export async function extractCard(input: ExtractInput): Promise<ParsedCard & { url: string | null; source: string }> {
+export async function extractCard(
+  input: ExtractInput,
+): Promise<ParsedCard & { url: string | null; source: string; lat: number | null; lng: number | null }> {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
 
   const text = (input.text ?? "").trim();
@@ -156,7 +178,21 @@ export async function extractCard(input: ExtractInput): Promise<ParsedCard & { u
     throw new Error("No structured output returned");
   }
   const card = JSON.parse(textBlock.text) as ParsedCard;
-  return { ...card, url, source: input.image_base64 ? "image" : url ? "link" : "text" };
+
+  let coords: { lat: number; lng: number } | null = null;
+  if (card.venue || card.area) {
+    coords = await geocode(
+      [card.venue ?? card.title, card.area, "London"].filter(Boolean).join(", "),
+    );
+  }
+
+  return {
+    ...card,
+    url,
+    source: input.image_base64 ? "image" : url ? "link" : "text",
+    lat: coords?.lat ?? null,
+    lng: coords?.lng ?? null,
+  };
 }
 
 export const corsHeaders = {

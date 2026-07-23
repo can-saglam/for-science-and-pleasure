@@ -33,6 +33,24 @@ Deno.serve(async (req) => {
     let row;
     try {
       const card = await extractCard(body);
+
+      // Duplicate guard: same source URL already saved → don't create a twin.
+      if (card.url) {
+        const { data: existing } = await supabase
+          .from("items")
+          .select("id, title")
+          .eq("url", card.url)
+          .is("deleted_at", null)
+          .limit(1)
+          .maybeSingle();
+        if (existing) {
+          return new Response(
+            JSON.stringify({ ok: true, duplicate: true, id: existing.id, title: existing.title }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+      }
+
       row = {
         kind: card.kind,
         status: "inbox",
@@ -47,6 +65,8 @@ Deno.serve(async (req) => {
         booking_url: card.booking_url,
         starts_on: card.starts_on,
         ends_on: card.ends_on,
+        lat: card.lat,
+        lng: card.lng,
         source: "shortcut",
         raw_input: body.text ?? "(screenshot)",
         added_by_email: body.added_by ?? null,

@@ -412,3 +412,12 @@ verify_jwt = false
 
 [functions.parse]
 verify_jwt = true
+
+[functions.calendar]
+verify_jwt = false
+
+[functions.digest]
+verify_jwt = false
+
+[functions.suggest]
+verify_jwt = true

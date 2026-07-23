@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { fetchItems } from "@/lib/api";
-import type { Item } from "@/lib/types";
+import { fetchItems, fetchMembers } from "@/lib/api";
+import type { Item, Member } from "@/lib/types";
+import { PlanDay } from "@/components/PlanDay";
 import { Auth } from "@/components/Auth";
 import { Capture } from "@/components/Capture";
 import { Inbox } from "@/components/Inbox";
@@ -47,6 +48,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("week");
   const [selected, setSelected] = useState<Item | null>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -76,12 +78,29 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     refresh();
+    fetchMembers().then(setMembers);
     const onFocus = () => refresh();
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [session, refresh]);
+
+  // Live sync: any change to items by either member refreshes both devices.
+  useEffect(() => {
+    if (!session || DEMO) return;
+    const channel = supabase
+      .channel("items-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "items" },
+        () => refresh(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
     };
   }, [session, refresh]);
 
@@ -109,7 +128,12 @@ export default function App() {
       </header>
 
       <main className="flex-1 space-y-6 px-4 pb-32 pt-2">
-        {tab === "week" && <ThisWeek items={items} onSelect={setSelected} />}
+        {tab === "week" && (
+          <>
+            <PlanDay items={items} onChanged={refresh} />
+            <ThisWeek items={items} onSelect={setSelected} />
+          </>
+        )}
         {tab === "calendar" && (
           <CalendarMonth items={items} onSelect={setSelected} />
         )}
@@ -168,6 +192,7 @@ export default function App() {
       <ItemSheet
         item={selected}
         allItems={items}
+        members={members}
         onClose={() => setSelected(null)}
         onChanged={refresh}
         onSwitch={setSelected}

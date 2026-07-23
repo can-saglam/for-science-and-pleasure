@@ -18,6 +18,8 @@ export interface Item {
   starts_on: string | null; // YYYY-MM-DD
   ends_on: string | null;
   planned_for: string | null;
+  lat: number | null;
+  lng: number | null;
   notes: string | null;
   source: string;
   raw_input: string | null;
@@ -41,6 +43,20 @@ export interface ParsedCard {
   ends_on: string | null;
   url: string | null;
   source: string;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface Member {
+  email: string;
+  display_name: string | null;
+}
+
+export interface DayPlan {
+  title: string;
+  why: string;
+  item_ids: string[];
+  steps: string[];
 }
 
 export const CATEGORIES = [

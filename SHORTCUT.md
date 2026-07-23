@@ -46,3 +46,26 @@ the screenshot version reads the dates off the image).
 
 Tip: you can also add `added_by` (Text) → your email in either body, so cards
 show who dumped them.
+
+## Automation — Sunday-evening digest
+
+A weekly "here's your week" note written by Claude, delivered as a notification.
+Each of you sets this up once:
+
+1. Shortcuts app → **Automation** tab → **+** → **Time of Day** → Sunday, 6:00 PM
+   → *Run Immediately*.
+2. Action **Get Contents of URL**:
+   - `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/digest?key=`*(the secret)*
+3. Action **Get Dictionary Value** → key `text` → from *Contents of URL*.
+4. Action **Show Notification** → body: the *Dictionary Value*.
+
+## Subscribe your real calendars
+
+One shared feed keeps planned outings and opening/closing markers inside
+Google Calendar automatically — no per-item exporting:
+
+- Feed URL: `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/calendar?key=`*(the secret)*
+- **Google Calendar** (do this on the web at calendar.google.com): Settings →
+  *Add calendar* → *From URL* → paste the feed URL. It then syncs to the
+  Google Calendar app on both phones signed into that account (Google refreshes
+  external feeds every few hours).

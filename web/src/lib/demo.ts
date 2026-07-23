@@ -22,6 +22,8 @@ function make(partial: Partial<Item>, i: number): Item {
     starts_on: null,
     ends_on: null,
     planned_for: null,
+    lat: null,
+    lng: null,
     notes: null,
     source: "manual",
     raw_input: null,
@@ -43,6 +45,8 @@ const seeds: Partial<Item>[] = [
     price: "£18",
     starts_on: past(40),
     ends_on: d(10),
+    lat: 51.5056,
+    lng: -0.1166,
   },
   {
     title: "Beryl Cook / Tom of Finland",
@@ -85,6 +89,8 @@ const seeds: Partial<Item>[] = [
     venue: "Marcella",
     area: "South Bank",
     category: "food",
+    lat: 51.503,
+    lng: -0.112,
   },
   {
     title: "The Understudy",
@@ -92,6 +98,8 @@ const seeds: Partial<Item>[] = [
     venue: "The Understudy",
     area: "South Bank",
     category: "drink",
+    lat: 51.5079,
+    lng: -0.1082,
   },
   {
     title: "Emily Kam Kngwarray",

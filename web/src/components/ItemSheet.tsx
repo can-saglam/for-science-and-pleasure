@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { downloadIcs, isActive, softDeleteItem, updateItem } from "@/lib/api";
-import type { Item, ItemKind } from "@/lib/types";
+import {
+  downloadIcs,
+  googleDirectionsUrl,
+  googleMapsUrl,
+  haversineKm,
+  isActive,
+  softDeleteItem,
+  updateItem,
+  walkMinutes,
+} from "@/lib/api";
+import type { Item, ItemKind, Member } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,12 +50,14 @@ function normalizeArea(area: string | null): string | null {
 export function ItemSheet({
   item,
   allItems,
+  members,
   onClose,
   onChanged,
   onSwitch,
 }: {
   item: Item | null;
   allItems: Item[];
+  members: Member[];
   onClose: () => void;
   onChanged: () => void;
   onSwitch: (item: Item) => void;
@@ -61,18 +72,39 @@ export function ItemSheet({
 
   const nearby = useMemo(() => {
     if (!item || item.kind !== "event") return [];
+    const places = allItems.filter(
+      (p) => p.id !== item.id && p.kind === "place" && isActive(p),
+    );
+    // Preferred: real distance when both sides are geocoded (≤ 2 km).
+    if (item.lat && item.lng) {
+      const withDist = places
+        .filter((p) => p.lat && p.lng)
+        .map((p) => ({
+          place: p,
+          km: haversineKm(
+            { lat: item.lat!, lng: item.lng! },
+            { lat: p.lat!, lng: p.lng! },
+          ),
+        }))
+        .filter(({ km }) => km <= 2)
+        .sort((a, b) => a.km - b.km)
+        .slice(0, 3);
+      if (withDist.length > 0) return withDist;
+    }
+    // Fallback: same-area name match for items without coordinates.
     const area = normalizeArea(item.area);
     if (!area) return [];
-    return allItems
-      .filter(
-        (p) =>
-          p.id !== item.id &&
-          p.kind === "place" &&
-          isActive(p) &&
-          normalizeArea(p.area) === area,
-      )
-      .slice(0, 3);
+    return places
+      .filter((p) => normalizeArea(p.area) === area)
+      .slice(0, 3)
+      .map((place) => ({ place, km: null as number | null }));
   }, [item, allItems]);
+
+  const addedBy = useMemo(() => {
+    if (!item?.added_by_email) return null;
+    const m = members.find((m) => m.email === item.added_by_email);
+    return m?.display_name ?? item.added_by_email.split("@")[0];
+  }, [item, members]);
 
   if (!draft) return <Drawer open={false} />;
 
@@ -146,18 +178,33 @@ export function ItemSheet({
                 {draft.notes && (
                   <p className="pt-1 whitespace-pre-wrap">{draft.notes}</p>
                 )}
+                {addedBy && (
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    Added by {addedBy}
+                  </p>
+                )}
               </div>
 
-              {draft.url && (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
                 <a
-                  href={draft.url}
+                  href={googleMapsUrl(draft)}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-3 inline-flex items-center gap-1 text-sm underline underline-offset-4"
+                  className="inline-flex items-center gap-1 text-sm underline underline-offset-4"
                 >
-                  Open source link <ArrowUpRight className="size-3.5" />
+                  <MapPin className="size-3.5" /> Google Maps
                 </a>
-              )}
+                {draft.url && (
+                  <a
+                    href={draft.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-sm underline underline-offset-4"
+                  >
+                    Source link <ArrowUpRight className="size-3.5" />
+                  </a>
+                )}
+              </div>
 
               <div className="mt-4 space-y-1.5">
                 <Label className="text-muted-foreground">Plan for a day</Label>
@@ -209,19 +256,35 @@ export function ItemSheet({
                     </h3>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Saved spots in {draft.area} you could pair with this.
+                    Saved spots near this you could pair with it.
                   </p>
-                  {nearby.map((p) => (
-                    <button
+                  {nearby.map(({ place: p, km }) => (
+                    <div
                       key={p.id}
-                      onClick={() => onSwitch(p)}
-                      className="w-full rounded-xl border bg-card px-4 py-3 text-left active:bg-accent"
+                      className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3"
                     >
-                      <div className="font-medium leading-snug">{p.title}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {[p.category, p.area].filter(Boolean).join(" · ")}
-                      </div>
-                    </button>
+                      <button onClick={() => onSwitch(p)} className="min-w-0 flex-1 text-left">
+                        <div className="truncate font-medium leading-snug">{p.title}</div>
+                        <div className="truncate text-sm text-muted-foreground">
+                          {[
+                            p.category,
+                            p.area,
+                            km !== null ? `~${walkMinutes(km)} min walk` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      </button>
+                      <a
+                        href={googleDirectionsUrl(draft, p)}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`Walking directions to ${p.title}`}
+                        className="shrink-0 rounded-md border p-2 text-muted-foreground active:bg-accent"
+                      >
+                        <ArrowUpRight className="size-4" />
+                      </a>
+                    </div>
                   ))}
                 </div>
               )}

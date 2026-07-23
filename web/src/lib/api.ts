@@ -1,6 +1,6 @@
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { supabase, SUPABASE_URL } from "./supabase";
-import type { Item, ParsedCard } from "./types";
+import type { DayPlan, Item, Member, ParsedCard } from "./types";
 
 export async function fetchItems(): Promise<Item[]> {
   const { data, error } = await supabase
@@ -60,6 +60,77 @@ export async function parseInput(input: {
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? `parse failed (${res.status})`);
   return json.card as ParsedCard;
+}
+
+export async function fetchMembers(): Promise<Member[]> {
+  const { data, error } = await supabase.from("members").select("email, display_name");
+  if (error) return [];
+  return data as Member[];
+}
+
+export async function findByUrl(url: string): Promise<Item | null> {
+  const { data } = await supabase
+    .from("items")
+    .select("*")
+    .eq("url", url)
+    .is("deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+  return (data as Item) ?? null;
+}
+
+export async function suggestPlans(date: string): Promise<DayPlan[]> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/suggest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ date }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? `suggest failed (${res.status})`);
+  return (json.plans ?? []) as DayPlan[];
+}
+
+// ---- maps (Google Maps only, per house rules) -----------------------------
+
+export function mapsQuery(item: Item): string {
+  return [item.venue ?? item.title, item.area, "London"].filter(Boolean).join(", ");
+}
+
+export function googleMapsUrl(item: Item): string {
+  if (item.lat && item.lng) {
+    return `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery(item))}`;
+}
+
+export function googleDirectionsUrl(from: Item, to: Item): string {
+  const enc = (i: Item) =>
+    i.lat && i.lng ? `${i.lat},${i.lng}` : encodeURIComponent(mapsQuery(i));
+  return `https://www.google.com/maps/dir/?api=1&origin=${enc(from)}&destination=${enc(to)}&travelmode=walking`;
+}
+
+export function haversineKm(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+export function walkMinutes(km: number): number {
+  return Math.max(1, Math.round(km * 12)); // ~5 km/h
 }
 
 // ---- time logic ----------------------------------------------------------

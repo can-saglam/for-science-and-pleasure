@@ -19,7 +19,21 @@ view helps plan the week around what's opening and closing.
 - **This Week** — planned outings, what's closing, what's opening, plus a
   rotating shortlist of saved places.
 - Planning is a soft `planned for` date; *Add to Calendar* exports an `.ics`
-  for the ones you commit to.
+  for the ones you commit to — or subscribe to the live feed (see below).
+- **Live sync** — changes appear on both phones instantly (Supabase realtime).
+- **Make a day of it** — event pages suggest saved places nearby (geocoded at
+  parse time; real walking distance when coordinates are known, area-name match
+  otherwise), with Google Maps links and walking directions.
+- **Plan a day** — "Free on a day?" on This Week asks Claude to build 1–3 day
+  plans from your own list, prioritising things that close soon; one tap plans
+  the whole thing.
+- **Calendar feed** — `/functions/v1/calendar?key=…` is a subscribable ICS
+  (planned days, "Opens —", "Last day —" markers) for Google Calendar.
+- **Weekly digest** — `/functions/v1/digest?key=…` returns a short
+  Claude-written summary of the week; wire it to a Sunday Shortcut automation
+  (see SHORTCUT.md).
+- **History** — the Library keeps Done and *Missed* (ended before you made it)
+  in a separate tab; duplicate URLs are deduped on capture.
 
 ## Stack
 
