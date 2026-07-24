@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { findByUrl, insertItem, parseInput } from "@/lib/api";
 import type { Item } from "@/lib/types";
+import { imageTooLargeMessage, MAX_IMAGE_BYTES } from "@/lib/limits";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -29,6 +30,9 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
       const payload: Parameters<typeof parseInput>[0] = {};
       if (text.trim()) payload.text = text.trim();
       if (file) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          throw new Error(imageTooLargeMessage());
+        }
         payload.image_base64 = await fileToBase64(file);
         payload.image_media_type = file.type || "image/jpeg";
       }
@@ -47,7 +51,7 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
 
       const item = await insertItem({
         kind: card.kind,
-        status: "inbox",
+        status: "saved",
         title: card.title,
         summary: card.summary,
         venue: card.venue,
@@ -61,6 +65,7 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
         ends_on: card.ends_on,
         lat: card.lat,
         lng: card.lng,
+        color: card.color,
         source: card.source,
         raw_input: text.trim() || "(screenshot)",
       });
@@ -77,7 +82,7 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
   async function handleManual() {
     const item = await insertItem({
       kind: "place",
-      status: "inbox",
+      status: "saved",
       title: "New item",
       source: "manual",
     });
@@ -100,7 +105,16 @@ export function Capture({ onCreated }: { onCreated: (item: Item) => void }) {
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              const next = e.target.files?.[0] ?? null;
+              if (next && next.size > MAX_IMAGE_BYTES) {
+                toast.error(imageTooLargeMessage());
+                e.target.value = "";
+                setFile(null);
+                return;
+              }
+              setFile(next);
+            }}
           />
           <Button
             variant="outline"

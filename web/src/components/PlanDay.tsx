@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { addDays, format, nextSaturday } from "date-fns";
-import { suggestPlans, updateItem } from "@/lib/api";
-import type { DayPlan, Item } from "@/lib/types";
+import { suggestPlans } from "@/lib/api";
+import type { DayPlan } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,15 +13,9 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer";
 import { toast } from "sonner";
-import { CalendarCheck, Wand2 } from "lucide-react";
+import { Wand2 } from "lucide-react";
 
-export function PlanDay({
-  items,
-  onChanged,
-}: {
-  items: Item[];
-  onChanged: () => void;
-}) {
+export function PlanDay() {
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(() =>
     format(nextSaturday(addDays(new Date(), -1)), "yyyy-MM-dd"),
@@ -41,23 +35,6 @@ export function PlanDay({
     }
   }
 
-  async function applyPlan(plan: DayPlan) {
-    const targets = items.filter((i) => plan.item_ids.includes(i.id));
-    try {
-      await Promise.all(
-        targets.map((i) =>
-          updateItem(i.id, { planned_for: date, status: "planned" }),
-        ),
-      );
-      toast(`Planned for ${format(new Date(date), "EEE d MMM")}`);
-      onChanged();
-      setOpen(false);
-      setPlans(null);
-    } catch (e) {
-      toast.error(String(e));
-    }
-  }
-
   return (
     <Drawer open={open} onOpenChange={setOpen}>
       <DrawerTrigger asChild>
@@ -66,7 +43,7 @@ export function PlanDay({
         </Button>
       </DrawerTrigger>
       <DrawerContent className="max-h-[92dvh]">
-        <div className="mx-auto w-full max-w-lg overflow-y-auto px-4 pb-8">
+        <div className="mx-auto w-full min-w-0 max-w-lg overscroll-contain overflow-x-hidden overflow-y-auto px-4 pb-8 scroll-pb-[40dvh]">
           <DrawerHeader className="px-0">
             <DrawerTitle className="text-left">Plan a day</DrawerTitle>
           </DrawerHeader>
@@ -91,7 +68,10 @@ export function PlanDay({
             )}
 
             {plans?.map((plan, idx) => (
-              <div key={idx} className="space-y-2 rounded-xl border bg-card p-4">
+              <div
+                key={idx}
+                className="space-y-2 overflow-hidden rounded-xl border bg-card p-4 [overflow-wrap:anywhere]"
+              >
                 <div className="font-heading font-semibold">{plan.title}</div>
                 <p className="text-sm text-muted-foreground">{plan.why}</p>
                 <ol className="space-y-1 text-sm">
@@ -102,13 +82,6 @@ export function PlanDay({
                     </li>
                   ))}
                 </ol>
-                <Button
-                  size="sm"
-                  className="w-full"
-                  onClick={() => applyPlan(plan)}
-                >
-                  <CalendarCheck /> Plan it
-                </Button>
               </div>
             ))}
           </div>

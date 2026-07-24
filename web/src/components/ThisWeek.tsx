@@ -1,7 +1,18 @@
 import { useMemo, useState } from "react";
-import { endOfWeek, format, isWithinInterval, parseISO, startOfWeek } from "date-fns";
+import {
+  differenceInCalendarDays,
+  endOfWeek,
+  format,
+  parseISO,
+  startOfWeek,
+} from "date-fns";
 import type { Item } from "@/lib/types";
-import { daysUntilClose, daysUntilOpen, isActive, timeBucket } from "@/lib/api";
+import {
+  daysUntilClose,
+  daysUntilOpen,
+  isActive,
+  timeBucket,
+} from "@/lib/api";
 import { ItemCard } from "./ItemCard";
 import { MapWeek } from "./MapWeek";
 import { cn } from "@/lib/utils";
@@ -20,12 +31,12 @@ function Section({
 }) {
   if (items.length === 0) return null;
   return (
-    <section className="space-y-2">
+    <section className="min-w-0 space-y-2">
       <div>
         <h3 className="font-heading text-base font-semibold">{title}</h3>
         {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       </div>
-      <div className="space-y-2">
+      <div className="min-w-0 space-y-2">
         {items.map((i) => (
           <ItemCard key={i.id} item={i} onClick={() => onSelect(i)} />
         ))}
@@ -47,61 +58,79 @@ export function ThisWeek({
   const [view, setView] = useState<"list" | "map">("list");
 
   const active = useMemo(() => items.filter(isActive), [items]);
-  // planned items live in their own section only
-  const unplanned = useMemo(
-    () => active.filter((i) => i.status !== "planned"),
-    [active],
-  );
 
-  const plannedThisWeek = active
-    .filter(
-      (i) =>
-        i.planned_for &&
-        isWithinInterval(parseISO(i.planned_for), { start: weekStart, end: weekEnd }),
-    )
-    .sort((a, b) => a.planned_for!.localeCompare(b.planned_for!));
-
-  const lastChance = unplanned
+  const lastChance = active
     .filter((i) => timeBucket(i, now) === "last-chance")
     .sort((a, b) => (daysUntilClose(a, now) ?? 99) - (daysUntilClose(b, now) ?? 99));
 
-  const closingSoon = unplanned
+  const closingSoon = active
     .filter((i) => timeBucket(i, now) === "closing-soon")
     .sort((a, b) => (daysUntilClose(a, now) ?? 99) - (daysUntilClose(b, now) ?? 99));
 
-  const openingThisWeek = unplanned
+  const openingThisWeek = active
     .filter((i) => {
       const d = daysUntilOpen(i, now);
       return d !== null && d >= 0 && d <= 7;
     })
     .sort((a, b) => (daysUntilOpen(a, now) ?? 99) - (daysUntilOpen(b, now) ?? 99));
 
-  const placeIdeas = useMemo(() => {
-    const places = active.filter((i) => i.kind === "place" && i.status === "saved");
-    // stable weekly rotation: seed by ISO week so the shortlist changes each week
-    const seed = Number(format(now, "I")) + now.getFullYear();
-    return [...places]
-      .sort((a, b) => {
-        const ha = (a.id.charCodeAt(0) * seed) % 97;
-        const hb = (b.id.charCodeAt(0) * seed) % 97;
-        return ha - hb;
-      })
-      .slice(0, 3);
-  }, [active, now]);
+  const places = active.filter((i) => i.kind === "place");
+  // stable weekly rotation: seed by ISO week so the shortlist changes each week
+  const seed = Number(format(now, "I")) + now.getFullYear();
+  const rotate = (a: Item, b: Item) => {
+    const ha = (a.id.charCodeAt(0) * seed) % 97;
+    const hb = (b.id.charCodeAt(0) * seed) % 97;
+    return ha - hb;
+  };
+  const placeIdeas = [...places].sort(rotate).slice(0, 3);
+
+  // Ongoing events (open now or undated) never hit an urgency bucket, so
+  // surface a rotating shortlist here — biased toward the oldest saves,
+  // which are the ones most at risk of quietly becoming "Missed".
+  const onNowPool = active.filter(
+    (i) =>
+      i.kind === "event" &&
+      ["open-now", "anytime"].includes(timeBucket(i, now)),
+  );
+  const onNow = [...onNowPool]
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .slice(0, 8)
+    .sort(rotate)
+    .slice(0, 3);
+
+  // Resurface the oldest save that isn't already on screen this week.
+  const shownIds = new Set(
+    [
+      ...lastChance,
+      ...closingSoon,
+      ...openingThisWeek,
+      ...onNow,
+      ...placeIdeas,
+    ].map((i) => i.id),
+  );
+  const stale = active
+    .filter(
+      (i) =>
+        !shownIds.has(i.id) &&
+        differenceInCalendarDays(now, parseISO(i.created_at)) > 60,
+    )
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .slice(0, 1);
 
   const empty =
-    plannedThisWeek.length + lastChance.length + closingSoon.length +
-    openingThisWeek.length + placeIdeas.length === 0;
+    lastChance.length + closingSoon.length + openingThisWeek.length +
+      onNow.length + placeIdeas.length + stale.length ===
+    0;
 
   // map = everything the week view talks about, plus every saved place
   const mapItems = useMemo(() => {
     const seen = new Set<string>();
     const out: Item[] = [];
     for (const i of [
-      ...plannedThisWeek,
       ...lastChance,
       ...closingSoon,
       ...openingThisWeek,
+      ...onNowPool,
       ...active.filter((i) => i.kind === "place"),
     ]) {
       if (!seen.has(i.id)) {
@@ -115,7 +144,7 @@ export function ThisWeek({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="sticky top-[calc(3.75rem+env(safe-area-inset-top)-1px)] z-20 -mx-4 flex transform-gpu items-center justify-between bg-background px-4 pb-2 will-change-transform md:top-[calc(4.5rem-1px)]">
         <p className="text-sm text-muted-foreground">
           {format(weekStart, "d MMM")} – {format(weekEnd, "d MMM")}
         </p>
@@ -146,8 +175,7 @@ export function ThisWeek({
       {view === "map" ? (
         <MapWeek items={mapItems} onSelect={onSelect} />
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 md:items-start">
-      <Section title="Planned" items={plannedThisWeek} onSelect={onSelect} />
+        <div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
       <Section
         title="Last chance"
         hint="Ending within a week — now or never."
@@ -167,9 +195,22 @@ export function ThisWeek({
         onSelect={onSelect}
       />
       <Section
+        title="On now"
+        hint="Already running, no rush yet — a fresh three each week."
+        items={onNow}
+        onSelect={onSelect}
+      />
+
+      <Section
         title="Ideas from your list"
         hint="Saved places for a free evening — a fresh three each week."
         items={placeIdeas}
+        onSelect={onSelect}
+      />
+      <Section
+        title="Saved ages ago"
+        hint="Been on the list a couple of months — still fancy it?"
+        items={stale}
         onSelect={onSelect}
       />
 

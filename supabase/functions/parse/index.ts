@@ -1,7 +1,9 @@
 // parse: authenticated in-app endpoint. Takes {text?, image_base64?, image_media_type?}
 // and returns a parsed card. The client inserts the row itself (RLS enforces membership).
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard } from "../_shared/extract.ts";
+import { assertImageWithinLimit } from "../_shared/limits.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -30,13 +32,22 @@ Deno.serve(async (req) => {
       });
     }
 
+    try {
+      assertImageWithinLimit(body.image_base64);
+    } catch (limitErr) {
+      return new Response(JSON.stringify({ error: String(limitErr) }), {
+        status: 413,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const card = await extractCard(body);
     return new Response(JSON.stringify({ card }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error(e);
-    return new Response(JSON.stringify({ error: String(e) }), {
+    return new Response(internalErrorBody(), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -1,7 +1,9 @@
 // calendar: subscribable ICS feed of the shared library. Add it once to
-// Google/Apple Calendar and planned outings + opening/closing markers stay
-// in sync automatically. Auth via ?key= (calendar apps need URL-embedded auth).
+// Google/Apple Calendar and opening/closing markers stay in sync automatically.
+// Auth via ?key= (calendar apps need URL-embedded auth). Prefer FEED_SECRET;
+// falls back to INGEST_SECRET until FEED_SECRET is configured.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isFeedKeyAuthorized } from "../_shared/auth.ts";
 
 function icsEscape(s: string): string {
   return s.replace(/([,;\\])/g, "\\$1");
@@ -29,7 +31,7 @@ function allDay(uid: string, date: string, summary: string, url?: string | null)
 
 Deno.serve(async (req) => {
   const key = new URL(req.url).searchParams.get("key");
-  if (!key || key !== Deno.env.get("INGEST_SECRET")) {
+  if (!isFeedKeyAuthorized(key)) {
     return new Response("unauthorized", { status: 401 });
   }
 
@@ -39,20 +41,17 @@ Deno.serve(async (req) => {
   );
   const { data: items, error } = await supabase
     .from("items")
-    .select("id, kind, status, title, planned_for, starts_on, ends_on, url")
+    .select("id, kind, status, title, starts_on, ends_on, url")
     .is("deleted_at", null)
-    .in("status", ["saved", "planned", "inbox"]);
+    .in("status", ["saved", "planned"]);
   if (error) return new Response(String(error.message), { status: 500 });
 
   const events: string[] = [];
   for (const i of items ?? []) {
-    if (i.planned_for) {
-      events.push(allDay(`plan-${i.id}`, i.planned_for, i.title, i.url));
-    }
-    if (i.kind === "event" && i.ends_on && i.ends_on !== i.planned_for) {
+    if (i.kind === "event" && i.ends_on) {
       events.push(allDay(`close-${i.id}`, i.ends_on, `Last day — ${i.title}`, i.url));
     }
-    if (i.kind === "event" && i.starts_on && i.starts_on !== i.ends_on && i.starts_on !== i.planned_for) {
+    if (i.kind === "event" && i.starts_on && i.starts_on !== i.ends_on) {
       events.push(allDay(`open-${i.id}`, i.starts_on, `Opens — ${i.title}`, i.url));
     }
   }
@@ -60,8 +59,8 @@ Deno.serve(async (req) => {
   const body = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//For Science and Pleasure//EN",
-    "X-WR-CALNAME:For Science and Pleasure",
+    "PRODID:-//Can We Go?//EN",
+    "X-WR-CALNAME:Can We Go?",
     "X-WR-TIMEZONE:Europe/London",
     ...events,
     "END:VCALENDAR",

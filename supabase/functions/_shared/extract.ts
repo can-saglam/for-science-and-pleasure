@@ -1,4 +1,19 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
+import {
+  colorFromImageBytes,
+  colorFromImageUrl,
+  ogImageFromHtml,
+} from "./color.ts";
+import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
+
+export { corsHeaders, geocode };
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
 
 export interface ParsedCard {
   kind: "event" | "place";
@@ -73,7 +88,9 @@ function isFetchable(url: string): boolean {
   }
 }
 
-async function fetchPageText(url: string): Promise<string | null> {
+async function fetchPage(
+  url: string,
+): Promise<{ text: string; ogImage: string | null } | null> {
   try {
     const res = await fetch(url, {
       redirect: "follow",
@@ -85,7 +102,9 @@ async function fetchPageText(url: string): Promise<string | null> {
       },
     });
     if (!res.ok) return null;
-    const html = await res.text();
+    // Cap the HTML before running regexes over it — pathological pages
+    // (Google Maps is ~20MB of JS) would blow the worker's CPU budget.
+    const html = (await res.text()).slice(0, 600_000);
     // Keep <title> and meta descriptions, then strip tags from the body.
     const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
     const metas = [...html.matchAll(/<meta[^>]+(?:name|property)=["'][^"']*(?:description|title|og:)[^"']*["'][^>]*content=["']([^"']*)["']/gi)]
@@ -97,27 +116,10 @@ async function fetchPageText(url: string): Promise<string | null> {
       .replace(/&nbsp;|&amp;|&quot;|&#\d+;|&[a-z]+;/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
-    return [title, metas.join("\n"), body].join("\n\n").slice(0, 30_000);
-  } catch {
-    return null;
-  }
-}
-
-// Free OSM geocoder — used only server-side to attach coordinates so the app
-// can do distance-based "nearby" suggestions and Google Maps directions.
-export async function geocode(query: string): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`,
-      {
-        headers: { "User-Agent": "for-science-and-pleasure/1.0" },
-        signal: AbortSignal.timeout(8_000),
-      },
-    );
-    if (!res.ok) return null;
-    const arr = await res.json();
-    if (!arr?.[0]?.lat) return null;
-    return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
+    return {
+      text: [title, metas.join("\n"), body].join("\n\n").slice(0, 30_000),
+      ogImage: ogImageFromHtml(html, url),
+    };
   } catch {
     return null;
   }
@@ -131,15 +133,35 @@ export interface ExtractInput {
 
 export async function extractCard(
   input: ExtractInput,
-): Promise<ParsedCard & { url: string | null; source: string; lat: number | null; lng: number | null }> {
+): Promise<
+  ParsedCard & {
+    url: string | null;
+    source: string;
+    lat: number | null;
+    lng: number | null;
+    color: string | null;
+  }
+> {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
 
   const text = (input.text ?? "").trim();
   const url = text ? firstUrl(text) : null;
-  let pageText: string | null = null;
-  if (url && isFetchable(url)) {
-    pageText = await fetchPageText(url);
+  // Google Maps links: never fetch the page (it's huge, JS-only junk); the
+  // URL itself names the place and pins its coordinates.
+  const mapsLink = url ? await resolveMapsLink(url) : null;
+  let page: { text: string; ogImage: string | null } | null = null;
+  if (url && !mapsLink && isFetchable(url)) {
+    page = await fetchPage(url);
   }
+  const pageText = page?.text ?? null;
+
+  // Card accent colour: a screenshot beats the page's og:image because it is
+  // exactly what the user saw. Best-effort; null is fine.
+  const colorPromise: Promise<string | null> = input.image_base64
+    ? colorFromImageBytes(base64ToBytes(input.image_base64))
+    : page?.ogImage
+      ? colorFromImageUrl(page.ogImage)
+      : Promise.resolve(null);
 
   const today = new Date().toISOString().slice(0, 10);
   const parts: string[] = [
@@ -149,7 +171,17 @@ export async function extractCard(
   ];
   if (text) parts.push(`User's saved input:\n${text}`);
   if (pageText) parts.push(`Fetched page content from ${url}:\n${pageText}`);
-  if (url && !pageText) {
+  if (mapsLink) {
+    parts.push(
+      [
+        `The link is a Google Maps pin${mapsLink.name ? ` for "${mapsLink.name}"` : ""}${
+          mapsLink.lat !== null ? ` at ${mapsLink.lat},${mapsLink.lng}` : ""
+        }.`,
+        "There is no page content to read. Identify this place from its name and your own knowledge of London: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.",
+        "Only leave fields null if you genuinely don't recognise the place; still never invent prices or dates.",
+      ].join(" "),
+    );
+  } else if (url && !pageText) {
     parts.push(`The link ${url} could not be fetched (it may be Instagram or blocked). Extract what you can from the input text${input.image_base64 ? " and the screenshot" : ""}.`);
   }
 
@@ -179,8 +211,12 @@ export async function extractCard(
   }
   const card = JSON.parse(textBlock.text) as ParsedCard;
 
-  let coords: { lat: number; lng: number } | null = null;
-  if (card.venue || card.area) {
+  // The pin in a Maps URL is exact — trust it over geocoding the name.
+  let coords: { lat: number; lng: number } | null =
+    mapsLink && mapsLink.lat !== null && mapsLink.lng !== null
+      ? { lat: mapsLink.lat, lng: mapsLink.lng }
+      : null;
+  if (!coords && (card.venue || card.area)) {
     coords = await geocode(
       [card.venue ?? card.title, card.area, "London"].filter(Boolean).join(", "),
     );
@@ -192,11 +228,6 @@ export async function extractCard(
     source: input.image_base64 ? "image" : url ? "link" : "text",
     lat: coords?.lat ?? null,
     lng: coords?.lng ?? null,
+    color: await colorPromise.catch(() => null),
   };
 }
-
-export const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-ingest-secret",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};

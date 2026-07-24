@@ -19,7 +19,7 @@ import {
 import type { Item } from "@/lib/types";
 import { isActive } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { ItemCard } from "./ItemCard";
+import { cardTint, ItemCard } from "./ItemCard";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -104,8 +104,6 @@ export function CalendarMonth({
     [month],
   );
 
-  const planned = items.filter((i) => i.status === "planned" && i.planned_for);
-
   const weekItems = useMemo(() => {
     if (!selectedWeek) return [];
     const weekEnd = endOfWeek(selectedWeek, { weekStartsOn: 1 });
@@ -123,7 +121,6 @@ export function CalendarMonth({
     if (!selectedDay) return [];
     return items.filter((i) => {
       if (!isActive(i)) return false;
-      if (i.planned_for && isSameDay(parseISO(i.planned_for), selectedDay)) return true;
       if (i.kind === "event" && i.starts_on && i.ends_on) {
         return isWithinInterval(selectedDay, {
           start: parseISO(i.starts_on),
@@ -137,31 +134,44 @@ export function CalendarMonth({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading text-lg font-semibold md:text-xl">
-          {format(month, "MMMM yyyy")}
-        </h2>
-        <div className="flex gap-1">
-          <Button variant="ghost" size="icon" onClick={() => setMonth(addMonths(month, -1))}>
-            <ChevronLeft />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setMonth(startOfMonth(new Date()))}
-          >
-            Today
-          </Button>
-          <Button variant="ghost" size="icon" onClick={() => setMonth(addMonths(month, 1))}>
-            <ChevronRight />
-          </Button>
+      <div className="sticky top-[calc(3.75rem+env(safe-area-inset-top)-1px)] z-20 -mx-4 transform-gpu space-y-2 bg-background px-4 pb-1 will-change-transform md:top-[calc(4.5rem-1px)]">
+        <div className="flex items-center justify-between">
+          <h2 className="font-heading text-lg font-semibold md:text-xl">
+            {format(month, "MMMM yyyy")}
+          </h2>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-11"
+              onClick={() => setMonth(addMonths(month, -1))}
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="min-h-11"
+              onClick={() => setMonth(startOfMonth(new Date()))}
+            >
+              Today
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-11"
+              onClick={() => setMonth(addMonths(month, 1))}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:text-xs">
-        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <div key={i}>{d}</div>
-        ))}
+        <div className="grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:text-xs">
+          {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
+            <div key={i}>{d}</div>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-1">
@@ -174,9 +184,6 @@ export function CalendarMonth({
             >
               {Array.from({ length: 7 }).map((_, i) => {
                 const day = addDays(weekStart, i);
-                const hasPlan = planned.some((p) =>
-                  isSameDay(parseISO(p.planned_for!), day),
-                );
                 return (
                   <button
                     key={i}
@@ -185,36 +192,40 @@ export function CalendarMonth({
                       setSelectedDay(day);
                     }}
                     className={cn(
-                      "mx-auto flex size-8 flex-col items-center justify-center rounded-full text-sm transition-colors hover:bg-accent md:size-10 md:text-base",
+                      "mx-auto flex size-10 touch-manipulation items-center justify-center rounded-full text-sm transition-colors hover:bg-accent md:text-base",
                       !isSameMonth(day, month) && "text-muted-foreground/40",
                       isToday(day) && "bg-foreground font-semibold text-background",
                       selectedDay && isSameDay(day, selectedDay) && !isToday(day) && "bg-accent",
                     )}
                   >
                     {format(day, "d")}
-                    <span
-                      className={cn(
-                        "size-1 rounded-full",
-                        hasPlan ? (isToday(day) ? "bg-background" : "bg-foreground") : "bg-transparent",
-                      )}
-                    />
                   </button>
                 );
               })}
-              {bars.map((bar) => (
-                <button
-                  key={bar.item.id + bar.colStart}
-                  onClick={() => onSelect(bar.item)}
-                  style={{ gridColumn: `${bar.colStart} / ${bar.colEnd}`, gridRow: bar.lane + 2 }}
-                  className={cn(
-                    "h-5 truncate border border-foreground/25 bg-secondary px-1.5 text-left text-[10px] leading-5 transition-colors hover:bg-accent md:h-6 md:px-2 md:text-[11px] md:leading-6",
-                    bar.openStart ? "rounded-l-none border-l-0" : "rounded-l-md",
-                    bar.openEnd ? "rounded-r-none border-r-0" : "rounded-r-md",
-                  )}
-                >
-                  {bar.item.title}
-                </button>
-              ))}
+              {bars.map((bar) => {
+                // Same pastel wash as the item's card, so runs are
+                // recognisable across tabs.
+                const { style } = cardTint(bar.item.color);
+                return (
+                  <button
+                    key={bar.item.id + bar.colStart}
+                    onClick={() => onSelect(bar.item)}
+                    style={{
+                      gridColumn: `${bar.colStart} / ${bar.colEnd}`,
+                      gridRow: bar.lane + 2,
+                      ...style,
+                    }}
+                    className={cn(
+                      "h-8 touch-manipulation truncate border px-1.5 text-left text-[11px] leading-8 transition-[filter] hover:brightness-95 md:px-2",
+                      bar.openStart ? "rounded-l-none border-l-0" : "rounded-l-md",
+                      bar.openEnd ? "rounded-r-none border-r-0" : "rounded-r-md",
+                      !bar.item.color && "border-foreground/25 bg-secondary",
+                    )}
+                  >
+                    {bar.item.title}
+                  </button>
+                );
+              })}
               {overflow > 0 && (
                 <button
                   onClick={() => {
@@ -222,7 +233,7 @@ export function CalendarMonth({
                     setSelectedWeek(weekStart);
                   }}
                   style={{ gridColumn: "1 / 8", gridRow: MAX_LANES + 2 }}
-                  className="px-1 text-left text-[10px] font-medium text-muted-foreground underline underline-offset-2"
+                  className="min-h-10 touch-manipulation px-1 text-left text-[11px] font-medium text-muted-foreground underline underline-offset-2"
                 >
                   +{overflow} more this week
                 </button>

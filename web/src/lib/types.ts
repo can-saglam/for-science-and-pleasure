@@ -1,5 +1,9 @@
 export type ItemKind = "event" | "place";
-export type ItemStatus = "inbox" | "saved" | "planned" | "done" | "archived";
+/** `planned` / `archived` remain in the DB enum for legacy rows only. */
+export type ItemStatus = "saved" | "planned" | "done" | "archived";
+
+/** Statuses that still appear in Library / This Week / Calendar. */
+export const ACTIVE_STATUSES: readonly ItemStatus[] = ["saved", "planned"];
 
 export interface Item {
   id: string;
@@ -20,6 +24,7 @@ export interface Item {
   planned_for: string | null;
   lat: number | null;
   lng: number | null;
+  color: string | null;
   notes: string | null;
   source: string;
   raw_input: string | null;
@@ -45,11 +50,29 @@ export interface ParsedCard {
   source: string;
   lat: number | null;
   lng: number | null;
+  color: string | null;
 }
 
 export interface Member {
   email: string;
   display_name: string | null;
+}
+
+export interface Digest {
+  id: string;
+  week_start: string;
+  text: string;
+  created_at: string;
+}
+
+export interface LocationProposal {
+  id: string;
+  venue: string | null;
+  area: string | null;
+  address: string | null;
+  confidence: "high" | "medium" | "low";
+  lat: number | null;
+  lng: number | null;
 }
 
 export interface DayPlan {

@@ -121,10 +121,24 @@
   * {
     @apply border-border outline-ring/50;
     }
+  /* No overflow rules on html/body or any ancestor of the sticky bars:
+     WebKit only keeps position:sticky on the fast compositor path when the
+     whole ancestor chain is overflow visible; any hidden/clip forces
+     main-thread updates and the sticky elements jitter during scroll.
+     Horizontal overflow is prevented at the content level instead. */
   body {
-    @apply bg-background text-foreground;
+    @apply w-full bg-background text-foreground;
     }
   html {
-    @apply font-sans;
+    @apply w-full font-sans;
     }
+}
+
+#root {
+  width: 100%;
+  min-width: 0;
+}
+
+.map-with-fab .leaflet-bottom.leaflet-right {
+  right: 4.5rem;
 }

@@ -1,5 +1,11 @@
-import { useMemo } from "react";
-import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CircleMarker,
+  MapContainer,
+  Popup,
+  TileLayer,
+  useMap,
+} from "react-leaflet";
 import { latLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Item } from "@/lib/types";
@@ -14,6 +20,27 @@ const ATTRIBUTION =
 
 const LONDON: [number, number] = [51.5074, -0.1276];
 
+function MapInteraction({ enabled }: { enabled: boolean }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const handlers = [
+      map.dragging,
+      map.touchZoom,
+      map.doubleClickZoom,
+      map.boxZoom,
+      map.keyboard,
+      map.scrollWheelZoom,
+    ];
+    for (const handler of handlers) {
+      if (enabled) handler.enable();
+      else handler.disable();
+    }
+  }, [enabled, map]);
+
+  return null;
+}
+
 export function MapWeek({
   items,
   onSelect,
@@ -21,6 +48,10 @@ export function MapWeek({
   items: Item[];
   onSelect: (item: Item) => void;
 }) {
+  const [touchDevice] = useState(() =>
+    window.matchMedia("(pointer: coarse)").matches,
+  );
+  const [interactive, setInteractive] = useState(() => !touchDevice);
   const pins = useMemo(
     () => items.filter((i) => i.lat != null && i.lng != null),
     [items],
@@ -34,7 +65,7 @@ export function MapWeek({
 
   return (
     <div className="space-y-2">
-      <div className="h-[55dvh] overflow-hidden rounded-xl border md:h-[65dvh]">
+      <div className="map-with-fab relative z-0 h-[55dvh] overflow-hidden rounded-xl border md:h-[65dvh]">
         <MapContainer
           {...(bounds
             ? { bounds, boundsOptions: { padding: [40, 40] } }
@@ -43,8 +74,12 @@ export function MapWeek({
                 zoom: 13,
               })}
           style={{ height: "100%", width: "100%" }}
-          scrollWheelZoom
+          dragging={interactive}
+          touchZoom={interactive}
+          doubleClickZoom={interactive}
+          scrollWheelZoom={interactive}
         >
+          <MapInteraction enabled={interactive} />
           <TileLayer url={TILES} attribution={ATTRIBUTION} />
           {pins.map((i) => (
             <CircleMarker
@@ -84,6 +119,26 @@ export function MapWeek({
             </CircleMarker>
           ))}
         </MapContainer>
+        {touchDevice && !interactive && (
+          <button
+            type="button"
+            onClick={() => setInteractive(true)}
+            className="absolute inset-0 z-[1000] flex touch-pan-y items-center justify-center bg-transparent"
+          >
+            <span className="rounded-full bg-background/95 px-4 py-2 text-sm font-medium shadow-sm ring-1 ring-foreground/15 backdrop-blur">
+              Tap to explore map
+            </span>
+          </button>
+        )}
+        {touchDevice && interactive && (
+          <button
+            type="button"
+            onClick={() => setInteractive(false)}
+            className="absolute right-2 top-2 z-[1000] min-h-11 rounded-full bg-background/95 px-4 text-sm font-medium shadow-sm ring-1 ring-foreground/15 backdrop-blur"
+          >
+            Done
+          </button>
+        )}
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <div className="flex items-center gap-3">

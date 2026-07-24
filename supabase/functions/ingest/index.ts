@@ -1,8 +1,10 @@
 // ingest: capture endpoint for the iOS share-sheet Shortcut. No user JWT —
 // authenticated by a shared secret header. Parses the input and inserts the
-// item directly (service role) with status 'inbox' for later confirmation.
+// item directly (service role) into the shared library.
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard } from "../_shared/extract.ts";
+import { assertImageWithinLimit } from "../_shared/limits.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -21,6 +23,15 @@ Deno.serve(async (req) => {
     if (!body.text && !body.image_base64) {
       return new Response(JSON.stringify({ error: "text or image_base64 required" }), {
         status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    try {
+      assertImageWithinLimit(body.image_base64);
+    } catch (limitErr) {
+      return new Response(JSON.stringify({ error: String(limitErr) }), {
+        status: 413,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -53,7 +64,7 @@ Deno.serve(async (req) => {
 
       row = {
         kind: card.kind,
-        status: "inbox",
+        status: "saved",
         title: card.title,
         summary: card.summary,
         venue: card.venue,
@@ -67,17 +78,18 @@ Deno.serve(async (req) => {
         ends_on: card.ends_on,
         lat: card.lat,
         lng: card.lng,
+        color: card.color,
         source: "shortcut",
         raw_input: body.text ?? "(screenshot)",
         added_by_email: body.added_by ?? null,
       };
     } catch (parseErr) {
       // Parsing failed (e.g. missing API key) — still save the raw dump so
-      // nothing is lost; it shows up in the inbox for manual completion.
+      // nothing is lost; it can be completed manually in the library.
       console.error("parse failed, saving raw:", parseErr);
       row = {
         kind: "event",
-        status: "inbox",
+        status: "saved",
         title: (body.text ?? "Saved item").slice(0, 120),
         url: null,
         source: "shortcut",
@@ -94,7 +106,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error(e);
-    return new Response(JSON.stringify({ error: String(e) }), {
+    return new Response(internalErrorBody(), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

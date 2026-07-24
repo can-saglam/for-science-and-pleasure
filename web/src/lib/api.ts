@@ -1,6 +1,14 @@
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { supabase, SUPABASE_URL } from "./supabase";
-import type { DayPlan, Item, Member, ParsedCard } from "./types";
+import {
+  ACTIVE_STATUSES,
+  type DayPlan,
+  type Digest,
+  type Item,
+  type LocationProposal,
+  type Member,
+  type ParsedCard,
+} from "./types";
 
 export async function fetchItems(): Promise<Item[]> {
   const { data, error } = await supabase
@@ -16,7 +24,11 @@ export async function insertItem(item: Partial<Item>): Promise<Item> {
   const { data: userData } = await supabase.auth.getUser();
   const { data, error } = await supabase
     .from("items")
-    .insert({ ...item, added_by_email: userData.user?.email ?? null })
+    .insert({
+      ...item,
+      status: "saved",
+      added_by_email: userData.user?.email ?? null,
+    })
     .select()
     .single();
   if (error) throw error;
@@ -62,10 +74,48 @@ export async function parseInput(input: {
   return json.card as ParsedCard;
 }
 
+export async function proposeLocations(items: Item[]): Promise<LocationProposal[]> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/locate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      items: items.map((i) => ({
+        id: i.id,
+        kind: i.kind,
+        title: i.title,
+        summary: i.summary,
+        venue: i.venue,
+        area: i.area,
+        address: i.address,
+        url: i.url,
+        notes: i.notes,
+      })),
+    }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? `locate failed (${res.status})`);
+  return json.proposals as LocationProposal[];
+}
+
 export async function fetchMembers(): Promise<Member[]> {
   const { data, error } = await supabase.from("members").select("email, display_name");
   if (error) return [];
   return data as Member[];
+}
+
+export async function fetchDigest(id: string): Promise<Digest> {
+  const { data, error } = await supabase
+    .from("digests")
+    .select("id, week_start, text, created_at")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  return data as Digest;
 }
 
 export async function findByUrl(url: string): Promise<Item | null> {
@@ -165,13 +215,13 @@ export function timeBucket(item: Item, today = new Date()): TimeBucket {
 }
 
 export function isActive(item: Item): boolean {
-  return item.status === "saved" || item.status === "planned" || item.status === "inbox";
+  return (ACTIVE_STATUSES as readonly string[]).includes(item.status);
 }
 
 // ---- ICS export ----------------------------------------------------------
 
 export function downloadIcs(item: Item) {
-  const date = item.planned_for ?? item.starts_on;
+  const date = item.starts_on;
   if (!date) return;
   const dt = date.replace(/-/g, "");
   const next = new Date(parseISO(date).getTime() + 86400000)
@@ -181,7 +231,7 @@ export function downloadIcs(item: Item) {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//For Science and Pleasure//EN",
+    "PRODID:-//Can We Go?//EN",
     "BEGIN:VEVENT",
     `UID:fsap-${item.id}`,
     `DTSTART;VALUE=DATE:${dt}`,

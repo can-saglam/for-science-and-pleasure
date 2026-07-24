@@ -1,4 +1,4 @@
--- For Science and Pleasure — initial schema
+-- Can We Go? — initial schema
 -- A shared pool of saved events & places for a small fixed set of members.
 
 create extension if not exists pgcrypto;

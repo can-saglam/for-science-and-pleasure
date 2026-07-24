@@ -2,13 +2,21 @@
 
 Two small Shortcuts give you one-tap capture from Safari, Instagram, WhatsApp —
 anywhere with a share sheet. Both POST to the `ingest` edge function, which
-parses with AI and drops the result in the app's Inbox.
+parses with AI and saves the result directly to the app's shared library.
 
 - **Endpoint:** `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/ingest`
-- **Secret:** the `INGEST_SECRET` value — print it on the laptop with:
+- **Ingest secret:** the `INGEST_SECRET` value — print it on the laptop with:
 
   ```sh
   grep INGEST_SECRET ~/Desktop/for-science-and-pleasure/.supabase.env
+  ```
+
+- **Feed secret (calendar + digest pull):** prefer `FEED_SECRET` once set.
+  Until then, the same `INGEST_SECRET` still works so existing shortcuts and
+  calendar subscriptions keep working:
+
+  ```sh
+  grep -E 'FEED_SECRET|INGEST_SECRET' ~/Desktop/for-science-and-pleasure/.supabase.env
   ```
 
 Build these once on one phone, then AirDrop the shortcuts to the other phone
@@ -55,16 +63,16 @@ Each of you sets this up once:
 1. Shortcuts app → **Automation** tab → **+** → **Time of Day** → Sunday, 6:00 PM
    → *Run Immediately*.
 2. Action **Get Contents of URL**:
-   - `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/digest?key=`*(the secret)*
+   - `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/digest?key=`*(FEED_SECRET, or INGEST_SECRET until FEED_SECRET is set)*
 3. Action **Get Dictionary Value** → key `text` → from *Contents of URL*.
 4. Action **Show Notification** → body: the *Dictionary Value*.
 
 ## Subscribe your real calendars
 
-One shared feed keeps planned outings and opening/closing markers inside
+One shared feed keeps opening/closing markers inside
 Google Calendar automatically — no per-item exporting:
 
-- Feed URL: `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/calendar?key=`*(the secret)*
+- Feed URL: `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/calendar?key=`*(FEED_SECRET, or INGEST_SECRET until FEED_SECRET is set)*
 - **Google Calendar** (do this on the web at calendar.google.com): Settings →
   *Add calendar* → *From URL* → paste the feed URL. It then syncs to the
   Google Calendar app on both phones signed into that account (Google refreshes

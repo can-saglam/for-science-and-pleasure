@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { format, parseISO } from "date-fns";
 import {
   downloadIcs,
   googleDirectionsUrl,
@@ -58,19 +57,24 @@ function ClearableDate({
   onChange: (v: string | null) => void;
 }) {
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <Input
         type="date"
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
-        className={value ? "pr-8" : undefined}
+        style={{ width: "100%", minWidth: 0, maxWidth: "100%" }}
+        className={
+          value
+            ? "pr-9 [&::-webkit-calendar-picker-indicator]:opacity-0"
+            : undefined
+        }
       />
       {value && (
         <button
           type="button"
           aria-label="Clear date"
           onClick={() => onChange(null)}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+          className="absolute inset-y-0 right-0 flex w-8 touch-manipulation items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground"
         >
           <X className="size-4" />
         </button>
@@ -99,7 +103,7 @@ export function ItemSheet({
 
   useEffect(() => {
     setDraft(item);
-    setEditing(item?.status === "inbox");
+    setEditing(false);
   }, [item]);
 
   const nearby = useMemo(() => {
@@ -166,7 +170,8 @@ export function ItemSheet({
       url: draft.url,
       starts_on: draft.starts_on || null,
       ends_on: draft.ends_on || null,
-      planned_for: draft.planned_for || null,
+      planned_for: null,
+      ...(draft.status === "planned" ? { status: "saved" as const } : {}),
       notes: draft.notes,
       ...extra,
     });
@@ -177,12 +182,12 @@ export function ItemSheet({
   return (
     <Drawer open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent className="max-h-[92dvh]">
-        <div className="mx-auto w-full max-w-lg overflow-y-auto px-4 pb-8">
+        <div className="mx-auto w-full min-w-0 max-w-lg overscroll-contain overflow-x-hidden overflow-y-auto px-4 pb-8 scroll-pb-[40dvh]">
           {!editing ? (
             /* ---------------- read-only view ---------------- */
             <>
               <DrawerHeader className="px-0 pb-2">
-                <DrawerTitle className="pr-8 text-left text-xl leading-snug">
+                <DrawerTitle className="pr-8 text-left text-xl leading-snug [overflow-wrap:anywhere]">
                   {draft.title}
                 </DrawerTitle>
               </DrawerHeader>
@@ -194,16 +199,11 @@ export function ItemSheet({
                 {draft.status === "done" && <Badge variant="secondary">done</Badge>}
               </div>
 
-              <div className="mt-3 space-y-1 text-sm">
+              <div className="mt-3 min-w-0 space-y-1 text-sm [overflow-wrap:anywhere]">
                 {(draft.venue || draft.area) && (
                   <p>{[draft.venue, draft.area].filter(Boolean).join(" · ")}</p>
                 )}
                 {label && <p className="text-muted-foreground">{label}</p>}
-                {draft.planned_for && (
-                  <p className="font-medium">
-                    Planned for {format(parseISO(draft.planned_for), "EEEE d MMMM")}
-                  </p>
-                )}
                 {draft.summary && (
                   <p className="pt-1 text-muted-foreground">{draft.summary}</p>
                 )}
@@ -251,7 +251,7 @@ export function ItemSheet({
                     <Undo2 /> Not done yet
                   </Button>
                 )}
-                {(draft.planned_for || draft.starts_on) && (
+                {draft.starts_on && (
                   <Button
                     variant="outline"
                     className="col-span-2"
@@ -309,9 +309,7 @@ export function ItemSheet({
             /* ---------------- edit form ---------------- */
             <>
               <DrawerHeader className="px-0">
-                <DrawerTitle className="text-left">
-                  {draft.status === "inbox" ? "Confirm item" : "Edit item"}
-                </DrawerTitle>
+                <DrawerTitle className="text-left">Edit item</DrawerTitle>
               </DrawerHeader>
 
               <div className="space-y-4">
@@ -320,11 +318,11 @@ export function ItemSheet({
                   <Input value={draft.title} onChange={(e) => set({ title: e.target.value })} />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid min-w-0 grid-cols-2 gap-3 [&>*]:min-w-0">
                   <div className="space-y-1.5">
                     <Label>Type</Label>
                     <Select value={draft.kind} onValueChange={(v) => set({ kind: v as ItemKind })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-full min-w-0"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="event">Event</SelectItem>
                         <SelectItem value="place">Place</SelectItem>
@@ -337,7 +335,9 @@ export function ItemSheet({
                       value={draft.category ?? undefined}
                       onValueChange={(v) => set({ category: v })}
                     >
-                      <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger className="w-full min-w-0">
+                        <SelectValue placeholder="—" />
+                      </SelectTrigger>
                       <SelectContent>
                         {CATEGORIES.map((c) => (
                           <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -347,7 +347,7 @@ export function ItemSheet({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid min-w-0 grid-cols-2 gap-3 [&>*]:min-w-0">
                   <div className="space-y-1.5">
                     <Label>Venue</Label>
                     <Input value={draft.venue ?? ""} onChange={(e) => set({ venue: e.target.value || null })} />
@@ -359,7 +359,7 @@ export function ItemSheet({
                 </div>
 
                 {draft.kind === "event" && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                     <div className="space-y-1.5">
                       <Label>Opens</Label>
                       <ClearableDate
@@ -377,27 +377,12 @@ export function ItemSheet({
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label>Price</Label>
-                    <Input value={draft.price ?? ""} onChange={(e) => set({ price: e.target.value || null })} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Planned for</Label>
-                    <ClearableDate
-                      value={draft.planned_for}
-                      onChange={(v) =>
-                        set({
-                          planned_for: v,
-                          status: v
-                            ? "planned"
-                            : draft.status === "planned"
-                              ? "saved"
-                              : draft.status,
-                        })
-                      }
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label>Price</Label>
+                  <Input
+                    value={draft.price ?? ""}
+                    onChange={(e) => set({ price: e.target.value || null })}
+                  />
                 </div>
 
                 <div className="space-y-1.5">
@@ -405,25 +390,19 @@ export function ItemSheet({
                   <Textarea
                     value={draft.notes ?? ""}
                     onChange={(e) => set({ notes: e.target.value || null })}
-                    rows={2}
+                    rows={3}
                   />
                 </div>
 
                 <Separator />
 
                 <div className="flex flex-col gap-2">
-                  {draft.status === "inbox" ? (
-                    <Button onClick={() => save({ status: draft.planned_for ? "planned" : "saved" })}>
-                      <Check /> Confirm &amp; save
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button variant="outline" onClick={() => setEditing(false)}>
+                      Cancel
                     </Button>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button variant="outline" onClick={() => setEditing(false)}>
-                        Cancel
-                      </Button>
-                      <Button onClick={() => save()}>Save changes</Button>
-                    </div>
-                  )}
+                    <Button onClick={() => save()}>Save changes</Button>
+                  </div>
 
                   <Button
                     variant="ghost"
