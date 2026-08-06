@@ -18,8 +18,9 @@ import {
 } from "date-fns";
 import type { Item } from "@/lib/types";
 import { isActive } from "@/lib/api";
+import { accentColor, cardTint } from "@/lib/colors";
 import { Button } from "@/components/ui/button";
-import { cardTint, ItemCard } from "./ItemCard";
+import { ItemCard } from "./ItemCard";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -205,7 +206,7 @@ export function CalendarMonth({
               {bars.map((bar) => {
                 // Same pastel wash as the item's card, so runs are
                 // recognisable across tabs.
-                const { style } = cardTint(bar.item.color);
+                const { style } = cardTint(accentColor(bar.item));
                 return (
                   <button
                     key={bar.item.id + bar.colStart}
@@ -219,7 +220,6 @@ export function CalendarMonth({
                       "h-8 touch-manipulation truncate border px-1.5 text-left text-[11px] leading-8 transition-[filter] hover:brightness-95 md:px-2",
                       bar.openStart ? "rounded-l-none border-l-0" : "rounded-l-md",
                       bar.openEnd ? "rounded-r-none border-r-0" : "rounded-r-md",
-                      !bar.item.color && "border-foreground/25 bg-secondary",
                     )}
                   >
                     {bar.item.title}

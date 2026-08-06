@@ -244,7 +244,7 @@ export function ItemSheet({
                 </Button>
                 {draft.status !== "done" ? (
                   <Button variant="outline" onClick={() => save({ status: "done" })}>
-                    <Check /> Mark done
+                    <Check /> We did go!
                   </Button>
                 ) : (
                   <Button variant="outline" onClick={() => save({ status: "saved" })}>

@@ -410,8 +410,12 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.ingest]
 verify_jwt = false
 
+# Auth handled in-function: members' JWTs (web) or the ingest secret (iOS).
 [functions.parse]
-verify_jwt = true
+verify_jwt = false
+
+[functions.locate]
+verify_jwt = false
 
 [functions.calendar]
 verify_jwt = false
@@ -424,3 +428,6 @@ verify_jwt = true
 
 [functions.send-digest]
 verify_jwt = false
+
+[functions.notify-save]
+verify_jwt = true

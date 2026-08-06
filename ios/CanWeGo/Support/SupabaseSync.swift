@@ -1,0 +1,298 @@
+import Foundation
+import SwiftData
+
+/// Two-way sync with the shared Supabase `items` table — the same one the
+/// web app reads. SwiftData stays the source for the UI; this engine pushes
+/// anything edited since the last sync and pulls everyone else's changes.
+///
+/// Conflict policy is last-write-wins by `updated_at`, and deletions travel
+/// as the web's soft delete (`deleted_at`), so nothing is lost to races.
+@MainActor
+enum SupabaseSync {
+    private static let cursorKey = "supabaseLastSyncAt"
+    private static var defaults: UserDefaults {
+        UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
+    }
+
+    private static var lastSyncAt: Date {
+        get { defaults.object(forKey: cursorKey) as? Date ?? .distantPast }
+        set {
+            defaults.set(newValue, forKey: cursorKey)
+            SyncStatus.shared.lastSyncedAt = newValue
+        }
+    }
+
+    static func resetCursor() {
+        defaults.removeObject(forKey: cursorKey)
+        SyncStatus.shared.lastSyncedAt = nil
+    }
+
+    // MARK: - Triggers
+
+    private static var pending: Task<Void, Never>?
+    private static var running = false
+
+    /// Debounced sync — safe to call on every local save.
+    static func schedule(context: ModelContext) {
+        pending?.cancel()
+        pending = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await sync(context: context)
+        }
+    }
+
+    static func sync(context: ModelContext) async {
+        guard SupabaseAuth.shared.signedIn, !running else { return }
+        running = true
+        SyncStatus.shared.syncing = true
+        defer {
+            running = false
+            SyncStatus.shared.syncing = false
+        }
+        do {
+            let cursor = lastSyncAt
+            if cursor == .distantPast {
+                // First sync after sign-in: the server is canonical (it may
+                // be newer than a seeded store), so pull before pushing
+                // whatever only exists locally.
+                try await pull(context: context)
+                try await push(context: context, since: cursor)
+            } else {
+                try await push(context: context, since: cursor)
+                try await pull(context: context)
+            }
+        } catch {
+            // Offline or auth hiccup — the next trigger retries.
+        }
+    }
+
+    // MARK: - Wire format
+
+    private struct Row: Codable {
+        var id: UUID
+        var kind: String
+        var status: String
+        var title: String
+        var summary: String?
+        var venue: String?
+        var area: String?
+        var address: String?
+        var category: String?
+        var price: String?
+        var url: String?
+        var image_url: String?
+        var starts_on: String?
+        var ends_on: String?
+        var notes: String?
+        var color: String?
+        var lat: Double?
+        var lng: Double?
+        var added_by_email: String?
+        var created_at: Date
+        var updated_at: Date
+        var deleted_at: Date?
+    }
+
+    /// Postgres timestamps come back with fractional seconds; sometimes not.
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
+
+    private static var decoder: JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { decoder in
+            var s = try decoder.singleValueContainer().decode(String.self)
+            // Postgres may emit microseconds; ISO8601DateFormatter only
+            // reliably takes milliseconds. Trim the fraction to 3 digits.
+            if let range = s.range(of: #"\.\d{4,}"#, options: .regularExpression) {
+                s = s.replacingCharacters(in: range, with: String(s[range].prefix(4)))
+            }
+            if let date = isoFractional.date(from: s) ?? isoPlain.date(from: s) {
+                return date
+            }
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Unparseable date: \(s)"
+            ))
+        }
+        return d
+    }
+
+    private static var encoder: JSONEncoder {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(isoFractional.string(from: date))
+        }
+        return e
+    }
+
+    private static func request(path: String, query: [URLQueryItem] = []) async throws -> URLRequest {
+        let token = try await SupabaseAuth.shared.validToken()
+        var components = URLComponents(
+            url: SupabaseAuth.baseURL.appending(path: path),
+            resolvingAgainstBaseURL: false
+        )!
+        if !query.isEmpty { components.queryItems = query }
+        var request = URLRequest(url: components.url!)
+        request.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return request
+    }
+
+    // MARK: - Push
+
+    private static func push(context: ModelContext, since cursor: Date) async throws {
+        let locals = try context.fetch(FetchDescriptor<Item>())
+        let dirty = locals.filter { $0.updatedAt > cursor }
+        guard !dirty.isEmpty else { return }
+        try await upsert(rows: dirty.map(row(from:)))
+    }
+
+    private static func upsert(rows: [Row]) async throws {
+        var request = try await request(path: "rest/v1/items")
+        request.httpMethod = "POST"
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try encoder.encode(rows)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw SupabaseAuth.AuthError(
+                message: "Push failed (\(status)): \(String(data: data, encoding: .utf8) ?? "")"
+            )
+        }
+    }
+
+    // MARK: - Partner notification
+
+    /// A brand-new save: put it on the server right away, then ask
+    /// notify-save to ping the other member's devices (never our own).
+    static func announceSave(_ item: Item) async {
+        guard SupabaseAuth.shared.signedIn else { return }
+        do {
+            try await upsert(rows: [row(from: item)])
+            var request = try await request(path: "functions/v1/notify-save")
+            request.httpMethod = "POST"
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "item_id": item.id.uuidString.lowercased(),
+            ])
+            _ = try await URLSession.shared.data(for: request)
+        } catch {
+            // The regular sync still carries the item; only the ping is lost.
+        }
+    }
+
+    private static func row(from item: Item) -> Row {
+        Row(
+            id: item.id,
+            kind: item.kind,
+            status: item.status,
+            title: item.title,
+            summary: item.summary,
+            venue: item.venue,
+            area: item.area,
+            address: item.address,
+            category: item.category,
+            price: item.price,
+            url: item.url,
+            image_url: item.imageUrl,
+            starts_on: item.startsOn,
+            ends_on: item.endsOn,
+            notes: item.notes,
+            color: item.colorHex,
+            lat: item.lat,
+            lng: item.lng,
+            added_by_email: item.addedByEmail ?? SupabaseAuth.shared.email,
+            created_at: item.createdAt,
+            updated_at: item.updatedAt,
+            deleted_at: nil
+        )
+    }
+
+    // MARK: - Pull
+
+    private static func pull(context: ModelContext) async throws {
+        // The whole table, soft-deleted rows included, so removals propagate.
+        // Fine at this scale (two people's saves).
+        var request = try await request(path: "rest/v1/items", query: [
+            .init(name: "select", value: "*"),
+            .init(name: "order", value: "updated_at.asc"),
+        ])
+        request.httpMethod = "GET"
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw SupabaseAuth.AuthError(message: "Pull failed.")
+        }
+        let rows = try decoder.decode([Row].self, from: data)
+
+        let locals = try context.fetch(FetchDescriptor<Item>())
+        let byID = Dictionary(locals.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        for row in rows {
+            if row.deleted_at != nil {
+                if let local = byID[row.id] { context.delete(local) }
+                continue
+            }
+            if let local = byID[row.id] {
+                if row.updated_at > local.updatedAt {
+                    apply(row, to: local)
+                }
+            } else {
+                let item = Item()
+                apply(row, to: item)
+                context.insert(item)
+            }
+        }
+        if context.hasChanges { try context.save() }
+        lastSyncAt = .now
+    }
+
+    private static func apply(_ row: Row, to item: Item) {
+        item.id = row.id
+        item.kind = row.kind
+        item.status = row.status
+        item.title = row.title
+        item.summary = row.summary
+        item.venue = row.venue
+        item.area = row.area
+        item.address = row.address
+        item.category = row.category
+        item.price = row.price
+        item.url = row.url
+        item.imageUrl = row.image_url
+        item.startsOn = row.starts_on
+        item.endsOn = row.ends_on
+        item.notes = row.notes
+        item.colorHex = row.color
+        item.lat = row.lat
+        item.lng = row.lng
+        item.addedByEmail = row.added_by_email
+        item.createdAt = row.created_at
+        item.updatedAt = row.updated_at
+    }
+
+    // MARK: - Deletes
+
+    /// Mirrors the web's soft delete; `undelete` covers the 5-second Undo.
+    static func setDeleted(_ id: UUID, _ deleted: Bool) {
+        Task {
+            guard SupabaseAuth.shared.signedIn else { return }
+            var request = try await request(
+                path: "rest/v1/items",
+                query: [.init(name: "id", value: "eq.\(id.uuidString.lowercased())")]
+            )
+            request.httpMethod = "PATCH"
+            request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+            let stamp: Any = deleted ? isoFractional.string(from: .now) : NSNull()
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["deleted_at": stamp])
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+}

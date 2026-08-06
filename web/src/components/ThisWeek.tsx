@@ -14,7 +14,7 @@ import {
   timeBucket,
 } from "@/lib/api";
 import { ItemCard } from "./ItemCard";
-import { MapWeek } from "./MapWeek";
+import { LazyMapWeek } from "./LazyMapWeek";
 import { cn } from "@/lib/utils";
 import { List, Map as MapIcon } from "lucide-react";
 
@@ -74,39 +74,29 @@ export function ThisWeek({
     })
     .sort((a, b) => (daysUntilOpen(a, now) ?? 99) - (daysUntilOpen(b, now) ?? 99));
 
-  const places = active.filter((i) => i.kind === "place");
-  // stable weekly rotation: seed by ISO week so the shortlist changes each week
-  const seed = Number(format(now, "I")) + now.getFullYear();
-  const rotate = (a: Item, b: Item) => {
-    const ha = (a.id.charCodeAt(0) * seed) % 97;
-    const hb = (b.id.charCodeAt(0) * seed) % 97;
-    return ha - hb;
-  };
-  const placeIdeas = [...places].sort(rotate).slice(0, 3);
-
-  // Ongoing events (open now or undated) never hit an urgency bucket, so
-  // surface a rotating shortlist here — biased toward the oldest saves,
-  // which are the ones most at risk of quietly becoming "Missed".
-  const onNowPool = active.filter(
-    (i) =>
-      i.kind === "event" &&
-      ["open-now", "anytime"].includes(timeBucket(i, now)),
-  );
-  const onNow = [...onNowPool]
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    .slice(0, 8)
-    .sort(rotate)
-    .slice(0, 3);
+  // Everything else that's simply on — running with no imminent end, or
+  // undated. Shown in full (no more weekly rotation): closing-soonest
+  // first, endless ones oldest-saved first so early finds resurface.
+  const onNow = active
+    .filter(
+      (i) =>
+        i.kind === "event" &&
+        ["open-now", "anytime"].includes(timeBucket(i, now)),
+    )
+    .sort((a, b) => {
+      const ca = daysUntilClose(a, now);
+      const cb = daysUntilClose(b, now);
+      if (ca !== null && cb !== null) return ca - cb;
+      if (ca !== null) return -1;
+      if (cb !== null) return 1;
+      return a.created_at.localeCompare(b.created_at);
+    });
 
   // Resurface the oldest save that isn't already on screen this week.
   const shownIds = new Set(
-    [
-      ...lastChance,
-      ...closingSoon,
-      ...openingThisWeek,
-      ...onNow,
-      ...placeIdeas,
-    ].map((i) => i.id),
+    [...lastChance, ...closingSoon, ...openingThisWeek, ...onNow].map(
+      (i) => i.id,
+    ),
   );
   const stale = active
     .filter(
@@ -119,7 +109,7 @@ export function ThisWeek({
 
   const empty =
     lastChance.length + closingSoon.length + openingThisWeek.length +
-      onNow.length + placeIdeas.length + stale.length ===
+      onNow.length + stale.length ===
     0;
 
   // map = everything the week view talks about, plus every saved place
@@ -130,7 +120,7 @@ export function ThisWeek({
       ...lastChance,
       ...closingSoon,
       ...openingThisWeek,
-      ...onNowPool,
+      ...onNow,
       ...active.filter((i) => i.kind === "place"),
     ]) {
       if (!seen.has(i.id)) {
@@ -173,7 +163,7 @@ export function ThisWeek({
       </div>
 
       {view === "map" ? (
-        <MapWeek items={mapItems} onSelect={onSelect} />
+        <LazyMapWeek items={mapItems} onSelect={onSelect} />
       ) : (
         <div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
       <Section
@@ -196,17 +186,11 @@ export function ThisWeek({
       />
       <Section
         title="On now"
-        hint="Already running, no rush yet — a fresh three each week."
+        hint="Everything else already running — no rush yet."
         items={onNow}
         onSelect={onSelect}
       />
 
-      <Section
-        title="Ideas from your list"
-        hint="Saved places for a free evening — a fresh three each week."
-        items={placeIdeas}
-        onSelect={onSelect}
-      />
       <Section
         title="Saved ages ago"
         hint="Been on the list a couple of months — still fancy it?"

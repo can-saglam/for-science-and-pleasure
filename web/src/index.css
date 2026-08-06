@@ -49,6 +49,7 @@
 }
 
 :root {
+    color-scheme: light;
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -84,6 +85,7 @@
 }
 
 .dark {
+    color-scheme: dark;
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -131,6 +133,10 @@
     }
   html {
     @apply w-full font-sans;
+    /* Reserve the desktop scrollbar's width so switching between long and
+       short tabs doesn't shift the whole layout. (Not an overflow rule, so
+       the sticky fast path above is unaffected; overlay scrollbars ignore it.) */
+    scrollbar-gutter: stable;
     }
 }
 
@@ -141,4 +147,26 @@
 
 .map-with-fab .leaflet-bottom.leaflet-right {
   right: 4.5rem;
+}
+
+/* Leaflet ships light-only chrome; follow the app theme in dark mode. */
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip {
+  background: var(--card);
+  color: var(--card-foreground);
+}
+.dark .leaflet-container a.leaflet-popup-close-button {
+  color: var(--muted-foreground);
+}
+.dark .leaflet-bar a {
+  background: var(--card);
+  color: var(--card-foreground);
+  border-color: var(--border);
+}
+.dark .leaflet-control-attribution {
+  background: rgb(0 0 0 / 0.5);
+}
+.dark .leaflet-control-attribution,
+.dark .leaflet-control-attribution a {
+  color: var(--muted-foreground);
 }

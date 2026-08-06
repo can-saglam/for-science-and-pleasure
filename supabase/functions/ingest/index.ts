@@ -5,6 +5,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard } from "../_shared/extract.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
+import { notifyPartnersOfSave } from "../_shared/notify.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -98,8 +99,20 @@ Deno.serve(async (req) => {
       };
     }
 
-    const { data, error } = await supabase.from("items").insert(row).select("id, title").single();
+    const { data, error } = await supabase.from("items").insert(row).select("id, title, venue").single();
     if (error) throw error;
+
+    // Tell the other person; best-effort, never fails the save.
+    try {
+      await notifyPartnersOfSave(supabase, {
+        itemId: data.id,
+        title: data.title,
+        venue: data.venue,
+        adderEmail: row.added_by_email ?? null,
+      });
+    } catch (notifyErr) {
+      console.error("partner notify failed", notifyErr);
+    }
 
     return new Response(JSON.stringify({ ok: true, id: data.id, title: data.title }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

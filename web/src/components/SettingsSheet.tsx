@@ -5,13 +5,18 @@ import {
   Loader2,
   LogOut,
   MapPin,
+  Monitor,
+  Moon,
+  Newspaper,
   NotebookPen,
   RefreshCw,
   Settings as SettingsIcon,
+  Sun,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { isActive, proposeLocations, updateItem } from "@/lib/api";
+import { getThemePref, setThemePref, type ThemePref } from "@/lib/theme";
 import {
   exportSavesAsMarkdown,
   exportSavesForAppleNotes,
@@ -39,11 +44,14 @@ import { NotificationSettings } from "@/components/NotificationSettings";
 export function SettingsSheet({
   email,
   items,
+  onOpenDigest,
 }: {
   email?: string;
   items: Item[];
+  onOpenDigest: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemePref>(getThemePref);
   const [refreshing, setRefreshing] = useState(false);
   const [locating, setLocating] = useState(false);
   const [proposals, setProposals] = useState<LocationProposal[] | null>(null);
@@ -140,6 +148,40 @@ export function SettingsSheet({
             </DrawerHeader>
 
             <div className="space-y-4">
+              <section className="space-y-3 rounded-xl border p-4">
+                <div>
+                  <h3 className="font-medium">Appearance</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    System follows your device's light/dark setting.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-1 rounded-lg border p-1">
+                  {(
+                    [
+                      { id: "light", label: "Light", icon: Sun },
+                      { id: "system", label: "System", icon: Monitor },
+                      { id: "dark", label: "Dark", icon: Moon },
+                    ] as const
+                  ).map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        setTheme(id);
+                        setThemePref(id);
+                      }}
+                      className={cn(
+                        "flex min-h-9 items-center justify-center gap-1.5 rounded-md text-sm",
+                        theme === id
+                          ? "bg-foreground font-medium text-background"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      <Icon className="size-4" /> {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
               <NotificationSettings />
 
               <section className="space-y-3 rounded-xl border p-4">
@@ -161,6 +203,27 @@ export function SettingsSheet({
                     <RefreshCw />
                   )}
                   Force refresh
+                </Button>
+              </section>
+
+              <section className="space-y-3 rounded-xl border p-4">
+                <div>
+                  <h3 className="font-medium">Weekly digest</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    See this week's summary — the same one the Tuesday
+                    notification points to. Nothing is sent.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenDigest();
+                  }}
+                >
+                  <Newspaper />
+                  Preview weekly digest
                 </Button>
               </section>
 

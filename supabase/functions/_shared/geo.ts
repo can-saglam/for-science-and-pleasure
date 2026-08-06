@@ -62,14 +62,31 @@ export async function resolveMapsLink(url: string): Promise<MapsLinkInfo | null>
   const direct = parseGoogleMapsUrl(url);
   if (direct) return direct;
   try {
-    const host = new URL(url).hostname;
-    if (!/^(maps\.app\.goo\.gl|goo\.gl)$/.test(host)) return null;
-    const res = await fetch(url, {
+    const short = new URL(url);
+    if (!/^(maps\.app\.goo\.gl|goo\.gl|g\.co)$/.test(short.hostname)) return null;
+    // Short links now serve a client-side interstitial instead of an HTTP
+    // redirect; _imcp=1 is what that page appends to force the real redirect.
+    short.searchParams.set("_imcp", "1");
+    const res = await fetch(short.toString(), {
       redirect: "follow",
       signal: AbortSignal.timeout(10_000),
+      // Without a browser UA, Google serves bot pages instead of redirecting.
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept-Language": "en-GB,en;q=0.9",
+      },
     });
     res.body?.cancel();
-    return parseGoogleMapsUrl(res.url);
+    let finalUrl = res.url;
+    // UK/EU egress IPs get bounced to a consent interstitial; the real maps
+    // URL (with the pin) rides along in the `continue` parameter.
+    const parsed = new URL(finalUrl);
+    if (parsed.hostname === "consent.google.com") {
+      const cont = parsed.searchParams.get("continue");
+      if (cont) finalUrl = cont;
+    }
+    return parseGoogleMapsUrl(finalUrl);
   } catch {
     return null;
   }

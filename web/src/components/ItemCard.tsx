@@ -1,4 +1,5 @@
 import { daysUntilClose, daysUntilOpen, timeBucket } from "@/lib/api";
+import { accentColor, cardTint } from "@/lib/colors";
 import type { Item } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -37,42 +38,17 @@ export function TimeBadge({ item }: { item: Item }) {
     case "open-now":
       return <Badge variant="secondary">on now</Badge>;
     case "upcoming":
-      return <Badge variant="secondary">opens in {open}d</Badge>;
+      // One-day events don't "open" — they happen.
+      return item.starts_on && item.starts_on === item.ends_on ? (
+        <Badge variant="secondary">happening in {open}d</Badge>
+      ) : (
+        <Badge variant="secondary">opens in {open}d</Badge>
+      );
     case "past":
       return <Badge variant="secondary" className="opacity-60">ended</Badge>;
     default:
       return null;
   }
-}
-
-function hexToRgb(hex: string): [number, number, number] | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-// Gentle pastel wash of the item's source colour. If a tint ever comes out
-// dark, the text flips to light so the card stays readable.
-// Also used by the calendar to tint event bars consistently with the cards.
-export function cardTint(color: string | null): {
-  style?: React.CSSProperties;
-  lightText: boolean;
-} {
-  const rgb = color ? hexToRgb(color) : null;
-  if (!rgb) return { lightText: false };
-  const blend = (weight: number) =>
-    rgb.map((c) => Math.round(c * weight + 255 * (1 - weight)));
-  const bg = blend(0.16);
-  const border = blend(0.38);
-  const luminance = (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) / 255;
-  return {
-    style: {
-      backgroundColor: `rgb(${bg.join(",")})`,
-      borderColor: `rgb(${border.join(",")})`,
-    },
-    lightText: luminance < 0.55,
-  };
 }
 
 export function ItemCard({
@@ -83,8 +59,17 @@ export function ItemCard({
   onClick?: () => void;
 }) {
   const label = windowLabel(item);
-  const { style, lightText } = cardTint(item.color);
+  const { style, lightText } = cardTint(accentColor(item));
   const muted = lightText ? "text-white/75" : "text-muted-foreground";
+
+  // Quiet nudges for incomplete saves — only on active items.
+  const hints: string[] = [];
+  if (item.status !== "done") {
+    if (item.kind === "event" && !item.starts_on && !item.ends_on) {
+      hints.push("needs a date");
+    }
+    if (item.lat == null || item.lng == null) hints.push("no location");
+  }
   return (
     <button
       onClick={onClick}
@@ -108,7 +93,21 @@ export function ItemCard({
           <TimeBadge item={item} />
         </div>
       </div>
-      {label && <div className={cn("mt-1 text-xs", muted)}>{label}</div>}
+      {(label || hints.length > 0) && (
+        <div className="mt-1 flex flex-wrap gap-x-2 text-xs">
+          {label && <span className={muted}>{label}</span>}
+          {hints.map((h) => (
+            <span
+              key={h}
+              className={
+                lightText ? "text-amber-200" : "text-amber-600 dark:text-amber-500"
+              }
+            >
+              {h}
+            </span>
+          ))}
+        </div>
+      )}
     </button>
   );
 }

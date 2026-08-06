@@ -5,3 +5,10 @@ dist/
 .env.*
 .DS_Store
 supabase/.temp/
+
+# iOS: personal seed data (public repo) and Xcode cruft
+ios/CanWeGo/Resources/seed-items.json
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+
+ios/CanWeGo/Resources/Secrets.plist

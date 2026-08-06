@@ -1,6 +1,6 @@
 import { buildPushHTTPRequest } from "npm:@pushforge/builder@2.0.5";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { generateDigestText } from "../_shared/digest.ts";
+import { buildDigest } from "../_shared/digest.ts";
 
 interface SubscriptionRow {
   id: string;
@@ -64,52 +64,56 @@ Deno.serve(async (req) => {
     return Response.json({ configured: true });
   }
 
+  // force: manual test run (still behind the cron secret) — bypasses the
+  // schedule/dedup gates and skips run bookkeeping so the real weekly run
+  // is unaffected; the response carries per-push failure details.
+  const force = body.force === true;
+
   const local = londonNow();
-  if (local.weekday !== "Tue" || local.hour !== "10") {
+  if (!force && (local.weekday !== "Tue" || local.hour !== "10")) {
     return Response.json({ skipped: true, reason: "outside London schedule" });
   }
 
   const localDate = `${local.year}-${local.month}-${local.day}`;
   const weekStart = previousMonday(localDate);
 
-  const { data: existingRun } = await supabase
-    .from("digest_runs")
-    .select("status")
-    .eq("week_start", weekStart)
-    .maybeSingle();
-  if (existingRun?.status === "completed" || existingRun?.status === "running") {
-    return Response.json({ skipped: true, reason: `already ${existingRun.status}` });
-  }
-
-  if (existingRun) {
-    const { error } = await supabase
+  if (!force) {
+    const { data: existingRun } = await supabase
       .from("digest_runs")
-      .update({ status: "running", started_at: new Date().toISOString(), error: null })
+      .select("status")
       .eq("week_start", weekStart)
-      .eq("status", "failed");
-    if (error) throw error;
-  } else {
-    const { error } = await supabase
-      .from("digest_runs")
-      .insert({ week_start: weekStart, status: "running" });
-    if (error) throw error;
+      .maybeSingle();
+    if (existingRun?.status === "completed" || existingRun?.status === "running") {
+      return Response.json({ skipped: true, reason: `already ${existingRun.status}` });
+    }
+
+    if (existingRun) {
+      const { error } = await supabase
+        .from("digest_runs")
+        .update({ status: "running", started_at: new Date().toISOString(), error: null })
+        .eq("week_start", weekStart)
+        .eq("status", "failed");
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from("digest_runs")
+        .insert({ week_start: weekStart, status: "running" });
+      if (error) throw error;
+    }
   }
 
   try {
     const { data: items, error: itemsError } = await supabase
       .from("items")
-      .select("kind, status, title, venue, area, category, price, starts_on, ends_on")
+      .select("id, kind, status, title, venue, area, category, price, starts_on, ends_on")
       .is("deleted_at", null)
       .eq("status", "saved");
     if (itemsError) throw itemsError;
 
-    const text = await generateDigestText(items ?? [], localDate);
-    const { data: digest, error: digestError } = await supabase
-      .from("digests")
-      .upsert({ week_start: weekStart, text }, { onConflict: "week_start" })
-      .select("id")
-      .single();
-    if (digestError) throw digestError;
+    // The sheet in the app computes its own summary live from the items,
+    // so nothing is stored — the push just carries the text and a flag
+    // telling the app to open the digest sheet.
+    const text = buildDigest(items ?? [], localDate);
 
     const { data: subscriptions, error: subscriptionsError } = await supabase
       .from("push_subscriptions")
@@ -119,14 +123,19 @@ Deno.serve(async (req) => {
     const privateJWK = JSON.parse(Deno.env.get("VAPID_PRIVATE_JWK")!);
     const adminContact = Deno.env.get("VAPID_SUBJECT")!;
     const appUrl =
-      `https://can-saglam.github.io/for-science-and-pleasure/?digest=${digest.id}`;
+      "https://can-saglam.github.io/for-science-and-pleasure/?digest=weekly";
     let sent = 0;
     let expired = 0;
     let failed = 0;
+    const failures: { endpoint: string; detail: string }[] = [];
 
     for (const subscription of (subscriptions ?? []) as SubscriptionRow[]) {
       if (!isAllowedPushEndpoint(subscription.endpoint)) {
         failed++;
+        failures.push({
+          endpoint: subscription.endpoint.slice(0, 50),
+          detail: "endpoint not allowed",
+        });
         continue;
       }
 
@@ -144,13 +153,14 @@ Deno.serve(async (req) => {
               icon:
                 "https://can-saglam.github.io/for-science-and-pleasure/icon-192.png",
               tag: `weekly-digest-${weekStart}`,
-              data: { digestId: digest.id, url: appUrl },
+              data: { digestId: "weekly", url: appUrl },
             },
             adminContact,
+            // No `topic`: Apple's push service rejects it (BadWebPushTopic);
+            // the notification `tag` already collapses repeats client-side.
             options: {
               ttl: 86400,
               urgency: "normal",
-              topic: "weekly-digest",
             },
           },
         });
@@ -168,26 +178,44 @@ Deno.serve(async (req) => {
           await supabase.from("push_subscriptions").delete().eq("id", subscription.id);
         } else {
           failed++;
-          console.error("push failed", response.status);
+          const detail = `${response.status} ${(await response.text()).slice(0, 200)}`;
+          failures.push({ endpoint: subscription.endpoint.slice(0, 50), detail });
+          console.error("push failed", detail);
         }
       } catch (error) {
         failed++;
+        failures.push({
+          endpoint: subscription.endpoint.slice(0, 50),
+          detail: String(error).slice(0, 200),
+        });
         console.error("push error", error);
       }
     }
 
-    await supabase
-      .from("digest_runs")
-      .update({ status: "completed", completed_at: new Date().toISOString() })
-      .eq("week_start", weekStart);
+    if (!force) {
+      await supabase
+        .from("digest_runs")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("week_start", weekStart);
+    }
 
-    return Response.json({ digest_id: digest.id, sent, expired, failed });
+    return Response.json({
+      sent,
+      expired,
+      failed,
+      ...(force ? { failures } : {}),
+    });
   } catch (error) {
-    await supabase
-      .from("digest_runs")
-      .update({ status: "failed", error: String(error) })
-      .eq("week_start", weekStart);
+    if (!force) {
+      await supabase
+        .from("digest_runs")
+        .update({ status: "failed", error: String(error) })
+        .eq("week_start", weekStart);
+    }
     console.error(error);
-    return Response.json({ error: "internal error" }, { status: 500 });
+    return Response.json(
+      { error: force ? String(error).slice(0, 300) : "internal error" },
+      { status: 500 },
+    );
   }
 });

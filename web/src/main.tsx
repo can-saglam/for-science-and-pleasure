@@ -4,6 +4,9 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { registerServiceWorker } from './lib/push.ts'
+import { initTheme } from './lib/theme.ts'
+
+initTheme()
 
 registerServiceWorker().catch((error) => {
   console.error("Service worker registration failed", error)

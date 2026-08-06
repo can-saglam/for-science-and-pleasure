@@ -88,6 +88,16 @@ function isFetchable(url: string): boolean {
   }
 }
 
+// Ticketing sites (See Tickets, Ticketmaster…) often serve a bot-challenge
+// page to server-side fetches. Treat those as "no page" so the model falls
+// back to web search instead of reading the challenge text.
+const BLOCK_PAGE_RE =
+  /unusual traffic|unusual activity|access denied|are you a robot|captcha|just a moment|attention required|pardon our interruption|request blocked|verify you are human|enable javascript and cookies/i;
+
+function looksBlocked(pageText: string): boolean {
+  return pageText.length < 4000 && BLOCK_PAGE_RE.test(pageText);
+}
+
 async function fetchPage(
   url: string,
 ): Promise<{ text: string; ogImage: string | null } | null> {
@@ -140,6 +150,7 @@ export async function extractCard(
     lat: number | null;
     lng: number | null;
     color: string | null;
+    image_url: string | null;
   }
 > {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
@@ -152,8 +163,15 @@ export async function extractCard(
   let page: { text: string; ogImage: string | null } | null = null;
   if (url && !mapsLink && isFetchable(url)) {
     page = await fetchPage(url);
+    if (page && looksBlocked(page.text)) page = null;
   }
   const pageText = page?.text ?? null;
+  // A link we couldn't read: let the model search the web for the real
+  // details instead of guessing from the URL slug alone. Same for maps
+  // links that named a place but carried no pin coordinates.
+  const useWebSearch =
+    Boolean(url && !mapsLink && !pageText) ||
+    Boolean(mapsLink && mapsLink.lat === null);
 
   // Card accent colour: a screenshot beats the page's og:image because it is
   // exactly what the user saw. Best-effort; null is fine.
@@ -178,11 +196,21 @@ export async function extractCard(
           mapsLink.lat !== null ? ` at ${mapsLink.lat},${mapsLink.lng}` : ""
         }.`,
         "There is no page content to read. Identify this place from its name and your own knowledge of London: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.",
+        mapsLink.lat === null
+          ? "The pin coordinates could not be extracted from the link — use the web search tool to find the place's exact street address so it can be geocoded."
+          : "",
         "Only leave fields null if you genuinely don't recognise the place; still never invent prices or dates.",
-      ].join(" "),
+      ].filter(Boolean).join(" "),
     );
-  } else if (url && !pageText) {
-    parts.push(`The link ${url} could not be fetched (it may be Instagram or blocked). Extract what you can from the input text${input.image_base64 ? " and the screenshot" : ""}.`);
+  } else if (useWebSearch) {
+    parts.push(
+      [
+        `The page at ${url} could not be read (blocked or unreachable).`,
+        "Use the web search tool to identify this exact event or place — search with the names from the URL slug plus \"London\" — and fill in verified details, especially start/end dates, venue, and price.",
+        input.image_base64 ? "Combine that with what the screenshot shows." : "",
+        "If search doesn't confirm a detail, leave it null; never guess.",
+      ].filter(Boolean).join(" "),
+    );
   }
 
   const content: Anthropic.ContentBlockParam[] = [];
@@ -202,10 +230,19 @@ export async function extractCard(
     model: "claude-opus-4-8",
     max_tokens: 4096,
     output_config: { format: { type: "json_schema", schema: CARD_SCHEMA } },
+    ...(useWebSearch
+      ? {
+          tools: [
+            { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 },
+          ],
+        }
+      : {}),
     messages: [{ role: "user", content }],
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
+  // With web search the model may emit commentary text between searches —
+  // the structured JSON is always the final text block.
+  const textBlock = [...response.content].reverse().find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
     throw new Error("No structured output returned");
   }
@@ -216,6 +253,11 @@ export async function extractCard(
     mapsLink && mapsLink.lat !== null && mapsLink.lng !== null
       ? { lat: mapsLink.lat, lng: mapsLink.lng }
       : null;
+  // Street addresses geocode far more reliably than small-venue names
+  // (Nominatim rarely knows independent restaurants), so try those first.
+  if (!coords && card.address) {
+    coords = await geocode(`${card.address}, London`);
+  }
   if (!coords && (card.venue || card.area)) {
     coords = await geocode(
       [card.venue ?? card.title, card.area, "London"].filter(Boolean).join(", "),
@@ -229,5 +271,7 @@ export async function extractCard(
     lat: coords?.lat ?? null,
     lng: coords?.lng ?? null,
     color: await colorPromise.catch(() => null),
+    // The page's og:image, so clients can show a thumbnail of the save.
+    image_url: page?.ogImage ?? null,
   };
 }

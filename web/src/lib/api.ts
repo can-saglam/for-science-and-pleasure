@@ -3,7 +3,6 @@ import { supabase, SUPABASE_URL } from "./supabase";
 import {
   ACTIVE_STATUSES,
   type DayPlan,
-  type Digest,
   type Item,
   type LocationProposal,
   type Member,
@@ -102,20 +101,29 @@ export async function proposeLocations(items: Item[]): Promise<LocationProposal[
   return json.proposals as LocationProposal[];
 }
 
+// Fire-and-forget: tell the other person about a confirmed save.
+export function notifyPartnerOfSave(itemId: string): void {
+  supabase.auth
+    .getSession()
+    .then(({ data }) => {
+      const token = data.session?.access_token;
+      if (!token) return;
+      return fetch(`${SUPABASE_URL}/functions/v1/notify-save`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ item_id: itemId }),
+      });
+    })
+    .catch(() => {});
+}
+
 export async function fetchMembers(): Promise<Member[]> {
   const { data, error } = await supabase.from("members").select("email, display_name");
   if (error) return [];
   return data as Member[];
-}
-
-export async function fetchDigest(id: string): Promise<Digest> {
-  const { data, error } = await supabase
-    .from("digests")
-    .select("id, week_start, text, created_at")
-    .eq("id", id)
-    .single();
-  if (error) throw error;
-  return data as Digest;
 }
 
 export async function findByUrl(url: string): Promise<Item | null> {

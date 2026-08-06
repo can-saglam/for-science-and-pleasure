@@ -1,5 +1,7 @@
-// parse: authenticated in-app endpoint. Takes {text?, image_base64?, image_media_type?}
-// and returns a parsed card. The client inserts the row itself (RLS enforces membership).
+// parse: stateless extraction endpoint. Takes {text?, image_base64?, image_media_type?}
+// and returns a parsed card; nothing is stored. Two callers, two auth paths:
+// the web app sends a member's JWT, the iOS app sends the ingest secret
+// (the same one already embedded in the share-sheet Shortcut).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard } from "../_shared/extract.ts";
@@ -10,18 +12,22 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
   try {
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: isMember, error: memberErr } = await supabase.rpc("is_member");
-    if (memberErr || !isMember) {
-      return new Response(JSON.stringify({ error: "not a member" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const secret = req.headers.get("x-ingest-secret");
+    const secretOk = Boolean(secret) && secret === Deno.env.get("INGEST_SECRET");
+    if (!secretOk) {
+      const authHeader = req.headers.get("Authorization") ?? "";
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authHeader } } },
+      );
+      const { data: isMember, error: memberErr } = await supabase.rpc("is_member");
+      if (memberErr || !isMember) {
+        return new Response(JSON.stringify({ error: "not a member" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     const body = await req.json();

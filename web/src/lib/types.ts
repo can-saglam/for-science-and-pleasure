@@ -51,18 +51,12 @@ export interface ParsedCard {
   lat: number | null;
   lng: number | null;
   color: string | null;
+  image_url: string | null;
 }
 
 export interface Member {
   email: string;
   display_name: string | null;
-}
-
-export interface Digest {
-  id: string;
-  week_start: string;
-  text: string;
-  created_at: string;
 }
 
 export interface LocationProposal {
