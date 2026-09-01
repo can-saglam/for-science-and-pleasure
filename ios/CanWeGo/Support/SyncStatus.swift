@@ -9,6 +9,9 @@ final class SyncStatus {
 
     var syncing = false
     var lastSyncedAt: Date?
+    /// Why the last sync round failed, if it did — shown in Settings so a
+    /// broken sync is never invisible.
+    var problem: String?
 
     /// False only before the very first successful pull on this install.
     var hasSyncedOnce: Bool { lastSyncedAt != nil }

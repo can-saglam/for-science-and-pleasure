@@ -1,13 +1,6 @@
-import { buildPushHTTPRequest } from "npm:@pushforge/builder@2.0.5";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { apnsConfigured, sendApnsAlert } from "../_shared/apns.ts";
 import { buildDigest } from "../_shared/digest.ts";
-
-interface SubscriptionRow {
-  id: string;
-  endpoint: string;
-  p256dh: string;
-  auth: string;
-}
 
 function londonNow() {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -17,29 +10,20 @@ function londonNow() {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
+    minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(new Date());
   return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
 }
 
+const ISO_DOW: Record<string, number> = {
+  Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+};
+
 function previousMonday(date: string): string {
   const monday = new Date(`${date}T00:00:00Z`);
   monday.setUTCDate(monday.getUTCDate() - 1);
   return monday.toISOString().slice(0, 10);
-}
-
-function isAllowedPushEndpoint(endpoint: string): boolean {
-  try {
-    const { hostname, protocol } = new URL(endpoint);
-    if (protocol !== "https:") return false;
-    return (
-      hostname === "fcm.googleapis.com" ||
-      hostname.endsWith(".push.apple.com") ||
-      hostname.endsWith(".push.services.mozilla.com")
-    );
-  } catch {
-    return false;
-  }
 }
 
 Deno.serve(async (req) => {
@@ -69,8 +53,21 @@ Deno.serve(async (req) => {
   // is unaffected; the response carries per-push failure details.
   const force = body.force === true;
 
+  // The schedule lives in the database so both members share one time and
+  // either app can move it. The cron dispatcher pings every 15 minutes;
+  // this window (scheduled moment + 59 min) plus digest_runs dedup below
+  // yields exactly one send per week, shortly after the chosen time.
   const local = londonNow();
-  if (!force && (local.weekday !== "Tue" || local.hour !== "10")) {
+  const { data: schedRow } = await supabase
+    .from("digest_schedule")
+    .select("day_of_week, hour, minute")
+    .maybeSingle();
+  const sched = schedRow ?? { day_of_week: 4, hour: 10, minute: 0 };
+  const nowMinutes = Number(local.hour) * 60 + Number(local.minute);
+  const schedMinutes = sched.hour * 60 + sched.minute;
+  const due = ISO_DOW[local.weekday] === sched.day_of_week &&
+    nowMinutes >= schedMinutes && nowMinutes <= schedMinutes + 59;
+  if (!force && !due) {
     return Response.json({ skipped: true, reason: "outside London schedule" });
   }
 
@@ -112,83 +109,27 @@ Deno.serve(async (req) => {
 
     // The sheet in the app computes its own summary live from the items,
     // so nothing is stored — the push just carries the text and a flag
-    // telling the app to open the digest sheet.
+    // telling the app to open the digest sheet. Native pushes only (the
+    // PWA is retired); the `digest` flag routes the tap to the sheet.
     const text = buildDigest(items ?? [], localDate);
 
-    const { data: subscriptions, error: subscriptionsError } = await supabase
-      .from("push_subscriptions")
-      .select("id, endpoint, p256dh, auth");
-    if (subscriptionsError) throw subscriptionsError;
-
-    const privateJWK = JSON.parse(Deno.env.get("VAPID_PRIVATE_JWK")!);
-    const adminContact = Deno.env.get("VAPID_SUBJECT")!;
-    const appUrl =
-      "https://can-saglam.github.io/for-science-and-pleasure/?digest=weekly";
-    let sent = 0;
-    let expired = 0;
-    let failed = 0;
-    const failures: { endpoint: string; detail: string }[] = [];
-
-    for (const subscription of (subscriptions ?? []) as SubscriptionRow[]) {
-      if (!isAllowedPushEndpoint(subscription.endpoint)) {
-        failed++;
-        failures.push({
-          endpoint: subscription.endpoint.slice(0, 50),
-          detail: "endpoint not allowed",
-        });
-        continue;
-      }
-
-      try {
-        const pushRequest = await buildPushHTTPRequest({
-          privateJWK,
-          subscription: {
-            endpoint: subscription.endpoint,
-            keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-          },
-          message: {
-            payload: {
-              title: "Can We Go? — This week",
-              body: text,
-              icon:
-                "https://can-saglam.github.io/for-science-and-pleasure/icon-192.png",
-              tag: `weekly-digest-${weekStart}`,
-              data: { digestId: "weekly", url: appUrl },
-            },
-            adminContact,
-            // No `topic`: Apple's push service rejects it (BadWebPushTopic);
-            // the notification `tag` already collapses repeats client-side.
-            options: {
-              ttl: 86400,
-              urgency: "normal",
-            },
-          },
-        });
-
-        const response = await fetch(pushRequest.endpoint, {
-          method: "POST",
-          headers: pushRequest.headers,
-          body: pushRequest.body,
-          redirect: "error",
-        });
-        if (response.ok) {
-          sent++;
-        } else if (response.status === 404 || response.status === 410) {
-          expired++;
-          await supabase.from("push_subscriptions").delete().eq("id", subscription.id);
-        } else {
-          failed++;
-          const detail = `${response.status} ${(await response.text()).slice(0, 200)}`;
-          failures.push({ endpoint: subscription.endpoint.slice(0, 50), detail });
-          console.error("push failed", detail);
-        }
-      } catch (error) {
-        failed++;
-        failures.push({
-          endpoint: subscription.endpoint.slice(0, 50),
-          detail: String(error).slice(0, 200),
-        });
-        console.error("push error", error);
+    let apnsSent = 0;
+    let apnsGone = 0;
+    let apnsFailed = 0;
+    if (apnsConfigured()) {
+      const { data: tokens } = await supabase.from("apns_tokens").select("token");
+      for (const row of (tokens ?? []) as { token: string }[]) {
+        const result = await sendApnsAlert(
+          row.token,
+          text,
+          "This weekend — Can We Go?",
+          { digest: weekStart },
+        );
+        if (result === "sent") apnsSent++;
+        else if (result === "gone") {
+          apnsGone++;
+          await supabase.from("apns_tokens").delete().eq("token", row.token);
+        } else apnsFailed++;
       }
     }
 
@@ -199,12 +140,7 @@ Deno.serve(async (req) => {
         .eq("week_start", weekStart);
     }
 
-    return Response.json({
-      sent,
-      expired,
-      failed,
-      ...(force ? { failures } : {}),
-    });
+    return Response.json({ apnsSent, apnsGone, apnsFailed });
   } catch (error) {
     if (!force) {
       await supabase

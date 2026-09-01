@@ -30,6 +30,9 @@ final class Item {
     var lat: Double?
     var lng: Double?
     var addedByEmail: String?
+    /// Manual position in the Places list (long-press drag). Local-only —
+    /// never synced, so each of you can keep your own order.
+    var sortOrder: Double?
     var createdAt: Date = Date.now
     var updatedAt: Date = Date.now
 
@@ -129,24 +132,47 @@ extension Item {
         return "\(m) months"
     }
 
-    /// Short label for list rows, e.g. "3 days left" / "opens in 5 days".
+    /// "today", "tomorrow", "this Saturday", "next Thursday" for anything
+    /// within the current or the following calendar week; nil beyond that.
+    private static func friendlyDay(_ daysAway: Int, _ day: String) -> String? {
+        switch daysAway {
+        case 0: return "today"
+        case 1: return "tomorrow"
+        case 2...13:
+            guard let date = DayString.date(day) else { return nil }
+            let calendar = Calendar.current
+            let dow = calendar.component(.weekday, from: calendar.startOfDay(for: .now))
+            let daysToSunday = (8 - dow) % 7 // 1 = Sunday
+            let name = date.formatted(.dateTime.weekday(.wide))
+            if daysAway <= daysToSunday { return "this \(name)" }
+            if daysAway <= daysToSunday + 7 { return "next \(name)" }
+            return nil
+        default: return nil
+        }
+    }
+
+    /// Short label for list rows, e.g. "3 days left" / "Opens next Friday".
     var timeLabel: String? {
         switch timeBucket {
         case .past:
-            return "ended"
+            return "Ended"
         case .lastChance:
             guard let d = daysUntilClose else { return nil }
-            if d == 0 { return "last day" }
+            if d == 0 { return "Last Day" }
             return "\(d) day\(d == 1 ? "" : "s") left"
         case .now:
             if let d = daysUntilClose { return "\(Item.friendlySpan(d)) left" }
-            return "on now"
+            return "On now"
         case .upcoming:
             guard let d = daysUntilStart else { return nil }
-            if d == 0 { return isOneDay ? "happening today" : "opens today" }
+            // Near starts get the human phrasing: "Opens this Saturday"
+            // beats "Opens in 2 days".
+            if let s = startsOn, let day = Item.friendlyDay(d, s) {
+                return isOneDay ? "Happening \(day)" : "Opens \(day)"
+            }
             return isOneDay
-                ? "happening in \(Item.friendlySpan(d))"
-                : "opens in \(Item.friendlySpan(d))"
+                ? "Happening in \(Item.friendlySpan(d))"
+                : "Opens in \(Item.friendlySpan(d))"
         case .undated:
             return nil
         }

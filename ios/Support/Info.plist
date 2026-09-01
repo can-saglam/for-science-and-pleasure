@@ -19,7 +19,22 @@
 	<string>Snap a poster or flyer to save it straight to your list.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>Adds events you choose to your calendar.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Post-TRIAL-Medium.otf</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.cansaglam.CanWeGo</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>canwego</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

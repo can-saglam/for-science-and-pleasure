@@ -65,14 +65,19 @@ extension Item {
     }
 }
 
-/// Holds the most recent deletion for a few seconds so the toast in
-/// ContentView can offer an Undo.
+/// Holds the most recent deletion — and the most recent "We did go!" —
+/// for a few seconds so the toasts in ContentView can offer an Undo.
 @Observable
 final class UndoBin {
     static let shared = UndoBin()
 
     private(set) var deleted: ItemSnapshot?
     private var expiry: Task<Void, Never>?
+
+    /// The item just marked done. Unlike a delete it still exists, so the
+    /// id is enough to take it back.
+    private(set) var done: (id: UUID, title: String)?
+    private var doneExpiry: Task<Void, Never>?
 
     func stash(_ snapshot: ItemSnapshot) {
         deleted = snapshot
@@ -82,6 +87,27 @@ final class UndoBin {
             guard !Task.isCancelled else { return }
             self.deleted = nil
         }
+    }
+
+    func stashDone(_ item: Item) {
+        done = (item.id, item.title)
+        doneExpiry?.cancel()
+        doneExpiry = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self.done = nil
+        }
+    }
+
+    func undoDone(in context: ModelContext) {
+        guard let done else { return }
+        let id = done.id
+        let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
+        if let item = try? context.fetch(fetch).first {
+            item.putBack()
+        }
+        doneExpiry?.cancel()
+        self.done = nil
     }
 
     func restore(into context: ModelContext) {

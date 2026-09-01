@@ -2,21 +2,24 @@ import SwiftUI
 
 // MARK: - Themes
 
-/// Three moods, one app: the signature deep blue, a pure black, and a dark
-/// forest green. Each theme derives its whole palette — tab shades, sheet
-/// depth, control accent — from one base color, so everything stays tuned.
+/// Four moods, one app: the signature deep blue, a pure black, a dark
+/// forest green, and a deep wine red. Each theme derives its whole palette —
+/// tab shades, sheet depth, control accent — from one base color, so
+/// everything stays tuned.
 enum AppTheme: String, CaseIterable, Identifiable {
     case midnight
     case ink
     case forest
+    case wine
 
     var id: String { rawValue }
 
     var name: String {
         switch self {
-        case .midnight: "Midnight blue"
-        case .ink: "Pure black"
-        case .forest: "Forest green"
+        case .midnight: "Midnight Blue"
+        case .ink: "Pure Black"
+        case .forest: "Forest Green"
+        case .wine: "Wine Red"
         }
     }
 
@@ -29,7 +32,20 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .ink:
             .black
         case .forest:
-            Color(hex: "#0B3226") ?? Color(red: 0.043, green: 0.196, blue: 0.149)
+            Color(hex: "#07231A") ?? Color(red: 0.027, green: 0.137, blue: 0.102)
+        case .wine:
+            Color(hex: "#440015") ?? Color(red: 0.267, green: 0, blue: 0.082)
+        }
+    }
+
+    /// The matching alternate home-screen icon; nil means the primary
+    /// (midnight blue) icon.
+    var iconName: String? {
+        switch self {
+        case .midnight: nil
+        case .ink: "AppIconInk"
+        case .forest: "AppIconForest"
+        case .wine: "AppIconWine"
         }
     }
 
@@ -39,6 +55,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: Color(hex: "#97A4FF") ?? .white
         case .ink: .white
         case .forest: Color(hex: "#8FD9B6") ?? .white
+        case .wine: Color(hex: "#FFA2B8") ?? .white
         }
     }
 
@@ -94,19 +111,31 @@ enum AppBackground {
     /// Control accent for the current theme.
     static var accent: Color { theme.accent }
 
-    static var thisWeek: Color { base }
     /// A touch toward teal, and brighter: out on the town.
     static var places: Color { base.shifted(hue: -0.020, brightness: 0.045) }
     /// A touch toward violet.
     static var library: Color { base.shifted(hue: 0.018, brightness: 0.02) }
-    /// Dimmer — the past. (Black can't go dimmer; lift it instead.)
-    static var weDidGo: Color {
-        theme == .ink ? base.shifted(brightness: 0.06) : base.shifted(brightness: -0.075)
-    }
     /// Sheets sit slightly deeper than the pages behind them.
     static var sheet: Color {
         theme == .ink ? base.shifted(brightness: 0.03) : base.shifted(brightness: -0.045)
     }
+
+    // MARK: Swipe action fills
+
+    /// Stock green/red swipe buttons clashed with every theme, so all three
+    /// derive from the palette. Deepened accent — dark enough that the
+    /// system's white label stays readable. Ink's accent is white, so it
+    /// gets a charcoal instead.
+    static var swipeDone: Color {
+        theme == .ink ? Color(white: 0.24) : accent.mix(with: .black, by: 0.4)
+    }
+    /// Red pulled toward the base: still unmistakably destructive, but
+    /// speaking the theme's tone rather than shouting over it.
+    static var swipeDelete: Color {
+        Color(red: 0.85, green: 0.16, blue: 0.22).mix(with: base, by: 0.4)
+    }
+    /// A quiet lift off the base for the non-committal "put back".
+    static var swipePutBack: Color { base.shifted(brightness: 0.18) }
 }
 
 extension Color {

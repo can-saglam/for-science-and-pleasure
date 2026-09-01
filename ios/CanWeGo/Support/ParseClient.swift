@@ -30,7 +30,7 @@ enum ParseClient {
         var errorDescription: String? {
             switch self {
             case .notConfigured:
-                return "Missing Secrets.plist — see ios/README.md."
+                return "Missing Secrets.plist. See ios/README.md."
             case .server(let message):
                 return message
             }
@@ -76,7 +76,7 @@ enum ParseClient {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(message ?? "Parse failed (\(status)).")
+            throw ParseError.server(message ?? "Couldn't read that one (\(status)).")
         }
         struct Envelope: Decodable { let card: Card }
         return try JSONDecoder().decode(Envelope.self, from: data).card

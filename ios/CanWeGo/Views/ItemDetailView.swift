@@ -12,11 +12,20 @@ struct ItemDetailView: View {
     @Environment(\.openURL) private var openURL
     @State private var confetti = false
     @State private var editing = false
+    /// Edits land on this detached scratch copy, applied on Done. Typing
+    /// straight into the live model re-rendered the entire list under the
+    /// sheet on every keystroke — that was the intermittent typing lag.
+    @State private var scratch: Item?
     @State private var calendarState: CalendarState = .idle
     @State private var detent: PresentationDetent = .medium
 
     private enum CalendarState {
         case idle, added, failed
+    }
+
+    /// "Added by Can" — same as the web; quietly absent when unknown.
+    private var addedBy: String? {
+        item.addedByEmail.map { "Added by \(MembersStore.shared.name(for: $0))" }
     }
 
     private var dateLine: String? {
@@ -62,8 +71,8 @@ struct ItemDetailView: View {
                         if !showsHero {
                             header
                         }
-                        if editing {
-                            ItemForm(item: item)
+                        if editing, let scratch {
+                            ItemForm(item: scratch)
                                 .transition(.opacity)
                         } else {
                             readingContent
@@ -94,8 +103,9 @@ struct ItemDetailView: View {
                     Button {
                         Haptics.tap()
                         if editing {
-                            item.updatedAt = .now
-                            try? context.save()
+                            applyEdits()
+                        } else {
+                            scratch = editableCopy()
                         }
                         withAnimation(.snappy) { editing.toggle() }
                     } label: {
@@ -108,7 +118,18 @@ struct ItemDetailView: View {
                     .accessibilityLabel(editing ? "Finish editing" : "Edit")
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    if let url = item.url.flatMap(URL.init(string:)) {
+                    if editing {
+                        // The way out that doesn't save: drop the scratch
+                        // copy and return to reading untouched.
+                        Button {
+                            Haptics.tap()
+                            scratch = nil
+                            withAnimation(.snappy) { editing = false }
+                        } label: {
+                            Text("Cancel").font(.subheadline)
+                        }
+                        .accessibilityLabel("Cancel editing")
+                    } else if let url = item.url.flatMap(URL.init(string:)) {
                         ShareLink(item: url, message: Text(shareMessage)) {
                             Image(systemName: "square.and.arrow.up")
                         }
@@ -135,14 +156,41 @@ struct ItemDetailView: View {
         .onChange(of: editing) { _, isEditing in
             if isEditing { detent = .large }
         }
-        // Edits are live on the model; if the sheet is swiped away mid-edit,
-        // stamp and persist them just like tapping Done would.
-        .onDisappear {
-            if editing {
-                item.updatedAt = .now
-                try? context.save()
-            }
-        }
+        // Swiping the sheet away mid-edit discards, same as Cancel —
+        // edits only ever land through an explicit Done.
+    }
+
+    /// A detached twin holding just the fields the form edits.
+    private func editableCopy() -> Item {
+        let copy = Item()
+        copy.title = item.title
+        copy.kind = item.kind
+        copy.category = item.category
+        copy.venue = item.venue
+        copy.area = item.area
+        copy.price = item.price
+        copy.startsOn = item.startsOn
+        copy.endsOn = item.endsOn
+        copy.notes = item.notes
+        return copy
+    }
+
+    /// One write to the live model — the list under the sheet re-renders
+    /// once here instead of on every keystroke.
+    private func applyEdits() {
+        guard let scratch else { return }
+        item.title = scratch.title
+        item.kind = scratch.kind
+        item.category = scratch.category
+        item.venue = scratch.venue
+        item.area = scratch.area
+        item.price = scratch.price
+        item.startsOn = scratch.startsOn
+        item.endsOn = scratch.endsOn
+        item.notes = scratch.notes
+        item.updatedAt = .now
+        try? context.save()
+        self.scratch = nil
     }
 
     // MARK: - Header
@@ -153,7 +201,8 @@ struct ItemDetailView: View {
         Color.clear
             .frame(height: 230)
             .overlay {
-                AsyncImage(url: url) { phase in
+                // Hero tier: the one place full-size pixels are worth it.
+                CachedImage(url: url, variant: .hero) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFill()
                     } else {
@@ -204,7 +253,8 @@ struct ItemDetailView: View {
                     Text("·").foregroundStyle(.tertiary)
                 }
                 if let category = item.category {
-                    Text(category).foregroundStyle(.secondary)
+                    // Title case, matching the filter chips.
+                    Text(category.capitalized).foregroundStyle(.secondary)
                 }
             }
             .font(.subheadline.weight(.medium))
@@ -217,6 +267,8 @@ struct ItemDetailView: View {
     private var readingContent: some View {
         if let summary = item.summary {
             Text(summary)
+                .font(.post(17))
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
 
@@ -225,6 +277,7 @@ struct ItemDetailView: View {
             metaRow("building.2", item.venue != item.title ? item.venue : nil)
             metaRow("map", item.area)
             metaRow("sterlingsign.circle", item.price)
+            metaRow("person", addedBy)
         }
 
         if let lat = item.lat, let lng = item.lng {
@@ -262,7 +315,8 @@ struct ItemDetailView: View {
 
         if let notes = item.notes, !notes.isEmpty {
             Text(notes)
-                .font(.subheadline)
+                .font(.post(15, relativeTo: .subheadline))
+                .lineSpacing(2)
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.white.opacity(0.06), in: .rect(cornerRadius: 14, style: .continuous))
@@ -286,13 +340,16 @@ struct ItemDetailView: View {
                 if !item.isDone {
                     Button {
                         item.markDone()
+                        UndoBin.shared.stashDone(item)
                         confetti = true
                         Task {
                             try? await Task.sleep(for: .seconds(0.75))
                             dismiss()
                         }
                     } label: {
-                        Label("We did go!", systemImage: "checkmark")
+                        // For something that's already over, the plain label
+                        // reads odd — soften it to an after-the-fact note.
+                        Label(item.isMissed ? "We did go after all" : "We did go!", systemImage: "checkmark")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(AppBackground.base)
                             .frame(maxWidth: .infinity)
@@ -331,7 +388,7 @@ struct ItemDetailView: View {
             }
 
             if calendarState == .failed {
-                Text("Couldn't add — allow calendar access in Settings.")
+                Text("Couldn't add. Allow calendar access in Settings.")
                     .font(.footnote)
                     .foregroundStyle(.red)
             }

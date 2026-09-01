@@ -2,7 +2,9 @@ import Foundation
 import UserNotifications
 
 /// Local notifications for closing windows: when a saved event enters its
-/// final week, a single quiet nudge fires at 10am. Rescheduled from scratch
+/// final week, a single quiet nudge fires at the same time of day the
+/// weekly digest is set to — one notification moment the two of them
+/// already chose, instead of an arbitrary 10am. Rescheduled from scratch
 /// on every foreground so the set always matches the library.
 enum LastChanceNotifier {
     private static let prefix = "lastchance-"
@@ -32,22 +34,34 @@ enum LastChanceNotifier {
         center.removePendingNotificationRequests(withIdentifiers: stale)
 
         let calendar = Calendar.current
+        let (hour, minute) = await MainActor.run {
+            (DigestScheduleStore.shared.hour, DigestScheduleStore.shared.minute)
+        }
         for event in events {
             guard let end = event.endsOn.flatMap(DayString.date),
                   let weekBefore = calendar.date(byAdding: .day, value: -6, to: end)
             else { continue }
             var comps = calendar.dateComponents([.year, .month, .day], from: weekBefore)
-            comps.hour = 10
+            comps.hour = hour
+            comps.minute = minute
             guard let fire = calendar.date(from: comps), fire > .now else { continue }
 
             let content = UNMutableNotificationContent()
-            content.title = "Last chance"
-            let closes = end.formatted(date: .abbreviated, time: .omitted)
-            content.body = "\u{201c}\(event.title)\u{201d} closes \(closes) — one week left."
+            let day = end.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+            // A one-day gig doesn't "close" — it happens.
+            if event.isOneDay {
+                content.title = "Coming up"
+                content.body = "\u{201c}\(event.title)\u{201d} is on \(day). One week to go."
+            } else {
+                content.title = "Last chance"
+                content.body = "\u{201c}\(event.title)\u{201d} closes \(day). One week left."
+            }
             content.sound = .default
+            // Tapping the nudge opens the event itself, not just the app.
+            content.userInfo = ["itemID": event.id.uuidString]
 
             let trigger = UNCalendarNotificationTrigger(
-                dateMatching: calendar.dateComponents([.year, .month, .day, .hour], from: fire),
+                dateMatching: calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire),
                 repeats: false
             )
             let request = UNNotificationRequest(

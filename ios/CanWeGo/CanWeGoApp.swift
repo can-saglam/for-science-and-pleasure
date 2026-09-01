@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UserNotifications
 
 @main
 struct CanWeGoApp: App {
@@ -36,12 +37,19 @@ struct CanWeGoApp: App {
 /// Sign-in gate: the shared library needs a member session before anything
 /// else. CWG_SKIP_AUTH keeps automated screenshot runs on local demo data.
 private struct RootGate: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var auth = SupabaseAuth.shared
 
     var body: some View {
         if auth.signedIn || ProcessInfo.processInfo.environment["CWG_SKIP_AUTH"] != nil {
             ContentView()
                 .task { PushRegistrar.register() }
+                // Re-register on every foreground: uploading the token is
+                // idempotent, and it self-heals a device whose first upload
+                // failed (offline, expired session…).
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { PushRegistrar.register() }
+                }
         } else {
             AuthView()
         }
@@ -51,13 +59,58 @@ private struct RootGate: View {
 /// Registers this phone for APNs and parks the token in Supabase, so the
 /// other member's saves can ping it. Lives here (not in Support/) because
 /// UIApplication is off-limits inside the share extension.
-final class PushRegistrar: NSObject, UIApplicationDelegate {
-    /// No prompt involved — the alert permission is requested separately
-    /// (LastChanceNotifier); registration itself is silent and idempotent.
+final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// Asks for the alert permission once (without it iOS delivers pushes
+    /// silently to nowhere), then registers for a device token. Safe to call
+    /// on every foreground — both steps are idempotent.
     static func register() {
         guard SupabaseAuth.shared.signedIn else { return }
         guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
-        UIApplication.shared.registerForRemoteNotifications()
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            if settings.authorizationStatus == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+            }
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let userInfo = response.notification.request.content.userInfo
+        if userInfo["digest"] != nil {
+            await MainActor.run {
+                DigestGate.pending = true
+                NotificationCenter.default.post(name: .cwgOpenDigest, object: nil)
+            }
+        } else if let id = (userInfo["itemID"] as? String).flatMap(UUID.init) {
+            // A last-chance nudge: open the event it's about.
+            await MainActor.run {
+                ItemGate.pending = id
+                NotificationCenter.default.post(name: .cwgOpenItem, object: id)
+            }
+        }
+    }
+
+    /// Pushes still show as banners while the app is open.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 
     func application(
@@ -91,6 +144,14 @@ final class PushRegistrar: NSObject, UIApplicationDelegate {
             "token": token,
             "email": email,
         ])
-        _ = try? await URLSession.shared.data(for: request)
+        // One quick retry — a dropped upload here used to mean this phone
+        // silently never received partner pushes.
+        for attempt in 0..<2 {
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) {
+                return
+            }
+            if attempt == 0 { try? await Task.sleep(for: .seconds(2)) }
+        }
     }
 }

@@ -52,18 +52,28 @@ enum SupabaseSync {
         }
         do {
             let cursor = lastSyncAt
+            var pushError: Error?
             if cursor == .distantPast {
                 // First sync after sign-in: the server is canonical (it may
                 // be newer than a seeded store), so pull before pushing
                 // whatever only exists locally.
                 try await pull(context: context)
-                try await push(context: context, since: cursor)
+                do { try await push(context: context, since: cursor) } catch { pushError = error }
             } else {
-                try await push(context: context, since: cursor)
+                // Push and pull fail independently: one stuck local row must
+                // never block receiving the partner's saves.
+                do { try await push(context: context, since: cursor) } catch { pushError = error }
                 try await pull(context: context)
             }
+            // Only a fully clean round advances the cursor — a failed push
+            // leaves its dirty items behind it, retried on the next sync.
+            if let pushError { throw pushError }
+            lastSyncAt = .now
+            SyncStatus.shared.problem = nil
         } catch {
-            // Offline or auth hiccup — the next trigger retries.
+            // Offline is routine and the next trigger retries — but keep
+            // the reason visible in Settings instead of failing silently.
+            SyncStatus.shared.problem = error.localizedDescription
         }
     }
 
@@ -230,7 +240,13 @@ enum SupabaseSync {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw SupabaseAuth.AuthError(message: "Pull failed.")
         }
-        let rows = try decoder.decode([Row].self, from: data)
+        // Row-by-row tolerance: one malformed row (an odd date, a null in a
+        // required field) must not poison the entire pull for everyone.
+        struct Lenient: Decodable {
+            let row: Row?
+            init(from decoder: Decoder) { row = try? Row(from: decoder) }
+        }
+        let rows = try decoder.decode([Lenient].self, from: data).compactMap(\.row)
 
         let locals = try context.fetch(FetchDescriptor<Item>())
         let byID = Dictionary(locals.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -251,7 +267,6 @@ enum SupabaseSync {
             }
         }
         if context.hasChanges { try context.save() }
-        lastSyncAt = .now
     }
 
     private static func apply(_ row: Row, to item: Item) {

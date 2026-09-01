@@ -15,7 +15,6 @@ struct CaptureView: View {
     @State private var cameraOpen = false
     @State private var busy = false
     @State private var errorMessage: String?
-    @State private var clipboardHasLink = false
     @FocusState private var inputFocused: Bool
 
     /// Unsaved model object; only inserted into the store on "Save".
@@ -25,6 +24,9 @@ struct CaptureView: View {
     @State private var manual = false
     @State private var confetti = false
     @State private var saved = false
+    /// Half height for the one-field input stage; the card preview gets the
+    /// full sheet.
+    @State private var detent: PresentationDetent = .medium
 
     private var canParse: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
@@ -71,11 +73,12 @@ struct CaptureView: View {
             }
             .background(AppBackground.sheet.ignoresSafeArea())
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .sensoryFeedback(.success, trigger: saved) { _, new in new }
-        // Pattern detection spots a copied link (even as plain text) without
-        // triggering the paste banner — reading happens only on tap.
+        .onChange(of: draft != nil) { _, hasDraft in
+            withAnimation(.snappy) { detent = hasDraft ? .large : .medium }
+        }
         .onAppear {
             // CWG_BLANK is only set by automated screenshot runs; it jumps
             // straight to the blank-card edit stage.
@@ -85,13 +88,6 @@ struct CaptureView: View {
                 draft = blank
                 editing = true
                 manual = true
-            }
-            UIPasteboard.general.detectPatterns(for: [\.probableWebURL]) { result in
-                if case .success(let patterns) = result, patterns.contains(\.probableWebURL) {
-                    Task { @MainActor in
-                        withAnimation(.snappy) { clipboardHasLink = true }
-                    }
-                }
             }
         }
         .onChange(of: photoItem) { _, item in
@@ -112,104 +108,104 @@ struct CaptureView: View {
 
     @ViewBuilder
     private var inputStage: some View {
-        TextField(
-            "An exhibition, a restaurant, a link…",
-            text: $text,
-            axis: .vertical
-        )
-        .lineLimit(4...8)
-        .textFieldStyle(.plain)
-        .focused($inputFocused)
-        .padding(16)
-        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18, style: .continuous))
+        // One composer, AI-app style: the field on top, attachments in the
+        // middle, and a tool row along the bottom — gallery and camera on
+        // the left, the round send button on the right.
+        VStack(alignment: .leading, spacing: 0) {
+            TextField(
+                "An exhibition, a restaurant, a link…",
+                text: $text,
+                axis: .vertical
+            )
+            .lineLimit(3...8)
+            .textFieldStyle(.plain)
+            .focused($inputFocused)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            if let image = imageJPEG.flatMap(UIImage.init(data:)) {
+                attachedThumbnail(image)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+
+            HStack(spacing: 8) {
+                if busy {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                        ParsingPhrases()
+                    }
+                    .padding(.leading, 6)
+                } else {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        composerIcon("photo")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Attach a photo")
+
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button {
+                            Haptics.tap()
+                            cameraOpen = true
+                        } label: {
+                            composerIcon("camera")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Take a photo")
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    Haptics.tap()
+                    Task { await parse() }
+                } label: {
+                    Group {
+                        if busy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.body.weight(.semibold))
+                        }
+                    }
+                    .frame(width: 34, height: 34)
+                    .foregroundStyle(
+                        canParse && !busy
+                            ? AnyShapeStyle(AppBackground.base)
+                            : AnyShapeStyle(.white.opacity(0.55))
+                    )
+                    .background(
+                        Circle().fill(.white.opacity(canParse && !busy ? 0.92 : 0.16))
+                    )
+                    .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .disabled(busy || !canParse)
+                .accessibilityLabel("Add")
+            }
+            .padding(10)
+            .animation(.snappy, value: busy)
+        }
+        .background(.white.opacity(0.08), in: .rect(cornerRadius: 24, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(
                     .white.opacity(inputFocused ? 0.22 : 0.10),
                     lineWidth: 1
                 )
         )
+        // Anywhere on the composer counts as the field. No auto-focus on
+        // appear: the keyboard would shove the sheet to full height, and the
+        // half-open drawer is the point.
+        .contentShape(.rect(cornerRadius: 24, style: .continuous))
+        .onTapGesture { inputFocused = true }
         .animation(.snappy, value: inputFocused)
-        .task {
-            // Focus requested mid-presentation is silently dropped — wait
-            // for the sheet to settle, claim it, and retry once if lost.
-            try? await Task.sleep(for: .seconds(0.45))
-            guard draft == nil else { return }
-            inputFocused = true
-            try? await Task.sleep(for: .seconds(0.5))
-            if draft == nil && !inputFocused { inputFocused = true }
-        }
-
-        // Copied a link before opening the app? One tap does the rest.
-        if clipboardHasLink && text.isEmpty && imageJPEG == nil {
-            Button {
-                Haptics.tap()
-                let pasted = UIPasteboard.general.url?.absoluteString
-                    ?? UIPasteboard.general.string.flatMap(firstURL(in:))
-                guard let pasted else {
-                    clipboardHasLink = false
-                    return
-                }
-                text = pasted
-                clipboardHasLink = false
-                Task { await parse() }
-            } label: {
-                Label("Add the link you copied", systemImage: "link")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .controlSize(.large)
-            .transition(.opacity)
-        }
-
-        if let image = imageJPEG.flatMap(UIImage.init(data:)) {
-            attachedThumbnail(image)
-        }
-
-        // One row, one height: attach, shoot, add.
-        HStack(spacing: 10) {
-            PhotosPicker(selection: $photoItem, matching: .images) {
-                Image(systemName: "photo")
-                    .font(.body.weight(.medium))
-            }
-            .buttonStyle(.glass)
-
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button {
-                    Haptics.tap()
-                    cameraOpen = true
-                } label: {
-                    Image(systemName: "camera")
-                        .font(.body.weight(.medium))
-                }
-                .buttonStyle(.glass)
-                .accessibilityLabel("Take a photo")
-            }
-
-            Button {
-                Haptics.tap()
-                Task { await parse() }
-            } label: {
-                Group {
-                    if busy {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .tint(.white)
-                            ParsingPhrases()
-                        }
-                    } else {
-                        Text("Add")
-                    }
-                }
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glassProminent)
-            .disabled(busy || !canParse)
-            .animation(.snappy, value: busy)
-        }
-        .controlSize(.large)
 
         if let errorMessage {
             Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -230,49 +226,57 @@ struct CaptureView: View {
                 manual = true
             }
         } label: {
-            Text("or start with a blank card")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Label("Add it manually", systemImage: "square.and.pencil")
+                .font(.subheadline.weight(.medium))
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.plain)
-        .padding(.top, 6)
+        .buttonStyle(.glass)
+        .controlSize(.large)
+        .padding(.top, 2)
     }
 
+    /// Small round tool button in the composer's bottom row.
+    private func composerIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.white.opacity(0.85))
+            .frame(width: 34, height: 34)
+            .background(.white.opacity(0.10), in: .circle)
+            .contentShape(.circle)
+    }
+
+    /// Just the picture with a small × on its corner — the way AI composers
+    /// show attachments. It speaks for itself; no caption needed.
     private func attachedThumbnail(_ image: UIImage) -> some View {
-        HStack(spacing: 12) {
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 56, height: 56)
-                .clipShape(.rect(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(.white.opacity(0.2), lineWidth: 1)
-                )
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Screenshot attached")
-                    .font(.subheadline.weight(.medium))
-                Text("The parser will read it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                withAnimation(.snappy) {
-                    imageJPEG = nil
-                    photoItem = nil
+        Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: 64, height: 64)
+            .clipShape(.rect(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    withAnimation(.snappy) {
+                        imageJPEG = nil
+                        photoItem = nil
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(.black.opacity(0.55), in: .circle)
                 }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .imageScale(.large)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .offset(x: 6, y: -6)
             }
-            .buttonStyle(.plain)
-        }
-        .padding(10)
-        .background(.white.opacity(0.06), in: .rect(cornerRadius: 16, style: .continuous))
-        .transition(.scale(scale: 0.95).combined(with: .opacity))
+            // Keep the × tappable where it pokes past the picture's corner.
+            .padding(.top, 6)
+            .padding(.trailing, 6)
+            .transition(.scale(scale: 0.95).combined(with: .opacity))
     }
 
     // MARK: - Stage 2: preview / edit
@@ -290,10 +294,8 @@ struct CaptureView: View {
             .foregroundStyle(.secondary)
             .padding(.top, 6)
 
-            if let image = draft.imageUrl.flatMap(URL.init(string:)) {
-                ItemImage(url: image, height: 150)
-            }
-
+            // The card already wears its thumbnail — a hero image above it
+            // just showed the same picture twice.
             ItemCard(item: draft)
         }
 
@@ -319,7 +321,10 @@ struct CaptureView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
-            .tint(draft.accentColor)
+            // Neutral white, not the item's extracted accent: murky source
+            // colors (olive posters…) made the main CTA read as disabled.
+            .tint(.white.opacity(0.92))
+            .foregroundStyle(AppBackground.base)
             .controlSize(.large)
             .disabled(saved || draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
             .overlay {
@@ -355,6 +360,8 @@ struct CaptureView: View {
                     }
                     .buttonStyle(.glass)
                 }
+                // Match the save button's height so the stack reads as one set.
+                .controlSize(.large)
             }
         }
         .padding(.top, 4)
@@ -417,6 +424,7 @@ struct CaptureView: View {
     private func save(_ item: Item) {
         item.createdAt = .now
         item.updatedAt = .now
+        item.addedByEmail = SupabaseAuth.shared.email
         context.insert(item)
         try? context.save()
         Task { await SupabaseSync.announceSave(item) }
@@ -480,16 +488,31 @@ private struct CameraPicker: UIViewControllerRepresentable {
 
 extension UIImage {
     /// Same recipe as the web app: cap the long edge at 2000px, JPEG 0.85 —
-    /// keeps phone screenshots under the parse endpoint's limits.
+    /// keeps camera shots and screenshots under the parse endpoint's 4 MB.
+    ///
+    /// Everything is computed in pixels with an explicit 1× renderer scale:
+    /// the default renderer format uses the screen scale (3× on iPhone),
+    /// which silently *tripled* the output and made camera photos too big.
     func compressedForUpload(maxEdge: CGFloat = 2000) -> Data? {
-        let longest = max(size.width, size.height)
-        guard longest > maxEdge else { return jpegData(compressionQuality: 0.85) }
-        let scale = maxEdge / longest
-        let target = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: target)
+        let pixelSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let ratio = min(1, maxEdge / max(pixelSize.width, pixelSize.height))
+        let target = CGSize(width: pixelSize.width * ratio, height: pixelSize.height * ratio)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
         let resized = renderer.image { _ in
             draw(in: CGRect(origin: .zero, size: target))
         }
-        return resized.jpegData(compressionQuality: 0.85)
+
+        // Belt and braces: dense photos can still overshoot at 0.85 —
+        // step the quality down before giving the data back.
+        var quality: CGFloat = 0.85
+        var data = resized.jpegData(compressionQuality: quality)
+        while let bytes = data?.count, bytes > 3_500_000, quality > 0.4 {
+            quality -= 0.15
+            data = resized.jpegData(compressionQuality: quality)
+        }
+        return data
     }
 }

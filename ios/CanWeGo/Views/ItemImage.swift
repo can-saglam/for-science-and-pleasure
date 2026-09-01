@@ -8,7 +8,7 @@ struct ItemImage: View {
     var height: CGFloat = 170
 
     var body: some View {
-        AsyncImage(url: url) { phase in
+        CachedImage(url: url) { phase in
             switch phase {
             case .success(let image):
                 image

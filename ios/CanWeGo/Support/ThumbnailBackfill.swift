@@ -5,23 +5,63 @@ import SwiftData
 /// this quietly fetches each page's og:image and stores it — best effort,
 /// no LLM involved, sites that block bots are simply skipped.
 enum ThumbnailBackfill {
+    /// Pages that yielded nothing (bot walls, no og:image) aren't retried
+    /// on every foreground — that was a fresh round of doomed requests each
+    /// time the app woke. A week gives sites a fair second chance.
+    private static let attemptsKey = "thumbnailBackfillAttempts"
+    private static let retryAfter: TimeInterval = 7 * 24 * 3600
+
     @MainActor
     static func run(context: ModelContext) async {
         guard let all = try? context.fetch(FetchDescriptor<Item>()) else { return }
         let missing = all.filter { $0.imageUrl == nil && $0.url != nil }
         guard !missing.isEmpty else { return }
 
+        let defaults = UserDefaults.standard
+        var attempts = defaults.dictionary(forKey: attemptsKey) as? [String: Date] ?? [:]
+        // Entries for items that got an image (or got deleted) fall away.
+        let liveURLs = Set(missing.compactMap(\.url))
+        attempts = attempts.filter { liveURLs.contains($0.key) }
+
         var found = false
         for item in missing {
-            guard let url = item.url.flatMap(URL.init(string:)),
-                  url.scheme?.hasPrefix("http") == true
+            guard let raw = item.url, let url = URL(string: raw),
+                  url.scheme?.hasPrefix("http") == true,
+                  !isMapsLink(url)
             else { continue }
+            if let tried = attempts[raw], Date.now.timeIntervalSince(tried) < retryAfter {
+                continue
+            }
             if let image = await ogImage(at: url) {
                 item.imageUrl = image
+                // Fresh timestamp or the found image never pushes to the
+                // shared table — it would stay stuck on this one phone.
+                item.updatedAt = .now
                 found = true
+                attempts.removeValue(forKey: raw)
+            } else {
+                attempts[raw] = .now
             }
         }
+        defaults.set(attempts, forKey: attemptsKey)
         if found { try? context.save() }
+    }
+
+    /// Maps pages only ever offer the Google Maps app icon as their
+    /// og:image — a garbage thumbnail. Skip them entirely.
+    private static func isMapsLink(_ url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        if host.contains("maps.google") || host == "maps.app.goo.gl" { return true }
+        if host.hasSuffix("google.com"), url.path().hasPrefix("/maps") { return true }
+        if host == "goo.gl", url.path().hasPrefix("/maps") { return true }
+        return false
+    }
+
+    /// The generic Google Maps app icon once poisoned saves with
+    /// rainbow-streak thumbnails — never store any maps-branded asset.
+    private static func isMapsBrandedImage(_ url: String) -> Bool {
+        url.range(of: #"(?:gstatic|googleusercontent)\.com.*maps|maps_\d+dp\.(?:png|webp)"#,
+                  options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func ogImage(at url: URL) async -> String? {
@@ -52,7 +92,8 @@ enum ThumbnailBackfill {
             else { continue }
             let raw = String(html[range]).replacingOccurrences(of: "&amp;", with: "&")
             // Relative paths resolve against the page they came from.
-            if let absolute = URL(string: raw, relativeTo: url)?.absoluteString {
+            if let absolute = URL(string: raw, relativeTo: url)?.absoluteString,
+               !isMapsBrandedImage(absolute) {
                 return absolute
             }
         }

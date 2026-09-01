@@ -10,5 +10,9 @@ supabase/.temp/
 ios/CanWeGo/Resources/seed-items.json
 ios/**/xcuserdata/
 ios/**/*.xcuserstate
+ios/build/
+
+# Trial-licensed font: not redistributable, so it stays local.
+ios/CanWeGo/Resources/Post-TRIAL-Medium.otf
 
 ios/CanWeGo/Resources/Secrets.plist

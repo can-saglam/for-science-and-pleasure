@@ -22,6 +22,8 @@ final class SupabaseAuth {
 
     struct AuthError: LocalizedError {
         let message: String
+        /// HTTP status when the server itself rejected us; 0 otherwise.
+        var status = 0
         var errorDescription: String? { message }
     }
 
@@ -38,10 +40,15 @@ final class SupabaseAuth {
     }
 
     private init() {
-        if let data = defaults.data(forKey: Self.storeKey),
-           let stored = try? JSONDecoder().decode(Session.self, from: data) {
-            session = stored
-        }
+        session = storedSession()
+    }
+
+    /// The session as persisted right now — which may be newer than the one
+    /// in memory, because the share extension rotates tokens in its own
+    /// process and this one only reads the store at launch.
+    private func storedSession() -> Session? {
+        guard let data = defaults.data(forKey: Self.storeKey) else { return nil }
+        return try? JSONDecoder().decode(Session.self, from: data)
     }
 
     private func persist() {
@@ -65,18 +72,51 @@ final class SupabaseAuth {
         session = nil
     }
 
+    /// One renewal at a time: concurrent callers must share a single
+    /// rotation, because burning the same refresh token twice more than ten
+    /// seconds apart makes Supabase revoke the whole session.
+    @MainActor private var refreshTask: Task<Session, Error>?
+
     /// A usable access token, refreshing when within a minute of expiry.
+    ///
+    /// Renewal is the one fragile spot in the app: Supabase rotates the
+    /// refresh token on every renewal, and replaying a stale one revokes
+    /// the entire session — after which every sync fails silently while
+    /// the UI still says "signed in". Three defenses:
+    ///  1. always prefer the newest persisted session (the share extension
+    ///     rotates tokens behind this process's back),
+    ///  2. serialize renewals so concurrent syncs share one rotation,
+    ///  3. when the server genuinely rejects the renewal, sign out — the
+    ///     login screen is recoverable, a zombie session is not.
+    @MainActor
     func validToken() async throws -> String {
+        if let stored = storedSession(),
+           stored.expiresAt > (session?.expiresAt ?? .distantPast) {
+            session = stored
+        }
         guard let current = session else { throw AuthError(message: "Signed out.") }
         if current.expiresAt > Date.now.addingTimeInterval(60) {
             return current.accessToken
         }
-        let fresh = try await Self.token(
-            grant: "refresh_token",
-            body: ["refresh_token": current.refreshToken]
-        )
-        session = fresh
-        return fresh.accessToken
+
+        let task = refreshTask ?? Task { [token = current.refreshToken] in
+            try await Self.token(grant: "refresh_token", body: ["refresh_token": token])
+        }
+        refreshTask = task
+        do {
+            let fresh = try await task.value
+            refreshTask = nil
+            session = fresh
+            return fresh.accessToken
+        } catch {
+            refreshTask = nil
+            // 4xx means the token family is dead — no retry can save it.
+            // Anything else (offline, 5xx) keeps the session for next time.
+            if let rejection = error as? AuthError, (400...499).contains(rejection.status) {
+                signOut()
+            }
+            throw error
+        }
     }
 
     private static func token(grant: String, body: [String: String]) async throws -> Session {
@@ -112,7 +152,8 @@ final class SupabaseAuth {
             let failure = try? JSONDecoder().decode(Failure.self, from: data)
             throw AuthError(
                 message: failure?.error_description ?? failure?.msg
-                    ?? "Sign-in failed (\(status))."
+                    ?? "Sign-in failed (\(status)).",
+                status: status
             )
         }
         return Session(

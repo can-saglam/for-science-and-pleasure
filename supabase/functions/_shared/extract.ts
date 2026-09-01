@@ -2,6 +2,7 @@ import Anthropic from "npm:@anthropic-ai/sdk";
 import {
   colorFromImageBytes,
   colorFromImageUrl,
+  heroImageFromUrl,
   ogImageFromHtml,
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
@@ -27,6 +28,7 @@ export interface ParsedCard {
   booking_url: string | null;
   starts_on: string | null;
   ends_on: string | null;
+  website: string | null;
 }
 
 const CARD_SCHEMA = {
@@ -52,7 +54,7 @@ const CARD_SCHEMA = {
     category: {
       type: ["string", "null"],
       description:
-        "One of: exhibition, gig, theatre, film, market, festival, food, drink, cafe, talk, workshop, outdoors, other",
+        "One of: exhibition, gig, theatre, film, market, festival, restaurant, drink, cafe, talk, workshop, outdoors, other",
     },
     price: { type: ["string", "null"], description: "e.g. 'Free', '£12', '£8–£15'" },
     booking_url: { type: ["string", "null"] },
@@ -64,10 +66,15 @@ const CARD_SCHEMA = {
       type: ["string", "null"],
       description: "Closing/end date as YYYY-MM-DD; for a one-day event same as starts_on",
     },
+    website: {
+      type: ["string", "null"],
+      description:
+        "Official homepage URL for this exact event or place — the venue's own site, not an aggregator, social media, or maps link; null unless confidently known",
+    },
   },
   required: [
     "kind", "title", "summary", "venue", "area", "address",
-    "category", "price", "booking_url", "starts_on", "ends_on",
+    "category", "price", "booking_url", "starts_on", "ends_on", "website",
   ],
   additionalProperties: false,
 } as const;
@@ -85,6 +92,23 @@ function isFetchable(url: string): boolean {
     return !/(^|\.)instagram\.com$|(^|\.)facebook\.com$|(^|\.)tiktok\.com$/.test(host);
   } catch {
     return false;
+  }
+}
+
+// The model is told never to hand back a maps link as the "official
+// website", but belt-and-braces: fetching one only ever yields the Google
+// Maps app icon, never a photo of the place.
+function isMapsUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (host.includes("maps.google") || host === "maps.app.goo.gl") return true;
+    if (host === "goo.gl" || host.endsWith("google.com")) {
+      return u.pathname.startsWith("/maps") || host.startsWith("maps.");
+    }
+    return false;
+  } catch {
+    return true;
   }
 }
 
@@ -167,11 +191,15 @@ export async function extractCard(
   }
   const pageText = page?.text ?? null;
   // A link we couldn't read: let the model search the web for the real
-  // details instead of guessing from the URL slug alone. Same for maps
-  // links that named a place but carried no pin coordinates.
+  // details instead of guessing from the URL slug alone. Every maps link
+  // searches too — a pin carries no page to read, so the official website
+  // (and with it the thumbnail photo) can only come from search. Bare
+  // typed names and screenshots search for the same reason: without a
+  // page there is no other route to verified details or a venue photo.
   const useWebSearch =
     Boolean(url && !mapsLink && !pageText) ||
-    Boolean(mapsLink && mapsLink.lat === null);
+    Boolean(mapsLink) ||
+    Boolean(!url && (text || input.image_base64));
 
   // Card accent colour: a screenshot beats the page's og:image because it is
   // exactly what the user saw. Best-effort; null is fine.
@@ -186,6 +214,7 @@ export async function extractCard(
     `Today's date is ${today}. Extract a structured card for a London events/places app.`,
     "Resolve relative or partial dates to absolute YYYY-MM-DD dates (if a month is named without a year, assume the next occurrence from today).",
     "If a field is genuinely unknown, use null — do not guess venues, prices, or dates.",
+    "Fill 'website' with the official homepage of the event or place (the venue's own site — never an aggregator, social media, Reddit, or a maps link). If you used web search and its results name or link the official site, use that; leave null only when no official site turns up.",
   ];
   if (text) parts.push(`User's saved input:\n${text}`);
   if (pageText) parts.push(`Fetched page content from ${url}:\n${pageText}`);
@@ -196,8 +225,9 @@ export async function extractCard(
           mapsLink.lat !== null ? ` at ${mapsLink.lat},${mapsLink.lng}` : ""
         }.`,
         "There is no page content to read. Identify this place from its name and your own knowledge of London: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.",
+        "Use the web search tool to find this exact place's official website and fill 'website' — the app fetches its photo from there, so a maps save without it stays pictureless.",
         mapsLink.lat === null
-          ? "The pin coordinates could not be extracted from the link — use the web search tool to find the place's exact street address so it can be geocoded."
+          ? "Also search for the place's exact street address so it can be geocoded — the pin coordinates could not be extracted from the link."
           : "",
         "Only leave fields null if you genuinely don't recognise the place; still never invent prices or dates.",
       ].filter(Boolean).join(" "),
@@ -205,9 +235,14 @@ export async function extractCard(
   } else if (useWebSearch) {
     parts.push(
       [
-        `The page at ${url} could not be read (blocked or unreachable).`,
-        "Use the web search tool to identify this exact event or place — search with the names from the URL slug plus \"London\" — and fill in verified details, especially start/end dates, venue, and price.",
+        url
+          ? `The page at ${url} could not be read (blocked or unreachable).`
+          : "There is no linked page to read.",
+        `Use the web search tool to identify this exact event or place — search with ${
+          url ? "the names from the URL slug" : "the names you can see in the input"
+        } plus "London" — and fill in verified details, especially start/end dates, venue, and price.`,
         input.image_base64 ? "Combine that with what the screenshot shows." : "",
+        "Also find the official website and fill 'website' — the app fetches the thumbnail photo from it.",
         "If search doesn't confirm a detail, leave it null; never guess.",
       ].filter(Boolean).join(" "),
     );
@@ -227,7 +262,10 @@ export async function extractCard(
   content.push({ type: "text", text: parts.join("\n\n") });
 
   const response = await anthropic.messages.create({
-    model: "claude-opus-4-8",
+    // Sonnet whenever search is on: opus + web search blows past the edge
+    // worker's 150s wall-clock budget (same lesson as the locate function).
+    // Plain page reads stay on opus — no search rounds, so they're quick.
+    model: useWebSearch ? "claude-sonnet-5" : "claude-opus-4-8",
     max_tokens: 4096,
     output_config: { format: { type: "json_schema", schema: CARD_SCHEMA } },
     ...(useWebSearch
@@ -264,14 +302,34 @@ export async function extractCard(
     );
   }
 
+  // Thumbnail: the saved page's og:image when we have it; otherwise try the
+  // official website the model named — Reddit tips, blocked ticketing pages,
+  // maps pins, and bare typed names all get a real venue photo this way.
+  let imageUrl = page?.ogImage ?? null;
+  if (
+    !imageUrl && card.website && isFetchable(card.website) &&
+    !isMapsUrl(card.website) && card.website !== url
+  ) {
+    imageUrl = await heroImageFromUrl(card.website);
+  }
+  // The generic Google Maps app icon once poisoned several saves with
+  // rainbow-streak thumbnails — never let any maps-branded asset through.
+  if (imageUrl && /(?:gstatic|googleusercontent)\.com.*maps|maps_\d+dp\.(?:png|webp)/i.test(imageUrl)) {
+    imageUrl = null;
+  }
+
+  let color = await colorPromise.catch(() => null);
+  if (!color && imageUrl) {
+    color = await colorFromImageUrl(imageUrl).catch(() => null);
+  }
+
   return {
     ...card,
     url,
     source: input.image_base64 ? "image" : url ? "link" : "text",
     lat: coords?.lat ?? null,
     lng: coords?.lng ?? null,
-    color: await colorPromise.catch(() => null),
-    // The page's og:image, so clients can show a thumbnail of the save.
-    image_url: page?.ogImage ?? null,
+    color,
+    image_url: imageUrl,
   };
 }

@@ -22,6 +22,12 @@ struct ShareView: View {
     @State private var payloadText: String?
     @State private var payloadImage: Data?
     @State private var extractedURL: String?
+    @State private var editing = false
+
+    private var isPreview: Bool {
+        if case .preview = stage { return true }
+        return false
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,7 +38,8 @@ struct ShareView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .navigationTitle("Can We Go?")
+            // Mirrors the in-app capture flow's preview title.
+            .navigationTitle(isPreview ? "Looks right?" : "Can We Go?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -47,11 +54,11 @@ struct ShareView: View {
             .background(alignment: .top) {
                 if case .preview(let draft) = stage {
                     LinearGradient(
-                        colors: [draft.accentColor.opacity(0.18), .clear],
+                        colors: [draft.accentColor.opacity(0.25), .clear],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: 200)
+                    .frame(height: 220)
                     .ignoresSafeArea()
                 }
             }
@@ -71,31 +78,68 @@ struct ShareView: View {
                 .padding(.vertical, 64)
 
         case .preview(let draft):
-            Label(
-                draft.isPlace ? "Looks like a place" : "Looks like an event",
-                systemImage: draft.isPlace ? "mappin.and.ellipse" : "ticket"
-            )
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
+            // Same shape as the in-app capture preview: the card wears its
+            // own thumbnail, so no hero image; while editing, the form IS
+            // the preview.
+            if !editing {
+                Label(
+                    draft.isPlace ? "Looks like a place" : "Looks like an event",
+                    systemImage: draft.isPlace ? "mappin.and.ellipse" : "ticket"
+                )
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
 
-            if let image = draft.imageUrl.flatMap(URL.init(string:)) {
-                ItemImage(url: image, height: 150)
+                ItemCard(item: draft)
+            } else {
+                ItemForm(item: draft)
+                    .transition(.opacity)
             }
 
-            ItemCard(item: draft)
+            VStack(spacing: 10) {
+                Button {
+                    Haptics.tap()
+                    save(draft)
+                } label: {
+                    Label("Save to library", systemImage: "checkmark")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                // Neutral white, matching the in-app flow — murky extracted
+                // accents made the main CTA read as disabled.
+                .tint(.white.opacity(0.92))
+                .foregroundStyle(AppBackground.base)
+                .controlSize(.large)
+                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
 
-            Button {
-                Haptics.tap()
-                save(draft)
-            } label: {
-                Label("Save to library", systemImage: "checkmark")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppBackground.base)
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 10) {
+                    Button {
+                        Haptics.tap()
+                        withAnimation(.snappy) { editing.toggle() }
+                    } label: {
+                        Label(
+                            editing ? "Show card" : "Edit first",
+                            systemImage: editing ? "rectangle.on.rectangle" : "pencil"
+                        )
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+
+                    // No input stage to fall back to here — the content came
+                    // from the share itself, so discarding closes the sheet.
+                    Button(role: .destructive) {
+                        Haptics.tap()
+                        cancel()
+                    } label: {
+                        Label("Discard", systemImage: "trash")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                }
+                .controlSize(.large)
             }
-            .buttonStyle(.glassProminent)
-            .tint(.white)
-            .controlSize(.large)
             .padding(.top, 4)
 
             Text("It'll appear in the app the next time you open it.")
@@ -182,6 +226,7 @@ struct ShareView: View {
 
     private func parse() async {
         stage = .parsing
+        editing = false
         do {
             let card = try await ParseClient.parse(text: payloadText, imageJPEG: payloadImage)
             let item = Item()
@@ -302,7 +347,7 @@ struct ShareView: View {
             title: String(text.prefix(120))
         )
         pending.url = extractedURL
-        pending.notes = "Saved from the share sheet — needs a tidy-up."
+        pending.notes = "Saved from the share sheet, needs a tidy-up."
         finish(pending)
     }
 

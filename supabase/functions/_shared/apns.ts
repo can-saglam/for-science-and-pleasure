@@ -38,11 +38,19 @@ export async function sendApnsAlert(
   deviceToken: string,
   body: string,
   title = "Can We Go?",
+  data: Record<string, unknown> = {},
 ): Promise<ApnsResult> {
   const payload = JSON.stringify({
     aps: { alert: { title, body }, sound: "default" },
+    ...data,
   });
   const auth = await providerToken();
+
+  // Only prune a token when every host actually *judged* it bad. If a host
+  // rejected our key instead (403 BadEnvironmentKeyInToken from an
+  // environment-restricted key), the token was never evaluated there — a
+  // healthy TestFlight token must not be deleted over our config problem.
+  let judgedBadEverywhere = true;
 
   for (const host of ["api.push.apple.com", "api.sandbox.push.apple.com"]) {
     const response = await fetch(`https://${host}/3/device/${deviceToken}`, {
@@ -60,12 +68,18 @@ export async function sendApnsAlert(
     if (response.status === 410) return "gone";
 
     const text = await response.text();
-    // Wrong environment: production rejects sandbox device tokens as bad,
-    // and environment-restricted keys as 403 — retry the sandbox host.
+    // Wrong environment for this token — try the other host.
     if (response.status === 400 && text.includes("BadDeviceToken")) continue;
-    if (response.status === 403 && text.includes("BadEnvironmentKeyInToken")) continue;
+    if (response.status === 403 && text.includes("BadEnvironmentKeyInToken")) {
+      console.error(
+        "apns key rejected on", host,
+        "— the key is environment-restricted; fix it in the developer portal",
+      );
+      judgedBadEverywhere = false;
+      continue;
+    }
     console.error("apns push failed", host, response.status, text);
     return "failed";
   }
-  return "gone"; // bad token in both environments — safe to prune
+  return judgedBadEverywhere ? "gone" : "failed";
 }

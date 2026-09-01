@@ -139,13 +139,98 @@ export function ogImageFromHtml(html: string, pageUrl: string): string | null {
     const value = found.get(key);
     if (value) {
       try {
-        return new URL(value.trim(), pageUrl).toString();
+        return httpsOnly(new URL(value.trim(), pageUrl).toString());
       } catch {
         continue;
       }
     }
   }
   return null;
+}
+
+// iOS blocks plain-http images (ATS), and Squarespace et al. still emit
+// http:// og:image URLs. Modern CDNs all serve https.
+function httpsOnly(url: string): string {
+  return url.replace(/^http:\/\//i, "https://");
+}
+
+// JSON-LD "image" values come as a string, an array, or an ImageObject.
+// Only an ImageObject's url counts — a WebSite/Organization node's url is
+// just the homepage, not a picture.
+function jsonLdImage(node: unknown): string | null {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) {
+    for (const entry of node) {
+      const found = jsonLdImage(entry);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (node && typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    if (typeof obj["@type"] === "string" && /image/i.test(obj["@type"])) {
+      return jsonLdImage(obj.contentUrl ?? obj.url ?? null);
+    }
+    return jsonLdImage(obj.image ?? obj["@graph"] ?? null);
+  }
+  return null;
+}
+
+/// Best photo for a page: og:image, then JSON-LD, then the largest content
+/// <img> — small venue sites often skip social meta tags entirely.
+export function heroImageFromHtml(html: string, pageUrl: string): string | null {
+  const og = ogImageFromHtml(html, pageUrl);
+  if (og) return og;
+
+  for (const block of html.matchAll(
+    /<script\b[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    try {
+      const image = jsonLdImage(JSON.parse(block[1]));
+      if (image) return httpsOnly(new URL(image, pageUrl).toString());
+    } catch {
+      // malformed block — keep looking
+    }
+  }
+
+  let best: { src: string; width: number } | null = null;
+  for (const tag of html.matchAll(/<img\b[^>]*>/gi)) {
+    const attrs = tag[0];
+    const src = attrs.match(/src\s*=\s*["']([^"']+)["']/i)?.[1];
+    // Page chrome never makes a good thumbnail.
+    if (!src || /logo|icon|sprite|avatar|badge|\.svg/i.test(src)) continue;
+    const width = Number(
+      attrs.match(/\bwidth\s*=\s*["']?(\d+)/i)?.[1] ??
+        src.match(/[?&]width=(\d+)/i)?.[1] ?? 0,
+    );
+    if (width < 500) continue;
+    if (!best || width > best.width) best = { src, width };
+  }
+  if (best) {
+    try {
+      return httpsOnly(new URL(best.src.replace(/&amp;/g, "&"), pageUrl).toString());
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/// Fetch a page and pull its best photo — for sites the model named when
+/// the saved link itself had none.
+export async function heroImageFromUrl(pageUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(pageUrl, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(10_000),
+      headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
+    });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 600_000);
+    return heroImageFromHtml(html, res.url || pageUrl);
+  } catch {
+    return null;
+  }
 }
 
 export async function colorFromPageUrl(pageUrl: string): Promise<string | null> {

@@ -1,8 +1,8 @@
 # Can We Go? — iOS
 
-Native SwiftUI app. Phase 1: SwiftData models with CloudKit sync, the four
-tabs (This Week / Places / Library / We Did Go), item detail, and a one-off
-import from the web app's Supabase data.
+Native SwiftUI app. SwiftData models synced with Supabase, two tabs
+(Events / Places — urgency sections up top, the Been/Missed journal at the
+bottom), item detail, and a one-off import from the web app's Supabase data.
 
 ## First run
 

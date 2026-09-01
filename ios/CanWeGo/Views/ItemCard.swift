@@ -8,9 +8,13 @@ struct ItemCard: View {
     let item: Item
     /// Journal-density variant for We Did Go.
     var compact = false
+    /// Context-specific meta line (the digest's "Closes Fri 29 Aug · venue")
+    /// — replaces both the subtitle and the countdown label.
+    var meta: String? = nil
 
     private var subtitle: String {
-        ([cleanVenue, cleanArea, distance].compactMap(\.self))
+        if let meta { return meta }
+        return ([cleanVenue, cleanArea, distance].compactMap(\.self))
             .joined(separator: " · ")
     }
 
@@ -61,20 +65,27 @@ struct ItemCard: View {
         return String(format: "%.1f km", meters / 1000)
     }
 
-    /// Quiet nudges for incomplete saves — only on active items.
+    /// Quiet nudge for undated events — the one gap that actually hides an
+    /// item from the calendar and digest. A missing pin is often deliberate
+    /// (festivals across town), so it gets no badge.
     private var hints: [String] {
-        guard !item.isDone, !compact else { return [] }
-        var h: [String] = []
+        guard !item.isDone, !compact, meta == nil else { return [] }
         if item.isEvent && item.startsOn == nil && item.endsOn == nil {
-            h.append("needs a date")
+            return ["needs a date"]
         }
-        if item.lat == nil || item.lng == nil {
-            h.append("no location")
-        }
-        return h
+        return []
     }
 
     private var radius: CGFloat { compact ? 14 : 18 }
+
+    /// Settings can switch thumbnails off, restoring the pre-thumbnail card.
+    @AppStorage("cardThumbnails", store: UserDefaults(suiteName: SharedInbox.groupID))
+    private var thumbnailsOn = true
+
+    private var imageURL: URL? {
+        guard thumbnailsOn, !compact else { return nil }
+        return item.imageUrl.flatMap(URL.init(string:))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 3 : 5) {
@@ -83,12 +94,13 @@ struct ItemCard: View {
                     .font(compact ? .subheadline.weight(.medium) : .body.weight(.semibold))
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
-                Spacer(minLength: 6)
-                if let label = item.timeLabel {
-                    Text(label)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(item.timeLabelIsUrgent ? .red : Color.secondary)
-                        .lineLimit(1)
+                // With a thumbnail bleeding in from the right, the countdown
+                // moves down beside the subtitle so titles keep their room.
+                if imageURL == nil && meta == nil {
+                    Spacer(minLength: 6)
+                    if let label = item.timeLabel {
+                        timeText(label)
+                    }
                 }
             }
             if !subtitle.isEmpty {
@@ -96,6 +108,10 @@ struct ItemCard: View {
                     .font(compact ? .caption : .subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            if imageURL != nil, meta == nil, let label = item.timeLabel {
+                timeText(label)
+                    .padding(.top, 1)
             }
             if !hints.isEmpty {
                 Text(hints.joined(separator: " · "))
@@ -105,13 +121,57 @@ struct ItemCard: View {
         }
         .padding(.horizontal, compact ? 14 : 16)
         .padding(.vertical, compact ? 10 : 13)
+        // Keep text clear of the visible part of the photo.
+        .padding(.trailing, imageURL == nil ? 0 : 64)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .trailing) {
+            if let imageURL {
+                bleedImage(imageURL)
+            }
+        }
         .background(cardBackground, in: .rect(cornerRadius: radius, style: .continuous))
+        .clipShape(.rect(cornerRadius: radius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(cardBorder, lineWidth: 1)
         )
         .contentShape(.rect(cornerRadius: radius, style: .continuous))
+    }
+
+    /// Urgent labels wear a quiet rose badge — folded toward the card color
+    /// so it belongs to the theme, instead of a raw system red.
+    @ViewBuilder
+    private func timeText(_ label: String) -> some View {
+        if item.timeLabelIsUrgent {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.red.mix(with: .white, by: 0.65))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Color.red.mix(with: cardBackground, by: 0.55),
+                    in: .capsule
+                )
+        } else {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    /// The source photo bleeding in from the card's right edge, dissolving
+    /// into the card color so text never fights it. Dead URLs show nothing.
+    ///
+    /// Three layers make the melt: a blurred copy of the photo underneath
+    /// (so sharp poster edges soften before they fade instead of ghosting
+    /// through), the sharp photo fading in over it, and an eased wash of
+    /// the card color on top. The blur is baked once per image off the main
+    /// thread — a live `.blur` on every card was the priciest GPU pass in
+    /// every scrolled frame.
+    private func bleedImage(_ url: URL) -> some View {
+        MeltImage(url: url, cardBackground: cardBackground)
     }
 
     // Cards live on the theme base: fold the accent into it and lift it
@@ -128,6 +188,94 @@ struct ItemCard: View {
     }
 }
 
+/// The card's photo melt, from pre-baked pixels: the blurred underlay comes
+/// out of `ImageStore` already rendered, so a scrolled frame composites four
+/// cheap layers instead of running a Gaussian blur per card.
+private struct MeltImage: View {
+    let url: URL
+    let cardBackground: Color
+
+    @State private var sharp: UIImage?
+    @State private var blurred: UIImage?
+    /// Which URL the pair belongs to — rows get recycled with new URLs.
+    @State private var loaded: URL?
+
+    init(url: URL, cardBackground: Color) {
+        self.url = url
+        self.cardBackground = cardBackground
+        // Memory-only lookups: cold-launch prewarm makes these land without
+        // a main-thread disk read.
+        if let hit = ImageStore.cached(url) {
+            _sharp = State(initialValue: hit)
+            _blurred = State(initialValue: ImageStore.cachedMelt(url) ?? hit)
+            _loaded = State(initialValue: url)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            if let sharp, let blurred {
+                filled(Image(uiImage: blurred))
+                filled(Image(uiImage: sharp))
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0.25),
+                                .init(color: .black, location: 0.8),
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                // Multiply pulls bright content toward the card color in
+                // the melt zone — white posters tint instead of glaring —
+                // and leaves the photo untouched at the right edge.
+                LinearGradient(
+                    stops: [
+                        .init(color: cardBackground, location: 0),
+                        .init(color: cardBackground.mix(with: .white, by: 0.5), location: 0.45),
+                        .init(color: .white, location: 0.95),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .blendMode(.multiply)
+                LinearGradient(
+                    stops: [
+                        .init(color: cardBackground, location: 0),
+                        .init(color: cardBackground.opacity(0.95), location: 0.15),
+                        .init(color: cardBackground.opacity(0.75), location: 0.3),
+                        .init(color: cardBackground.opacity(0.45), location: 0.45),
+                        .init(color: cardBackground.opacity(0.18), location: 0.6),
+                        .init(color: cardBackground.opacity(0.05), location: 0.75),
+                        .init(color: cardBackground.opacity(0), location: 0.9),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+        }
+        .compositingGroup()
+        .frame(width: 150)
+        .clipped()
+        .task(id: url) {
+            guard loaded != url else { return }
+            guard let pair = await ImageStore.meltPair(url) else { return }
+            sharp = pair.sharp
+            blurred = pair.blurred
+            loaded = url
+        }
+    }
+
+    private func filled(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFill()
+            .frame(width: 150)
+            .clipped()
+    }
+}
+
 /// Things-style tactility: cards settle slightly under the finger,
 /// with a soft haptic tick on touch-down.
 struct PressableCardStyle: ButtonStyle {
@@ -139,61 +287,7 @@ struct PressableCardStyle: ButtonStyle {
     }
 }
 
-/// When the surrounding list was born — rows only cascade during its first
-/// moments, so cells recycled while scrolling back up don't replay the fade.
-private struct CascadeStartKey: EnvironmentKey {
-    static let defaultValue = Date.distantPast
-}
-
-extension EnvironmentValues {
-    var cascadeStart: Date {
-        get { self[CascadeStartKey.self] }
-        set { self[CascadeStartKey.self] = newValue }
-    }
-}
-
-private struct CascadeRoot: ViewModifier {
-    @State private var born = Date()
-
-    func body(content: Content) -> some View {
-        content.environment(\.cascadeStart, born)
-    }
-}
-
-/// Staggered fade-up as cards arrive — capped so deep scrolling stays snappy.
-private struct CascadeIn: ViewModifier {
-    let index: Int
-    @Environment(\.cascadeStart) private var start
-    @State private var shown = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 14)
-            .onAppear {
-                guard !shown else { return }
-                // Past the list's opening beat, just appear in place.
-                guard Date().timeIntervalSince(start) < 1.2 else {
-                    shown = true
-                    return
-                }
-                withAnimation(.spring(duration: 0.45).delay(Double(min(index, 10)) * 0.05)) {
-                    shown = true
-                }
-            }
-    }
-}
-
 extension View {
-    func cascadeIn(_ index: Int) -> some View {
-        modifier(CascadeIn(index: index))
-    }
-
-    /// Mark the list whose first render drives the cascade timing.
-    func cascadeRoot() -> some View {
-        modifier(CascadeRoot())
-    }
-
     /// Card rows inside a plain List: invisible chrome, our own spacing.
     func cardListRow() -> some View {
         self
@@ -207,7 +301,6 @@ extension View {
 /// delete, long-press for quick actions.
 struct ItemCardRow: View {
     let item: Item
-    let index: Int
     var compact = false
     let onOpen: () -> Void
 
@@ -224,9 +317,11 @@ struct ItemCardRow: View {
             ItemCard(item: item, compact: compact)
         }
         .buttonStyle(PressableCardStyle())
-        .cascadeIn(index)
         .cardListRow()
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+        // No full swipe: a firm scroll-adjacent drag was enough to silently
+        // mark an event done (see: Carnival, 7:13am, nobody remembers doing
+        // it). The swipe now only reveals the button; done takes a real tap.
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if item.isDone {
                 Button {
                     Haptics.tap()
@@ -234,15 +329,16 @@ struct ItemCardRow: View {
                 } label: {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
-                .tint(.indigo)
+                .tint(AppBackground.swipePutBack)
             } else {
                 Button {
                     celebrate += 1
                     item.markDone()
+                    UndoBin.shared.stashDone(item)
                 } label: {
                     Label("We did go!", systemImage: "checkmark")
                 }
-                .tint(.green)
+                .tint(AppBackground.swipeDone)
             }
         }
         .swipeActions(edge: .trailing) {
@@ -251,6 +347,7 @@ struct ItemCardRow: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(AppBackground.swipeDelete)
         }
         .contextMenu {
             if item.isDone {
@@ -264,6 +361,7 @@ struct ItemCardRow: View {
                 Button {
                     celebrate += 1
                     item.markDone()
+                    UndoBin.shared.stashDone(item)
                 } label: {
                     Label("We did go!", systemImage: "checkmark")
                 }
