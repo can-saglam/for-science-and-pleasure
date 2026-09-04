@@ -13,6 +13,14 @@ final class SyncStatus {
     /// broken sync is never invisible.
     var problem: String?
 
+    /// The server says this build is too old to sync (`app_config.min_build`).
+    /// While true, the app shows the update screen and every write path
+    /// stays offline — a stale client must never push stale rows.
+    var updateRequired = false
+    /// Where the update button goes: TestFlight during beta, the App Store
+    /// listing later. Server-provided so the switch needs no release.
+    var storeURL: URL?
+
     /// False only before the very first successful pull on this install.
     var hasSyncedOnce: Bool { lastSyncedAt != nil }
 

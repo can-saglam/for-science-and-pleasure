@@ -50,6 +50,8 @@ enum SupabaseSync {
             running = false
             SyncStatus.shared.syncing = false
         }
+        // The kill switch: an old build never gets as far as a push.
+        guard await buildIsCurrent() else { return }
         do {
             let cursor = lastSyncAt
             var pushError: Error?
@@ -74,6 +76,42 @@ enum SupabaseSync {
             // Offline is routine and the next trigger retries — but keep
             // the reason visible in Settings instead of failing silently.
             SyncStatus.shared.problem = error.localizedDescription
+        }
+    }
+
+    // MARK: - Kill switch
+
+    /// This build's number, as App Store Connect counts it.
+    static let buildNumber: Int =
+        Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
+
+    private struct AppConfig: Decodable {
+        var min_build: Int
+        var store_url: String
+    }
+
+    /// Reads `app_config.min_build` and compares it to this build. Below it,
+    /// the app flips to the update screen and this returns false — the
+    /// caller must not touch the server. Fails *open*: if the row can't be
+    /// fetched (offline, transient error) the sync proceeds as normal; the
+    /// switch is for dormant clients waking up, not for a flaky connection.
+    private static func buildIsCurrent() async -> Bool {
+        do {
+            var request = try await request(path: "rest/v1/app_config", query: [
+                .init(name: "select", value: "min_build,store_url"),
+                .init(name: "limit", value: "1"),
+            ])
+            request.httpMethod = "GET"
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let config = try JSONDecoder().decode([AppConfig].self, from: data).first
+            else { return true }
+            SyncStatus.shared.storeURL = URL(string: config.store_url)
+            let current = buildNumber >= config.min_build
+            SyncStatus.shared.updateRequired = !current
+            return current
+        } catch {
+            return true
         }
     }
 
@@ -184,7 +222,7 @@ enum SupabaseSync {
     /// A brand-new save: put it on the server right away, then ask
     /// notify-save to ping the other member's devices (never our own).
     static func announceSave(_ item: Item) async {
-        guard SupabaseAuth.shared.signedIn else { return }
+        guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
         do {
             try await upsert(rows: [row(from: item)])
             var request = try await request(path: "functions/v1/notify-save")
@@ -298,7 +336,7 @@ enum SupabaseSync {
     /// Mirrors the web's soft delete; `undelete` covers the 5-second Undo.
     static func setDeleted(_ id: UUID, _ deleted: Bool) {
         Task {
-            guard SupabaseAuth.shared.signedIn else { return }
+            guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
             var request = try await request(
                 path: "rest/v1/items",
                 query: [.init(name: "id", value: "eq.\(id.uuidString.lowercased())")]

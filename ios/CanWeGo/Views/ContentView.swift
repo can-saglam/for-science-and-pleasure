@@ -54,6 +54,15 @@ struct ContentView: View {
         .sheet(isPresented: $digestOpen) {
             WeeklyDigestSheet()
         }
+        // The kill switch. Server-driven; CWG_FORCE_UPDATE only exists so
+        // automated runs can photograph the screen without touching the
+        // real min_build.
+        .fullScreenCover(isPresented: Binding(
+            get: { syncStatus.updateRequired || ProcessInfo.processInfo.environment["CWG_FORCE_UPDATE"] != nil },
+            set: { _ in }
+        )) {
+            UpdateRequiredView()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .cwgOpenDigest)) { _ in
             DigestGate.pending = false
             digestOpen = true
