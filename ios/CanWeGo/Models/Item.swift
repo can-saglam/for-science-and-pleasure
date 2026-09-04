@@ -158,7 +158,8 @@ extension Item {
             return "Ended"
         case .lastChance:
             guard let d = daysUntilClose else { return nil }
-            if d == 0 { return "Last Day" }
+            // A gig has no "last day" — it just happens today.
+            if d == 0 { return isOneDay ? "Today" : "Last Day" }
             return "\(d) day\(d == 1 ? "" : "s") left"
         case .now:
             if let d = daysUntilClose { return "\(Item.friendlySpan(d)) left" }
