@@ -306,6 +306,8 @@ struct ItemCardRow: View {
 
     @Environment(\.modelContext) private var context
     @State private var celebrate = 0
+    /// A rendered postcard of this save, on its way to the share sheet.
+    @State private var shareCard: ShareCard.Rendered?
 
     var body: some View {
         // Haptic fires with the action, not the press state — quick taps in
@@ -366,15 +368,21 @@ struct ItemCardRow: View {
                     Label("We did go!", systemImage: "checkmark")
                 }
             }
-            if let maps = item.googleMapsURL {
+            if let maps = item.directionsURL {
                 Link(destination: maps) {
-                    Label("Open in Google Maps", systemImage: "map")
+                    Label("Open in \(TransportApp.current.name)", systemImage: "map")
                 }
             }
             if let url = item.url.flatMap(URL.init(string:)) {
                 Link(destination: url) {
                     Label("Open source", systemImage: "arrow.up.right")
                 }
+            }
+            Button {
+                Haptics.tap()
+                Task { shareCard = await ShareCard.render(item) }
+            } label: {
+                Label("Share as image", systemImage: "square.and.arrow.up")
             }
             Divider()
             Button(role: .destructive) {
@@ -384,6 +392,10 @@ struct ItemCardRow: View {
             }
         }
         .sensoryFeedback(.success, trigger: celebrate)
+        .sheet(item: $shareCard) { card in
+            ActivitySheet(items: [card.image])
+                .presentationDetents([.medium, .large])
+        }
     }
 
     /// Deletion always leaves a five-second Undo behind (toast in ContentView).

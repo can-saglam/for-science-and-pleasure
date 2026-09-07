@@ -19,6 +19,9 @@ struct SettingsView: View {
     /// Photos bleeding into list cards — same key ItemCard reads.
     @AppStorage("cardThumbnails", store: UserDefaults(suiteName: SharedInbox.groupID))
     private var cardThumbnails = true
+    /// Which maps app gets the directions taps — same key `TransportApp` reads.
+    @AppStorage(TransportApp.key, store: UserDefaults(suiteName: SharedInbox.groupID))
+    private var transportApp = TransportApp.google.rawValue
 
     private var unlocated: [Item] {
         items.filter { $0.lat == nil && !$0.isDone }
@@ -119,6 +122,14 @@ struct SettingsView: View {
                     }
                     .tint(AppBackground.accent)
                     .sensoryFeedback(.selection, trigger: cardThumbnails)
+                    Picker(selection: $transportApp) {
+                        ForEach(TransportApp.allCases) { app in
+                            Text(app.name).tag(app.rawValue)
+                        }
+                    } label: {
+                        row("Directions in", icon: "map.fill")
+                    }
+                    .sensoryFeedback(.selection, trigger: transportApp)
                 }
                 .listRowBackground(Self.rowBackground)
 

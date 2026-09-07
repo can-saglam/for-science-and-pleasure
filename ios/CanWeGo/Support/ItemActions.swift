@@ -22,13 +22,23 @@ extension Item {
         return CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
 
+    /// "Venue, Area, London" — what a maps app should search for. Nil when
+    /// the save names no place (an event with only a title).
+    var placeQuery: String? {
+        guard let place = venue ?? (kind == Item.Kind.place ? title : nil) else { return nil }
+        return ([place, area].compactMap(\.self) + ["London"]).joined(separator: ", ")
+    }
+
+    /// Wherever the user chose to get directions (Settings → Directions).
+    var directionsURL: URL? { TransportApp.current.url(for: self) }
+
     /// Google Maps link, built on the fly — the app opens it directly if
     /// installed, the web version otherwise. A named search gets the full
     /// place card (hours, photos); coordinates are the fallback pin.
     var googleMapsURL: URL? {
         let query: String
-        if let place = venue ?? (kind == Item.Kind.place ? title : nil) {
-            query = ([place, area].compactMap(\.self) + ["London"]).joined(separator: ", ")
+        if let placeQuery {
+            query = placeQuery
         } else if let coordinate {
             query = "\(coordinate.latitude),\(coordinate.longitude)"
         } else {

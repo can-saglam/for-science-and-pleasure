@@ -497,8 +497,8 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] Search includes the journal
 - [x] Gone-item states for notification/widget/Spotlight taps
 - [ ] Accessibility pass (Dynamic Type, VoiceOver, Reduce Motion)
-- [ ] Pull-to-refresh; per-category empty states; share card as image
-- [ ] Transport choice in Settings (Google Maps default; Apple Maps / Citymapper)
+- [x] Pull-to-refresh; per-category empty states; share card as image
+- [x] Transport choice in Settings (Google Maps default; Apple Maps / Citymapper)
 - [x] Ended-event save → offer We Did Go; parse retry + "Try again"; dead-image fallback
 - [ ] Social links: TikTok oEmbed; Instagram embed → on-device fetch → ask; short-link resolution
 

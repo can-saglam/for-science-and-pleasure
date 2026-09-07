@@ -292,7 +292,7 @@ struct ItemDetailView: View {
             .frame(height: 190)
             .allowsHitTesting(false)
             .overlay(alignment: .bottomTrailing) {
-                Label("Open in Google Maps", systemImage: "arrow.up.right")
+                Label("Open in \(TransportApp.current.name)", systemImage: "arrow.up.right")
                     .font(.caption.weight(.medium))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -306,7 +306,7 @@ struct ItemDetailView: View {
             )
             .contentShape(.rect(cornerRadius: 18, style: .continuous))
             .onTapGesture {
-                if let maps = item.googleMapsURL {
+                if let maps = item.directionsURL {
                     Haptics.tap()
                     openURL(maps)
                 }
