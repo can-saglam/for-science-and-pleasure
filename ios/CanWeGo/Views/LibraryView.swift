@@ -339,9 +339,6 @@ struct LibraryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    SettingsButton()
-                }
-                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Haptics.tap()
                         withAnimation(.snappy) {
@@ -352,6 +349,11 @@ struct LibraryView: View {
                         headerIcon(mode.showMap ? "list.bullet" : "map")
                     }
                     .accessibilityLabel(mode.showMap ? "Show list" : "Show map")
+                }
+                // Settings holds the far end: the gear is the one control
+                // that isn't about the list in front of you.
+                ToolbarItem(placement: .topBarTrailing) {
+                    SettingsButton()
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {

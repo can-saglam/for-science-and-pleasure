@@ -30,9 +30,12 @@ enum ThumbnailBackfill {
 
         var found: [(id: UUID, image: String)] = []
         for item in missing {
+            // Social posts' og:image is a signed CDN URL that expires within
+            // days — never a thumbnail. Those saves get their picture from
+            // the venue's own site at parse time, or stay on the colour block.
             guard let raw = item.url, let url = URL(string: raw),
                   url.scheme?.hasPrefix("http") == true,
-                  !isMapsLink(url)
+                  !isMapsLink(url), !SocialPrefetch.isSocial(url)
             else { continue }
             if let tried = attempts[raw], Date.now.timeIntervalSince(tried) < retryAfter {
                 continue
