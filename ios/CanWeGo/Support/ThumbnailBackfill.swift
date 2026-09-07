@@ -3,7 +3,10 @@ import SwiftData
 
 /// Items saved before thumbnails existed have a URL but no image. On launch
 /// this quietly fetches each page's og:image and stores it — best effort,
-/// no LLM involved, sites that block bots are simply skipped.
+/// no LLM involved, sites that block bots are simply skipped. A thumbnail
+/// whose URL has since died (`ImageStore.isDead`) counts as missing too, so
+/// a venue that reshuffles its CDN gets a fresh picture rather than a
+/// permanent colour block.
 enum ThumbnailBackfill {
     /// Pages that yielded nothing (bot walls, no og:image) aren't retried
     /// on every foreground — that was a fresh round of doomed requests each
@@ -14,7 +17,9 @@ enum ThumbnailBackfill {
     @MainActor
     static func run(context: ModelContext) async {
         guard let all = try? context.fetch(FetchDescriptor<Item>()) else { return }
-        let missing = all.filter { $0.imageUrl == nil && $0.url != nil }
+        let missing = all.filter { item in
+            item.url != nil && (item.imageUrl.map(ImageStore.isDead) ?? true)
+        }
         guard !missing.isEmpty else { return }
 
         let defaults = UserDefaults.standard
@@ -32,7 +37,9 @@ enum ThumbnailBackfill {
             if let tried = attempts[raw], Date.now.timeIntervalSince(tried) < retryAfter {
                 continue
             }
-            if let image = await ogImage(at: url) {
+            // The page still pointing at the dead picture counts as nothing
+            // found — try again next week, not next foreground.
+            if let image = await ogImage(at: url), image != item.imageUrl {
                 item.imageUrl = image
                 found.append((item.id, image))
                 attempts.removeValue(forKey: raw)

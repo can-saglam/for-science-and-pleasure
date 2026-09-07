@@ -25,13 +25,13 @@ enum ParseClient {
 
     enum ParseError: LocalizedError {
         case notConfigured
-        case server(String)
+        case server(String, status: Int)
 
         var errorDescription: String? {
             switch self {
             case .notConfigured:
                 return "Missing Secrets.plist. See ios/README.md."
-            case .server(let message):
+            case .server(let message, _):
                 return message
             }
         }
@@ -55,7 +55,34 @@ enum ParseClient {
 
     static var isConfigured: Bool { Secrets.shared != nil }
 
+    /// One silent retry on a transient failure — a dropped connection, a
+    /// gateway timeout while the web-search fallback runs long — before the
+    /// user is asked to try again. Anything that reads like a real answer
+    /// ("couldn't find a venue", 4xx) surfaces straight away.
     static func parse(text: String?, imageJPEG: Data?) async throws -> Card {
+        do {
+            return try await parseOnce(text: text, imageJPEG: imageJPEG)
+        } catch let error where isTransient(error) {
+            try? await Task.sleep(for: .seconds(1.5))
+            return try await parseOnce(text: text, imageJPEG: imageJPEG)
+        }
+    }
+
+    private static func isTransient(_ error: Error) -> Bool {
+        if case ParseError.server(_, let status) = error {
+            return status >= 500
+        }
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost,
+             .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func parseOnce(text: String?, imageJPEG: Data?) async throws -> Card {
         guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
 
         var body: [String: String] = [:]
@@ -76,7 +103,7 @@ enum ParseClient {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(message ?? "Couldn't read that one (\(status)).")
+            throw ParseError.server(message ?? "Couldn't read that one (\(status)).", status: status)
         }
         struct Envelope: Decodable { let card: Card }
         return try JSONDecoder().decode(Envelope.self, from: data).card
@@ -132,7 +159,7 @@ enum ParseClient {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(message ?? "Locate failed (\(status)).")
+            throw ParseError.server(message ?? "Locate failed (\(status)).", status: status)
         }
         struct Envelope: Decodable { let proposals: [LocationProposal] }
         return try JSONDecoder().decode(Envelope.self, from: data).proposals

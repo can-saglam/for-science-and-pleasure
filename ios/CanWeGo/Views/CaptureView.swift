@@ -225,12 +225,25 @@ struct CaptureView: View {
         .animation(.snappy, value: inputFocused)
 
         if let errorMessage {
-            Label(errorMessage, systemImage: "exclamationmark.triangle")
-                .font(.footnote)
-                .foregroundStyle(.orange)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+            // The input is still in the field above — nothing is lost — so
+            // the way forward is one tap, not a re-paste.
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Label(errorMessage, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if canParse {
+                    Button("Try again") {
+                        Haptics.tap()
+                        Task { await parse() }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                }
+            }
+            .padding(12)
+            .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
 
         if let existing {
@@ -336,6 +349,34 @@ struct CaptureView: View {
         // "save anyway".
         if !saved, !saveAnyway, let twin = duplicate(ofCard: draft) {
             duplicateNotice(twin, saveAnyway: nil)
+        }
+
+        // An event that's already happened would land straight in "Ended".
+        // Chances are they're logging a night out — offer the journal.
+        if !saved, draft.isEvent, draft.timeBucket == .past,
+           let day = (draft.endsOn ?? draft.startsOn).flatMap(DayString.date) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(
+                    "This happened on \(day.formatted(.dateTime.day().month(.abbreviated))). Add it to We Did Go instead?",
+                    systemImage: "checkmark.seal"
+                )
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+
+                Button {
+                    draft.status = Item.Status.done
+                    save(draft)
+                } label: {
+                    Label("We did go!", systemImage: "checkmark.seal.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
 
         VStack(spacing: 10) {

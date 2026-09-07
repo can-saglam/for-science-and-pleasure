@@ -499,7 +499,7 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [ ] Accessibility pass (Dynamic Type, VoiceOver, Reduce Motion)
 - [ ] Pull-to-refresh; per-category empty states; share card as image
 - [ ] Transport choice in Settings (Google Maps default; Apple Maps / Citymapper)
-- [ ] Ended-event save → offer We Did Go; parse retry + "Try again"; dead-image fallback
+- [x] Ended-event save → offer We Did Go; parse retry + "Try again"; dead-image fallback
 - [ ] Social links: TikTok oEmbed; Instagram embed → on-device fetch → ask; short-link resolution
 
 ### Phase 1a — additive

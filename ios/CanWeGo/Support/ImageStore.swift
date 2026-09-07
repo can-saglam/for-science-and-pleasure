@@ -110,11 +110,17 @@ enum ImageStore {
             if let data = try? Data(contentsOf: file(for: url)) {
                 return await decoded(data, maxSide: variant.maxSide)
             }
-            guard let (data, response) = try? await URLSession.shared.data(from: url),
-                  (response as? HTTPURLResponse).map({ (200 ..< 300).contains($0.statusCode) }) ?? true,
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+            let status = (response as? HTTPURLResponse)?.statusCode
+            if let status, [404, 410].contains(status) {
+                setDead(url, true)
+                return nil
+            }
+            guard status.map({ (200 ..< 300).contains($0) }) ?? true,
                   let image = await decoded(data, maxSide: variant.maxSide)
             else { return nil }
             try? data.write(to: file(for: url), options: .atomic)
+            setDead(url, false)
             return image
         }.value
         if let image {
@@ -172,6 +178,27 @@ enum ImageStore {
             height: image.size.height * image.scale * factor
         )
         return await image.byPreparingThumbnail(ofSize: target) ?? image
+    }
+
+    // MARK: - Dead images
+
+    /// Thumbnail URLs the server has definitively taken down (404/410).
+    /// The views already fall back to the colour block on any failure; this
+    /// list exists for `ThumbnailBackfill`, which treats a dead thumbnail
+    /// like a missing one and asks the page for a fresh og:image. A network
+    /// blip never lands here — only a real "gone" answer.
+    private static let deadKey = "deadImageURLs"
+
+    static func isDead(_ url: String) -> Bool {
+        (UserDefaults.standard.stringArray(forKey: deadKey) ?? []).contains(url)
+    }
+
+    private static func setDead(_ url: URL, _ dead: Bool) {
+        var set = Set(UserDefaults.standard.stringArray(forKey: deadKey) ?? [])
+        let raw = url.absoluteString
+        guard set.contains(raw) != dead else { return }
+        if dead { set.insert(raw) } else { set.remove(raw) }
+        UserDefaults.standard.set(Array(set), forKey: deadKey)
     }
 
     /// One light prune per launch: once the cache passes ~200 MB, the
