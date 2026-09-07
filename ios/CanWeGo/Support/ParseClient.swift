@@ -60,11 +60,14 @@ enum ParseClient {
     /// user is asked to try again. Anything that reads like a real answer
     /// ("couldn't find a venue", 4xx) surfaces straight away.
     static func parse(text: String?, imageJPEG: Data?) async throws -> Card {
+        // Social links pick up their caption and cover on-device first —
+        // the phone can read what the server's IP is often walled from.
+        let input = await SocialPrefetch.enrich(text: text, imageJPEG: imageJPEG)
         do {
-            return try await parseOnce(text: text, imageJPEG: imageJPEG)
+            return try await parseOnce(text: input.text, imageJPEG: input.imageJPEG)
         } catch let error where isTransient(error) {
             try? await Task.sleep(for: .seconds(1.5))
-            return try await parseOnce(text: text, imageJPEG: imageJPEG)
+            return try await parseOnce(text: input.text, imageJPEG: input.imageJPEG)
         }
     }
 

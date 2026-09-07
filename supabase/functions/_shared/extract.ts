@@ -6,8 +6,14 @@ import {
   ogImageFromHtml,
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
+import {
+  fetchImageBase64,
+  fetchSocialPost,
+  socialPlatform,
+  SocialUnreadableError,
+} from "./social.ts";
 
-export { corsHeaders, geocode };
+export { corsHeaders, geocode, SocialUnreadableError };
 
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
@@ -190,12 +196,33 @@ export async function extractCard(
     if (page && looksBlocked(page.text)) page = null;
   }
   const pageText = page?.text ?? null;
+
+  // Social links (Instagram, TikTok, Facebook) have no readable page, but
+  // their caption and cover are reachable without a login — see social.ts.
+  // The cover is fetched as bytes for the model to read the on-screen text;
+  // its URL is signed and expiring, so it is never stored as the thumbnail.
+  const social = url && !mapsLink ? socialPlatform(url) : null;
+  const post = social ? await fetchSocialPost(url!) : null;
+  const cover = post?.image && !input.image_base64
+    ? await fetchImageBase64(post.image)
+    : null;
+  // The user's own words beyond the bare link — a name they typed after
+  // it, or a caption the app fetched on-device when this server couldn't.
+  const ownWords = url ? text.replace(url, "").trim() : text;
+  if (social && !post && !ownWords && !input.image_base64) {
+    // Nothing from the platform, nothing from the user: asking beats a
+    // card invented from a URL slug.
+    throw new SocialUnreadableError(social);
+  }
+
   // A link we couldn't read: let the model search the web for the real
   // details instead of guessing from the URL slug alone. Every maps link
   // searches too — a pin carries no page to read, so the official website
   // (and with it the thumbnail photo) can only come from search. Bare
   // typed names and screenshots search for the same reason: without a
   // page there is no other route to verified details or a venue photo.
+  // Social posts always search: a caption names a place, the web confirms
+  // it and finds the official site.
   const useWebSearch =
     Boolean(url && !mapsLink && !pageText) ||
     Boolean(mapsLink) ||
@@ -205,9 +232,11 @@ export async function extractCard(
   // exactly what the user saw. Best-effort; null is fine.
   const colorPromise: Promise<string | null> = input.image_base64
     ? colorFromImageBytes(base64ToBytes(input.image_base64))
-    : page?.ogImage
-      ? colorFromImageUrl(page.ogImage)
-      : Promise.resolve(null);
+    : cover
+      ? colorFromImageBytes(base64ToBytes(cover.base64))
+      : page?.ogImage
+        ? colorFromImageUrl(page.ogImage)
+        : Promise.resolve(null);
 
   const today = new Date().toISOString().slice(0, 10);
   const parts: string[] = [
@@ -218,6 +247,20 @@ export async function extractCard(
   ];
   if (text) parts.push(`User's saved input:\n${text}`);
   if (pageText) parts.push(`Fetched page content from ${url}:\n${pageText}`);
+  if (post) {
+    const platform = post.platform === "tiktok" ? "TikTok" : "Instagram";
+    parts.push(
+      [
+        `The link is a ${platform} post${post.author ? ` by @${post.author}` : ""}.`,
+        post.caption ? `Its caption:\n${post.caption}` : "It has no readable caption.",
+        cover
+          ? "Its cover image is attached — read any on-screen text (venue names, dates, addresses)."
+          : "",
+        "Identify the specific place or event the post is about — the venue or exhibition itself, not the account posting about it. Posts often mention several places; pick the one the post is mainly about, or the first named.",
+        "Then use the web search tool to verify it and fill in the details, especially the official website.",
+      ].filter(Boolean).join(" "),
+    );
+  }
   if (mapsLink) {
     parts.push(
       [
@@ -232,7 +275,7 @@ export async function extractCard(
         "Only leave fields null if you genuinely don't recognise the place; still never invent prices or dates.",
       ].filter(Boolean).join(" "),
     );
-  } else if (useWebSearch) {
+  } else if (useWebSearch && !post) {
     parts.push(
       [
         url
@@ -256,6 +299,15 @@ export async function extractCard(
         type: "base64",
         media_type: (input.image_media_type ?? "image/jpeg") as "image/jpeg",
         data: input.image_base64,
+      },
+    });
+  } else if (cover) {
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: cover.mediaType as "image/jpeg",
+        data: cover.base64,
       },
     });
   }

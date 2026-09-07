@@ -112,15 +112,20 @@ and either protects the migration or shrinks Phase 4 to just legal and ops.
     Follow `vm.tiktok.com` short links first. Description + cover image (the
     model reads the on-screen text) → venue candidates → the existing
     web-search verification path. Reliable.
-  - *Instagram*, in three layers: (1) server-side, the public
-    `/p/<code>/embed/captioned/` page — caption and image for public posts,
-    but datacenter IPs are sometimes served the login wall, which
-    `looksBlocked` must recognise; (2) on-device, the app fetches the post's
-    HTML from the phone (residential IP, mobile UA) and forwards caption +
-    image to the parser — the screenshot input already carries this shape;
-    (3) if both yield nothing (private accounts), ask: "Can't read this
-    post — what's the place called?" with the URL kept and "or share a
-    screenshot" offered. Reels use the cover image the same way.
+  - *Instagram*, in three layers: (1) server-side, the post page's own
+    `og:description` / `og:image` tags under a mobile Safari UA — the
+    caption arrives as `N likes, M comments - user on date: "…"` and is
+    parsed out (the `/embed/captioned/` page turned out to be a login wall
+    even from a residential IP, so it isn't used). Datacenter IPs are often
+    served the wall here too, which comes back as "nothing"; (2) on-device,
+    the app fetches the same tags from the phone (residential IP, mobile
+    UA) and forwards caption + cover to the parser — the screenshot input
+    already carries this shape; (3) if both yield nothing (private
+    accounts), the parser answers 422 and the app asks: "Can't read this
+    post — add the place's name after the link, or share a screenshot."
+    Reels use the cover image the same way. Cover URLs from both CDNs carry
+    expiring signatures: they feed the model and the accent colour, never
+    the stored thumbnail — that comes from the official site as usual.
   - Facebook events are treated as Instagram layer 3 for now.
   - Expectation: venue, area, category and often a date from captions;
     price and booking come from the web-search step, as today.
@@ -500,7 +505,7 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] Pull-to-refresh; per-category empty states; share card as image
 - [x] Transport choice in Settings (Google Maps default; Apple Maps / Citymapper)
 - [x] Ended-event save → offer We Did Go; parse retry + "Try again"; dead-image fallback
-- [ ] Social links: TikTok oEmbed; Instagram embed → on-device fetch → ask; short-link resolution
+- [x] Social links: TikTok oEmbed; Instagram og: tags → on-device fetch → ask; short-link resolution
 
 ### Phase 1a — additive
 - [ ] `pg_dump`

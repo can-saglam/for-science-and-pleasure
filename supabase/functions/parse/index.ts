@@ -4,7 +4,7 @@
 // (the same one already embedded in the share-sheet Shortcut).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { internalErrorBody } from "../_shared/auth.ts";
-import { corsHeaders, extractCard } from "../_shared/extract.ts";
+import { corsHeaders, extractCard, SocialUnreadableError } from "../_shared/extract.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 
 Deno.serve(async (req) => {
@@ -52,6 +52,15 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
+    // A social post nothing could read: a question for the user, not a
+    // server error. 422 so the app shows the message as-is (and doesn't
+    // retry — see ParseClient.isTransient).
+    if (e instanceof SocialUnreadableError) {
+      return new Response(JSON.stringify({ error: e.message, code: "social_unreadable" }), {
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     console.error(e);
     return new Response(internalErrorBody(), {
       status: 500,
