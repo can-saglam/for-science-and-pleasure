@@ -35,7 +35,6 @@ struct LibraryView: View {
     @State private var archiveSide: ArchiveSide = .all
     /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
     @State private var refreshNotice: (text: String, icon: String)?
-    @State private var showSyncDetail = false
     @State private var syncStatus = SyncStatus.shared
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
@@ -460,21 +459,23 @@ struct LibraryView: View {
                               detail: "Push failed (400): {\"code\":\"PGRST102\",\"details\":null,\"hint\":null,\"message\":\"All object keys must match\"}",
                               status: 400)
                 : nil)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.orange)
-                    .frame(width: 34, height: 34)
-                    .background(.orange.opacity(0.16), in: .circle)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(staleTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(problem?.message ?? "You're online, but the server hasn't answered since.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        // Same anatomy as the duplicate and ended-event notices in Capture:
+        // an orange label, footnote copy, two full-width glass buttons.
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(staleTitle)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text(problem?.message ?? "You're online, but the server hasn't answered since.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.orange)
                 }
                 Spacer(minLength: 0)
                 Button {
@@ -484,65 +485,36 @@ struct LibraryView: View {
                     Image(systemName: "xmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 24, height: 24)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Dismiss")
             }
-            HStack(spacing: 10) {
-                Button {
-                    Haptics.tap()
-                    Task {
-                        await SupabaseSync.sync(context: context)
-                        if SyncStatus.shared.problem == nil {
-                            Haptics.success()
-                            showRefreshNotice("Updated just now", icon: "checkmark")
-                        }
-                    }
-                } label: {
-                    Label(syncStatus.syncing ? "Syncing…" : "Try again", systemImage: "arrow.clockwise")
-                        .font(.footnote.weight(.semibold))
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
-                .disabled(syncStatus.syncing)
 
-                if problem?.detail != nil {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(.snappy) { showSyncDetail.toggle() }
-                    } label: {
-                        Text(showSyncDetail ? "Hide details" : "Details")
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(.secondary)
+            // One action. The raw server answer lives in Settings, not here.
+            Button {
+                Haptics.tap()
+                Task {
+                    await SupabaseSync.sync(context: context)
+                    if SyncStatus.shared.problem == nil {
+                        Haptics.success()
+                        showRefreshNotice("Updated just now", icon: "checkmark")
                     }
-                    .buttonStyle(.plain)
                 }
+            } label: {
+                Label(syncStatus.syncing ? "Syncing…" : "Try again", systemImage: "arrow.clockwise")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.leading, 46)
-
-            // The raw server answer, for whoever is debugging — never the
-            // default view. Monospaced and selectable so it can be copied.
-            if showSyncDetail, let detail = problem?.detail {
-                Text(detail)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.black.opacity(0.25), in: .rect(cornerRadius: 8, style: .continuous))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            .buttonStyle(.glassProminent)
+            .tint(.white.opacity(0.92))
+            .foregroundStyle(AppBackground.base)
+            .disabled(syncStatus.syncing)
         }
-        .padding(14)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06), in: .rect(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.orange.opacity(0.22), lineWidth: 1)
-        )
+        .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 
