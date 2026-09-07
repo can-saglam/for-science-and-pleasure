@@ -15,7 +15,6 @@ struct ShareView: View {
         case preview(Item)
         case duplicate
         case failed(String, retryText: String?)
-        case saved
     }
 
     @State private var stage: Stage = .reading
@@ -23,6 +22,10 @@ struct ShareView: View {
     @State private var payloadImage: Data?
     @State private var extractedURL: String?
     @State private var editing = false
+    /// Set on save: the CTA's label crossfades to "Saved" and the sheet
+    /// closes a beat later. The card stays where it is — no separate
+    /// success screen.
+    @State private var saved = false
 
     private var isPreview: Bool {
         if case .preview = stage { return true }
@@ -97,12 +100,12 @@ struct ShareView: View {
 
             VStack(spacing: 10) {
                 Button {
-                    Haptics.tap()
                     save(draft)
                 } label: {
-                    Label("Save to library", systemImage: "checkmark")
+                    Label(saved ? "Saved" : "Save to library", systemImage: "checkmark")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
+                        .contentTransition(.opacity)
                 }
                 .buttonStyle(.glassProminent)
                 // Neutral white, matching the in-app flow — murky extracted
@@ -111,6 +114,7 @@ struct ShareView: View {
                 .foregroundStyle(AppBackground.base)
                 .controlSize(.large)
                 .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+                .allowsHitTesting(!saved)
 
                 HStack(spacing: 10) {
                     Button {
@@ -184,27 +188,18 @@ struct ShareView: View {
                 Button {
                     saveRaw(retryText)
                 } label: {
-                    Label("Save it anyway", systemImage: "tray.and.arrow.down")
+                    Label(saved ? "Saved" : "Save it anyway", systemImage: saved ? "checkmark" : "tray.and.arrow.down")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppBackground.base)
                         .frame(maxWidth: .infinity)
+                        .contentTransition(.opacity)
                 }
                 .buttonStyle(.glassProminent)
                 .tint(.white)
                 .controlSize(.large)
+                .allowsHitTesting(!saved)
             }
 
-        case .saved:
-            VStack(spacing: 12) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 46))
-                    .foregroundStyle(.white)
-                    .symbolEffect(.bounce, value: true)
-                Text("Saved")
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 48)
         }
     }
 
@@ -355,9 +350,9 @@ struct ShareView: View {
         do {
             try SharedInbox.write(pending)
             Haptics.success()
-            withAnimation(.snappy) { stage = .saved }
+            withAnimation(.easeInOut(duration: 0.25)) { saved = true }
             Task {
-                try? await Task.sleep(for: .seconds(0.7))
+                try? await Task.sleep(for: .seconds(0.6))
                 complete()
             }
         } catch {

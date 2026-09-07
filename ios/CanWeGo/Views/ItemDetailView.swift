@@ -10,7 +10,7 @@ struct ItemDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
-    @State private var confetti = false
+    @State private var done = false
     @State private var editing = false
     /// Edits land on this detached scratch copy, applied on Done. Typing
     /// straight into the live model re-rendered the entire list under the
@@ -350,33 +350,41 @@ struct ItemDetailView: View {
                     .tint(.white)
                 }
 
-                if !item.isDone {
+                // `done` keeps the row on screen for the 0.6 s the label
+                // reads "Done"; without it markDone() would pull the button
+                // out from under the crossfade.
+                if !item.isDone || done {
                     Button {
                         item.markDone()
                         UndoBin.shared.stashDone(item)
-                        confetti = true
+                        Haptics.success()
+                        withAnimation(.easeInOut(duration: 0.25)) { done = true }
+                        // The label's crossfade to "Done" is the whole
+                        // acknowledgement here; the library's toast (with
+                        // Undo) takes over once the sheet is down.
                         Task {
-                            try? await Task.sleep(for: .seconds(0.75))
+                            try? await Task.sleep(for: .seconds(0.6))
                             dismiss()
                         }
                     } label: {
                         // For something that's already over, the plain label
                         // reads odd — soften it to an after-the-fact note.
-                        Label(item.isMissed ? "We did go after all" : "We did go!", systemImage: "checkmark")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AppBackground.base)
-                            .frame(maxWidth: .infinity)
+                        Label(
+                            done ? "Done" : (item.isMissed ? "We did go after all" : "We did go!"),
+                            systemImage: "checkmark"
+                        )
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.base)
+                        .frame(maxWidth: .infinity)
+                        .contentTransition(.opacity)
                     }
                     .buttonStyle(.glassProminent)
                     .tint(.white)
-                    .overlay {
-                        ConfettiBurst(color: item.accentColor, fire: $confetti)
-                    }
-                    .sensoryFeedback(.success, trigger: confetti) { _, new in new }
+                    .allowsHitTesting(!done)
                 }
             }
 
-            if item.startsOn != nil && !item.isDone {
+            if item.startsOn != nil && (!item.isDone || done) {
                 Button {
                     Haptics.tap()
                     Task {

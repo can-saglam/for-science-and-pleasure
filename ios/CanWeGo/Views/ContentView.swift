@@ -94,9 +94,14 @@ struct ContentView: View {
             else { return }
             openItem(id)
         }
-        // Five-second Undo after any swipe-delete or "We did go!".
+        // Five-second Undo after a save, a swipe-delete or "We did go!".
         .overlay(alignment: .bottom) {
             VStack(spacing: 10) {
+                if let saved = undoBin.saved {
+                    undoToast("Saved \u{201c}\(saved.title)\u{201d}") {
+                        undoBin.undoSave(in: context)
+                    }
+                }
                 if let deleted = undoBin.deleted {
                     undoToast("Deleted \u{201c}\(deleted.title)\u{201d}") {
                         undoBin.restore(into: context)
@@ -111,6 +116,7 @@ struct ContentView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 96)
         }
+        .animation(.snappy, value: undoBin.saved?.id)
         .animation(.snappy, value: undoBin.deleted?.id)
         .animation(.snappy, value: undoBin.done?.id)
         // First sign-in on a fresh install: don't present empty tabs while

@@ -79,6 +79,11 @@ final class UndoBin {
     private(set) var done: (id: UUID, title: String)?
     private var doneExpiry: Task<Void, Never>?
 
+    /// The item just saved from the capture sheet. Undo here is a delete,
+    /// which in turn lands in `deleted` — so a slip can be un-undone too.
+    private(set) var saved: (id: UUID, title: String)?
+    private var savedExpiry: Task<Void, Never>?
+
     func stash(_ snapshot: ItemSnapshot) {
         deleted = snapshot
         expiry?.cancel()
@@ -97,6 +102,31 @@ final class UndoBin {
             guard !Task.isCancelled else { return }
             self.done = nil
         }
+    }
+
+    func stashSaved(_ item: Item) {
+        saved = (item.id, item.title)
+        savedExpiry?.cancel()
+        savedExpiry = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self.saved = nil
+        }
+    }
+
+    @MainActor
+    func undoSave(in context: ModelContext) {
+        guard let saved else { return }
+        let id = saved.id
+        let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
+        if let item = try? context.fetch(fetch).first {
+            stash(item.snapshot)
+            SupabaseSync.setDeleted(item.id, true)
+            context.delete(item)
+            try? context.save()
+        }
+        savedExpiry?.cancel()
+        self.saved = nil
     }
 
     func undoDone(in context: ModelContext) {

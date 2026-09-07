@@ -23,7 +23,6 @@ struct CaptureView: View {
     @State private var editing = false
     /// True when the card was started blank — no parser involved.
     @State private var manual = false
-    @State private var confetti = false
     @State private var saved = false
     /// A save already in the library that the input points at — shown as a
     /// notice with a way to open it, never as a wall. "Save anyway" sets the
@@ -384,9 +383,12 @@ struct CaptureView: View {
             Button {
                 save(draft)
             } label: {
+                // The acknowledgement is the label itself crossfading to
+                // "Saved" — no burst; the library's toast says the rest.
                 Label(saved ? "Saved" : "Save to library", systemImage: "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
+                    .contentTransition(.opacity)
             }
             .buttonStyle(.glassProminent)
             // Neutral white, not the item's extracted accent: murky source
@@ -394,10 +396,9 @@ struct CaptureView: View {
             .tint(.white.opacity(0.92))
             .foregroundStyle(AppBackground.base)
             .controlSize(.large)
-            .disabled(saved || draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
-            .overlay {
-                ConfettiBurst(color: draft.accentColor, fire: $confetti)
-            }
+            .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+            // Not `.disabled`: that would grey the button out under "Saved".
+            .allowsHitTesting(!saved)
 
             if !saved {
                 HStack(spacing: 10) {
@@ -567,10 +568,12 @@ struct CaptureView: View {
         context.insert(item)
         try? context.save()
         Task { await SupabaseSync.announceSave(item) }
-        saved = true
-        confetti = true
+        Haptics.success()
+        withAnimation(.easeInOut(duration: 0.25)) { saved = true }
+        UndoBin.shared.stashSaved(item)
+        // Long enough to read "Saved", short enough not to feel like a wait.
         Task {
-            try? await Task.sleep(for: .seconds(0.75))
+            try? await Task.sleep(for: .seconds(0.6))
             dismiss()
         }
     }
