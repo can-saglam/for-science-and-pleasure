@@ -87,16 +87,26 @@ struct ItemCard: View {
         return item.imageUrl.flatMap(URL.init(string:))
     }
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// At accessibility text sizes the countdown can't share a line with
+    /// the title — it moves below, the way it already does beside a photo.
+    private var stackedTimeLabel: Bool {
+        imageURL != nil || typeSize.isAccessibilitySize
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 3 : 5) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(item.title)
                     .font(compact ? .subheadline.weight(.medium) : .body.weight(.semibold))
                     .multilineTextAlignment(.leading)
-                    .lineLimit(2)
+                    // Big type wraps rather than clips: a truncated title is
+                    // a missing title to someone reading at that size.
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 // With a thumbnail bleeding in from the right, the countdown
                 // moves down beside the subtitle so titles keep their room.
-                if imageURL == nil && meta == nil {
+                if !stackedTimeLabel && meta == nil {
                     Spacer(minLength: 6)
                     if let label = item.timeLabel {
                         timeText(label)
@@ -107,9 +117,9 @@ struct ItemCard: View {
                 Text(subtitle)
                     .font(compact ? .caption : .subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
             }
-            if imageURL != nil, meta == nil, let label = item.timeLabel {
+            if stackedTimeLabel, meta == nil, let label = item.timeLabel {
                 timeText(label)
                     .padding(.top, 1)
             }
@@ -127,6 +137,8 @@ struct ItemCard: View {
         .background(alignment: .trailing) {
             if let imageURL {
                 bleedImage(imageURL)
+                    // Decorative: the text already says everything it shows.
+                    .accessibilityHidden(true)
             }
         }
         .background(cardBackground, in: .rect(cornerRadius: radius, style: .continuous))
@@ -136,6 +148,19 @@ struct ItemCard: View {
                 .strokeBorder(cardBorder, lineWidth: 1)
         )
         .contentShape(.rect(cornerRadius: radius, style: .continuous))
+        // One sentence per card for VoiceOver, in reading order, instead of
+        // three separate stops with the countdown detached from its title.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts = [item.title]
+        if !subtitle.isEmpty { parts.append(subtitle) }
+        if meta == nil, let label = item.timeLabel { parts.append(label) }
+        if item.isDone { parts.append("We did go") }
+        parts.append(contentsOf: hints)
+        return parts.joined(separator: ". ")
     }
 
     /// Urgent labels wear a quiet rose badge — folded toward the card color
@@ -157,7 +182,7 @@ struct ItemCard: View {
             Text(label)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Color.secondary)
-                .lineLimit(1)
+                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
         }
     }
 
@@ -320,6 +345,19 @@ struct ItemCardRow: View {
         }
         .buttonStyle(PressableCardStyle())
         .cardListRow()
+        // The swipe gestures, spoken: VoiceOver's rotor gets the same three
+        // actions a sighted thumb has.
+        .accessibilityHint("Opens the details")
+        .accessibilityAction(named: item.isDone ? "Put back in the library" : "We did go") {
+            if item.isDone {
+                item.putBack()
+            } else {
+                celebrate += 1
+                item.markDone()
+                UndoBin.shared.stashDone(item)
+            }
+        }
+        .accessibilityAction(named: "Delete") { delete() }
         // No full swipe: a firm scroll-adjacent drag was enough to silently
         // mark an event done (see: Carnival, 7:13am, nobody remembers doing
         // it). The swipe now only reveals the button; done takes a real tap.

@@ -496,7 +496,7 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] Stale-sync banner
 - [x] Search includes the journal
 - [x] Gone-item states for notification/widget/Spotlight taps
-- [ ] Accessibility pass (Dynamic Type, VoiceOver, Reduce Motion)
+- [x] Accessibility pass (Dynamic Type, VoiceOver, Reduce Motion)
 - [x] Pull-to-refresh; per-category empty states; share card as image
 - [x] Transport choice in Settings (Google Maps default; Apple Maps / Citymapper)
 - [x] Ended-event save → offer We Did Go; parse retry + "Try again"; dead-image fallback

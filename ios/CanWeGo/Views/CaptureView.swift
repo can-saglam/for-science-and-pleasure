@@ -8,6 +8,7 @@ import SwiftUI
 struct CaptureView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var text = ""
     @State private var photoItem: PhotosPickerItem?
@@ -43,7 +44,7 @@ struct CaptureView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if let draft {
                         previewStage(draft)
-                            .transition(.scale(scale: 0.96).combined(with: .opacity))
+                            .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
                     } else {
                         inputStage
                     }
@@ -315,7 +316,7 @@ struct CaptureView: View {
             // Keep the × tappable where it pokes past the picture's corner.
             .padding(.top, 6)
             .padding(.trailing, 6)
-            .transition(.scale(scale: 0.95).combined(with: .opacity))
+            .transition(reduceMotion ? .opacity : .scale(scale: 0.95).combined(with: .opacity))
     }
 
     // MARK: - Stage 2: preview / edit

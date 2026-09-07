@@ -41,12 +41,14 @@ struct ParsingPhrases: View {
         "Nearly there…",
     ]
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2.4)) { context in
             let step = Int(context.date.timeIntervalSinceReferenceDate / 2.4)
             Text(Self.phrases[step % Self.phrases.count])
                 .id(step)
-                .transition(.push(from: .bottom))
+                .transition(reduceMotion ? .opacity : .push(from: .bottom))
                 .animation(.snappy, value: step)
         }
     }

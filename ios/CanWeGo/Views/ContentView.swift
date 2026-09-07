@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var deepLinked: Item?
     /// A notification/widget/Spotlight tap on a save that no longer exists.
     @State private var goneItem = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// Drives the stretchy selection pill in the bottom bar.
     @Namespace private var barNamespace
@@ -328,14 +329,20 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.footnote.weight(.semibold))
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
+                // At accessibility sizes the two words no longer fit the
+                // pill; the icons carry it and VoiceOver still gets the name.
+                if !typeSize.isAccessibilitySize {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                }
             }
             .padding(.horizontal, 16)
             .frame(height: 44)
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(tab == value ? [.isSelected] : [])
         // Explicit colors, same trick as the filter chips: the selected
         // side inverts onto a near-white pill.
         .foregroundStyle(tab == value ? AppBackground.base : .white)

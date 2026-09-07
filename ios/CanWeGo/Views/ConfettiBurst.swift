@@ -5,10 +5,15 @@ struct ConfettiBurst: View {
     let color: Color
     @Binding var fire: Bool
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
-            if fire {
+            if fire, reduceMotion {
+                // Reduce Motion: the haptic and the "Saved" state carry the
+                // moment; a cloud of flying dots is exactly what's asked off.
+                Color.clear.onAppear { fire = false }
+            } else if fire {
                 ZStack {
                     ForEach(0..<18, id: \.self) { i in
                         let angle = Double(i) / 18 * 2 * .pi

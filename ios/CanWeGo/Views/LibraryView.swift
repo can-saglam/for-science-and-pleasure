@@ -821,6 +821,8 @@ private struct ChipRow: View {
                 .padding(.vertical, 7)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+        .accessibilityHint(isOn ? "Clears this filter" : "Filters the list")
         // Explicit colors: the system styles both resolve near-white here,
         // leaving white text on white glass.
         .foregroundStyle(isOn ? AppBackground.base : .white)
