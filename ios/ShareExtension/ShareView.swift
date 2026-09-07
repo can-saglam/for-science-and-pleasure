@@ -247,7 +247,7 @@ struct ShareView: View {
             item.imageUrl = card.image_url
             withAnimation(.snappy) { stage = .preview(item) }
         } catch {
-            stage = .failed(error.localizedDescription, retryText: payloadText)
+            stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
         }
     }
 
@@ -361,7 +361,7 @@ struct ShareView: View {
                 complete()
             }
         } catch {
-            stage = .failed(error.localizedDescription, retryText: nil)
+            stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: nil)
         }
     }
 }

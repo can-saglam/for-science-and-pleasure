@@ -554,7 +554,9 @@ struct CaptureView: View {
             item.imageUrl = card.image_url
             withAnimation(.spring(duration: 0.4)) { draft = item }
         } catch {
-            errorMessage = error.localizedDescription
+            // ParseError already speaks to a person; everything else
+            // (URLError, decoding) gets the same translation sync uses.
+            errorMessage = (error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message
         }
     }
 

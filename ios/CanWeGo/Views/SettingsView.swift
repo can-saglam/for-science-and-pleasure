@@ -242,11 +242,19 @@ struct SettingsView: View {
                             }
                         }
                         if let problem = SyncStatus.shared.problem {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 6) {
                                 row("Sync issue", icon: "exclamationmark.triangle.fill")
-                                Text(problem)
-                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                Text(problem.message)
+                                    .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                                if let detail = problem.detail {
+                                    Text(detail)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.tertiary)
+                                        .textSelection(.enabled)
+                                        .lineLimit(4)
+                                }
                             }
                         }
                         Button(role: .destructive) {

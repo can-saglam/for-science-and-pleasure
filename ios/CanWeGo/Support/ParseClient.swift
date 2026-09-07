@@ -85,6 +85,28 @@ enum ParseClient {
         }
     }
 
+    /// The edge function's error bodies are written for logs ("internal
+    /// error", "not a member"); the gateway's aren't written at all. Only a
+    /// 422 carries a sentence meant for the person holding the phone.
+    private static func friendly(status: Int, serverMessage: String?) -> String {
+        switch status {
+        case 422:
+            return serverMessage ?? "Couldn't make sense of that one."
+        case 400:
+            return "Paste a link, some text, or add a screenshot first."
+        case 401, 403:
+            return "You're signed out. Sign in again from Settings."
+        case 413:
+            return "That photo is too big. Try a smaller screenshot."
+        case 429:
+            return "Too many saves at once. Give it a minute."
+        case 500...:
+            return "The server tripped over that one. Try again in a moment."
+        default:
+            return "Couldn't read that one. Try again in a moment."
+        }
+    }
+
     private static func parseOnce(text: String?, imageJPEG: Data?) async throws -> Card {
         guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
 
@@ -105,8 +127,8 @@ enum ParseClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
-            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(message ?? "Couldn't read that one (\(status)).", status: status)
+            let serverMessage = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+            throw ParseError.server(friendly(status: status, serverMessage: serverMessage), status: status)
         }
         struct Envelope: Decodable { let card: Card }
         return try JSONDecoder().decode(Envelope.self, from: data).card

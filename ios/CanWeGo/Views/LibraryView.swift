@@ -35,6 +35,7 @@ struct LibraryView: View {
     @State private var archiveSide: ArchiveSide = .all
     /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
     @State private var refreshNotice: (text: String, icon: String)?
+    @State private var showSyncDetail = false
     @State private var syncStatus = SyncStatus.shared
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
@@ -453,21 +454,28 @@ struct LibraryView: View {
     /// day of the same — a library quietly drifting apart is the one thing
     /// a shared list must never do silently.
     private var staleBanner: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Last synced \(syncStatus.lastSyncedAt?.formatted(.relative(presentation: .named)) ?? "a while ago")")
-                            .font(.footnote.weight(.semibold))
-                        Text(syncStatus.problem ?? "Couldn't reach the server, though you're online.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                } icon: {
-                    Image(systemName: "arrow.triangle.2.circlepath.circle")
+        let problem = syncStatus.problem
+            ?? (ProcessInfo.processInfo.environment["CWG_STALE"] != nil
+                ? SyncProblem(message: "Changes on this phone haven't reached the server yet.",
+                              detail: "Push failed (400): {\"code\":\"PGRST102\",\"details\":null,\"hint\":null,\"message\":\"All object keys must match\"}",
+                              status: 400)
+                : nil)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 34, height: 34)
+                    .background(.orange.opacity(0.16), in: .circle)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(staleTitle)
+                        .font(.subheadline.weight(.semibold))
+                    Text(problem?.message ?? "You're online, but the server hasn't answered since.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .foregroundStyle(.orange)
                 Spacer(minLength: 0)
                 Button {
                     Haptics.tap()
@@ -482,30 +490,68 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Dismiss")
             }
-            Button {
-                Haptics.tap()
-                Task {
-                    await SupabaseSync.sync(context: context)
-                    if SyncStatus.shared.problem == nil {
-                        Haptics.success()
-                        showRefreshNotice("Updated just now", icon: "checkmark")
+            HStack(spacing: 10) {
+                Button {
+                    Haptics.tap()
+                    Task {
+                        await SupabaseSync.sync(context: context)
+                        if SyncStatus.shared.problem == nil {
+                            Haptics.success()
+                            showRefreshNotice("Updated just now", icon: "checkmark")
+                        }
                     }
+                } label: {
+                    Label(syncStatus.syncing ? "Syncing…" : "Try again", systemImage: "arrow.clockwise")
+                        .font(.footnote.weight(.semibold))
                 }
-            } label: {
-                Label(syncStatus.syncing ? "Syncing…" : "Try again", systemImage: "arrow.clockwise")
-                    .font(.footnote.weight(.semibold))
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .disabled(syncStatus.syncing)
+
+                if problem?.detail != nil {
+                    Button {
+                        Haptics.tap()
+                        withAnimation(.snappy) { showSyncDetail.toggle() }
+                    } label: {
+                        Text(showSyncDetail ? "Hide details" : "Details")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.glass)
-            .controlSize(.small)
-            .disabled(syncStatus.syncing)
+            .padding(.leading, 46)
+
+            // The raw server answer, for whoever is debugging — never the
+            // default view. Monospaced and selectable so it can be copied.
+            if showSyncDetail, let detail = problem?.detail {
+                Text(detail)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.black.opacity(0.25), in: .rect(cornerRadius: 8, style: .continuous))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06), in: .rect(cornerRadius: 14, style: .continuous))
+        .background(.white.opacity(0.06), in: .rect(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.orange.opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.orange.opacity(0.22), lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
+    }
+
+    /// "Out of sync for 3 weeks" beats "Last synced 3 weeks ago": the first
+    /// names the problem, the second reads like a timestamp.
+    private var staleTitle: String {
+        guard let last = syncStatus.lastSyncedAt else { return "Not synced yet" }
+        let gap = Duration.seconds(max(3600, Date.now.timeIntervalSince(last)))
+        return "Out of sync for \(gap.formatted(.units(allowed: [.weeks, .days, .hours], width: .wide, maximumUnitCount: 1)))"
     }
 
     private var list: some View {
@@ -582,11 +628,15 @@ struct LibraryView: View {
         // now", or a brief notice when the sync couldn't get through.
         .refreshable {
             await SupabaseSync.sync(context: context)
-            if SyncStatus.shared.problem == nil {
+            if let problem = SyncStatus.shared.problem {
+                let offline = problem.status == 0
+                showRefreshNotice(
+                    offline ? "Couldn't refresh. Check your connection" : "Refreshed, but not everything synced",
+                    icon: offline ? "wifi.slash" : "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+                )
+            } else {
                 Haptics.success()
                 showRefreshNotice("Updated just now", icon: "checkmark")
-            } else {
-                showRefreshNotice("Couldn't refresh. Check your connection", icon: "wifi.slash")
             }
         }
         // Tapping the tab you're already on brings the list home.

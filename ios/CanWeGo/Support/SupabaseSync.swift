@@ -71,13 +71,50 @@ enum SupabaseSync {
             // leaves its dirty items behind it, retried on the next sync.
             if let pushError { throw pushError }
             lastSyncAt = .now
-            SyncStatus.shared.problem = nil
+            // A row the server refused on its own merits is set aside
+            // (see `upsert`) so it can't hold everything else hostage — but
+            // it stays visible in Settings until the item is edited again.
+            SyncStatus.shared.problem = quarantineProblem(context: context)
         } catch {
             // Offline is routine and the next trigger retries — but keep
-            // the reason visible in Settings instead of failing silently.
-            SyncStatus.shared.problem = error.localizedDescription
+            // the reason visible instead of failing silently.
+            SyncStatus.shared.problem = SyncProblem(error)
         }
     }
+
+    // MARK: - Quarantine
+
+    /// Rows the server rejected individually, keyed by item id, valued by
+    /// the `updatedAt` that was refused. A later edit changes the stamp and
+    /// the row is tried again; until then it's skipped so the cursor can
+    /// advance and everyone else's saves keep flowing.
+    private static let rejectedKey = "supabaseRejectedRows"
+    private static var rejected: [String: Date] {
+        get { defaults.dictionary(forKey: rejectedKey) as? [String: Date] ?? [:] }
+        set { defaults.set(newValue, forKey: rejectedKey) }
+    }
+
+    private static func isQuarantined(_ item: Item) -> Bool {
+        rejected[item.id.uuidString] == item.updatedAt
+    }
+
+    private static func quarantineProblem(context: ModelContext) -> SyncProblem? {
+        guard !rejected.isEmpty else { return nil }
+        let locals = try? context.fetch(FetchDescriptor<Item>())
+        let stuck = (locals ?? []).filter(isQuarantined)
+        // Rows that were edited (or deleted) since drop out of the record.
+        if stuck.count != rejected.count {
+            rejected = Dictionary(uniqueKeysWithValues: stuck.map { ($0.id.uuidString, $0.updatedAt) })
+        }
+        guard let first = stuck.first else { return nil }
+        let title = first.title.isEmpty ? "One save" : "“\(first.title)”"
+        let more = stuck.count > 1 ? " and \(stuck.count - 1) more" : ""
+        return SyncProblem(
+            message: "\(title)\(more) couldn't be synced. Editing it will retry.",
+            detail: rejectedDetail
+        )
+    }
+    private static var rejectedDetail: String?
 
     // MARK: - Kill switch
 
@@ -140,6 +177,38 @@ enum SupabaseSync {
         var created_at: Date
         var updated_at: Date
         var deleted_at: Date?
+
+        /// PostgREST insists every object in a bulk upsert has the *same*
+        /// keys ("All object keys must match"). The synthesised encoder
+        /// drops nil optionals, so two rows with different empty fields —
+        /// one with notes, one without — made the whole batch a 400 while
+        /// single-row pushes sailed through. Write every column, nulls
+        /// included, so the shape is identical for every row.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(kind, forKey: .kind)
+            try c.encode(status, forKey: .status)
+            try c.encode(title, forKey: .title)
+            try c.encode(summary, forKey: .summary)
+            try c.encode(venue, forKey: .venue)
+            try c.encode(area, forKey: .area)
+            try c.encode(address, forKey: .address)
+            try c.encode(category, forKey: .category)
+            try c.encode(price, forKey: .price)
+            try c.encode(url, forKey: .url)
+            try c.encode(image_url, forKey: .image_url)
+            try c.encode(starts_on, forKey: .starts_on)
+            try c.encode(ends_on, forKey: .ends_on)
+            try c.encode(notes, forKey: .notes)
+            try c.encode(color, forKey: .color)
+            try c.encode(lat, forKey: .lat)
+            try c.encode(lng, forKey: .lng)
+            try c.encode(added_by_email, forKey: .added_by_email)
+            try c.encode(created_at, forKey: .created_at)
+            try c.encode(updated_at, forKey: .updated_at)
+            try c.encode(deleted_at, forKey: .deleted_at)
+        }
     }
 
     /// Postgres timestamps come back with fractional seconds; sometimes not.
@@ -197,9 +266,33 @@ enum SupabaseSync {
 
     private static func push(context: ModelContext, since cursor: Date) async throws {
         let locals = try context.fetch(FetchDescriptor<Item>())
-        let dirty = locals.filter { $0.updatedAt > cursor }
+        let dirty = locals.filter { $0.updatedAt > cursor && !isQuarantined($0) }
         guard !dirty.isEmpty else { return }
-        try await upsert(rows: dirty.map(row(from:)))
+        do {
+            try await upsert(rows: dirty.map(row(from:)))
+        } catch let error as SyncProblem where error.rowRejected && dirty.count > 1 {
+            // The server rejected the batch. Find out which row: push them
+            // one at a time so the good ones land now and only the culprit
+            // is set aside. Network trouble (no status) isn't isolated —
+            // that's just retried whole next time.
+            var refused: [(Item, SyncProblem)] = []
+            for item in dirty {
+                do { try await upsert(rows: [row(from: item)]) } catch let e as SyncProblem where e.rowRejected {
+                    refused.append((item, e))
+                }
+            }
+            guard !refused.isEmpty else { return }
+            quarantine(refused)
+        } catch let error as SyncProblem where error.rowRejected {
+            quarantine(dirty.map { ($0, error) })
+        }
+    }
+
+    private static func quarantine(_ refused: [(Item, SyncProblem)]) {
+        var record = rejected
+        for (item, _) in refused { record[item.id.uuidString] = item.updatedAt }
+        rejected = record
+        rejectedDetail = refused.first?.1.detail
     }
 
     private static func upsert(rows: [Row]) async throws {
@@ -211,8 +304,10 @@ enum SupabaseSync {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            throw SupabaseAuth.AuthError(
-                message: "Push failed (\(status)): \(String(data: data, encoding: .utf8) ?? "")"
+            throw SyncProblem(
+                message: "Changes on this phone haven't reached the server yet.",
+                detail: "Push failed (\(status)): \(String(data: data, encoding: .utf8) ?? "")",
+                status: status
             )
         }
     }
@@ -275,8 +370,13 @@ enum SupabaseSync {
         request.httpMethod = "GET"
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw SupabaseAuth.AuthError(message: "Pull failed.")
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            throw SyncProblem(
+                message: "Couldn't fetch the latest saves.",
+                detail: "Pull failed (\(status)): \(String(data: data.prefix(300), encoding: .utf8) ?? "")",
+                status: status
+            )
         }
         // Row-by-row tolerance: one malformed row (an odd date, a null in a
         // required field) must not poison the entire pull for everyone.

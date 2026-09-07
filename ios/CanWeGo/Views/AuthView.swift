@@ -110,7 +110,9 @@ struct AuthView: View {
             )
             Haptics.success()
         } catch {
-            errorMessage = error.localizedDescription
+            // GoTrue's own messages ("Invalid login credentials") are fine
+            // as-is; network failures get the human translation.
+            errorMessage = (error as? SupabaseAuth.AuthError)?.message ?? SyncProblem(error).message
         }
     }
 }

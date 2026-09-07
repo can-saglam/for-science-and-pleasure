@@ -130,16 +130,18 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(AppBackground.base.ignoresSafeArea())
                     .transition(.opacity)
-                } else if syncStatus.problem != nil {
+                } else if let problem = syncStatus.problem {
                     VStack(spacing: 14) {
-                        Image(systemName: "wifi.slash")
+                        Image(systemName: problem.status == 0 ? "wifi.slash" : "exclamationmark.icloud")
                             .font(.title2)
                             .foregroundStyle(.secondary)
                         Text("Couldn't load your library")
                             .font(.headline)
-                        Text("Check your connection and try again.")
+                        Text(problem.message)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
                         Button {
                             Haptics.tap()
                             Task { await SupabaseSync.sync(context: context) }
