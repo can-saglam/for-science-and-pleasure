@@ -496,7 +496,7 @@ shippable to TestFlight, so daily use continues while it transforms.
 ### Phase 0 — this week
 - [x] `app_config.min_build` + forced-update screen, shipped to TestFlight before anything else (build 36)
 - [x] Backfills/enrichment PATCH their own columns; only human edits bump `updated_at`
-- [ ] Supabase paid tier
+- [x] Supabase paid tier (Pro, 7 Sep); `min_build` armed at 38
 - [x] Duplicate detection on save (URL or title+date), warn not block
 - [x] Stale-sync banner
 - [x] Search includes the journal
@@ -508,14 +508,14 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] Social links: TikTok oEmbed; Instagram og: tags → on-device fetch → ask; short-link resolution
 
 ### Phase 1a — additive
-- [ ] `pg_dump`
-- [ ] Groups schema (with `home`), `profiles`, per-user `entitlements`, nullable `group_id`, `updated_by`, per-group digest rows (created with the group), Can+Joyce backfill — RLS untouched
+- [x] Backup — JSON dump of every table + auth users via the API (no Docker/pg_dump on this Mac), `~/Backups/canwego/20260907-1731`
+- [x] Groups schema (with `home`), `profiles`, per-user `entitlements`, nullable `group_id`, `updated_by`, per-group digest rows (created with the group), Can+Joyce backfill — RLS untouched (`0016_groups_additive.sql`, applied 7 Sep; 58/58 items backfilled, founder entitlements seeded)
 - [ ] Parse-quality gate: replay existing library URLs with the home-string prompts, diff cards against stored, ship only on noise
 - [ ] Home plumbed through prompts, geocoder (suffix only when no city named; trust out-of-home matches), digest scheduler
 - [ ] Time labels + This Week + widget evaluate in home timezone (snapshot carries it); dates format in device locale
 - [ ] Map default by distance from home; distance chips hide beyond 100 km
-- [ ] "Edited by" line from `updated_by`
-- [ ] iOS sync carries `group_id` end to end — ship, run for a week
+- [x] "Edited by" line from `updated_by` (build 40)
+- [ ] iOS sync carries `group_id` end to end — shipped in build 40 on 7 Sep; run for a week → 1b no earlier than 14 Sep
 
 ### Phase 1b — flip security
 - [ ] RLS → `is_in_group`; `group_id` non-null; 4-member trigger; retire singleton digest schedule and `members`

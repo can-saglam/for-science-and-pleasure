@@ -30,6 +30,12 @@ final class Item {
     var lat: Double?
     var lng: Double?
     var addedByEmail: String?
+    /// Which shared library this belongs to (launch plan, Phase 1a). Set by
+    /// the server on first insert; the client only carries it back.
+    var groupId: UUID?
+    /// Who last made a *human* edit — stamped server-side from the JWT, so
+    /// a backfill or thumbnail write never changes it.
+    var updatedBy: UUID?
     /// Manual position in the Places list (long-press drag). Local-only —
     /// never synced, so each of you can keep your own order.
     var sortOrder: Double?

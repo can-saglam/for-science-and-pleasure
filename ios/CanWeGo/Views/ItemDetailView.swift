@@ -28,6 +28,18 @@ struct ItemDetailView: View {
         item.addedByEmail.map { "Added by \(MembersStore.shared.name(for: $0))" }
     }
 
+    /// "Edited by Joyce · yesterday" — only once the row has actually been
+    /// edited after it was saved (the server stamps updated_by on human
+    /// edits alone, so a thumbnail backfill never produces this line).
+    private var editedBy: String? {
+        guard let by = item.updatedBy,
+              item.updatedAt.timeIntervalSince(item.createdAt) > 60,
+              let name = MembersStore.shared.name(forUser: by)
+        else { return nil }
+        let when = item.updatedAt.formatted(.relative(presentation: .named))
+        return "Edited by \(name) · \(when)"
+    }
+
     private var dateLine: String? {
         switch (item.startsOn, item.endsOn) {
         case let (s?, e?) where s == e:
@@ -278,6 +290,7 @@ struct ItemDetailView: View {
             metaRow("map", item.area)
             metaRow("sterlingsign.circle", item.price)
             metaRow("person", addedBy)
+            metaRow("pencil", editedBy)
         }
 
         if let lat = item.lat, let lng = item.lng {

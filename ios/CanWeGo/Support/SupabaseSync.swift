@@ -174,6 +174,8 @@ enum SupabaseSync {
         var lat: Double?
         var lng: Double?
         var added_by_email: String?
+        var group_id: UUID?
+        var updated_by: UUID?
         var created_at: Date
         var updated_at: Date
         var deleted_at: Date?
@@ -205,6 +207,8 @@ enum SupabaseSync {
             try c.encode(lat, forKey: .lat)
             try c.encode(lng, forKey: .lng)
             try c.encode(added_by_email, forKey: .added_by_email)
+            try c.encode(group_id, forKey: .group_id)
+            try c.encode(updated_by, forKey: .updated_by)
             try c.encode(created_at, forKey: .created_at)
             try c.encode(updated_at, forKey: .updated_at)
             try c.encode(deleted_at, forKey: .deleted_at)
@@ -352,6 +356,8 @@ enum SupabaseSync {
             lat: item.lat,
             lng: item.lng,
             added_by_email: item.addedByEmail ?? SupabaseAuth.shared.email,
+            group_id: item.groupId,
+            updated_by: item.updatedBy,
             created_at: item.createdAt,
             updated_at: item.updatedAt,
             deleted_at: nil
@@ -427,6 +433,8 @@ enum SupabaseSync {
         item.lat = row.lat
         item.lng = row.lng
         item.addedByEmail = row.added_by_email
+        item.groupId = row.group_id
+        item.updatedBy = row.updated_by
         item.createdAt = row.created_at
         item.updatedAt = row.updated_at
     }
