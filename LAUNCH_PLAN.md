@@ -527,6 +527,15 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] Per-group ICS token (`groups.feed_token`); the old key still resolves to the founding group so existing calendar subscriptions keep updating — rotation on leave lands with Phase 2b
 - [x] iOS build 41: `digest_schedules` per group, `created_by` synced, "Added by" from profiles, `members` gone from the client
 
+Post-flip hardening, 7 Sep evening (all green):
+- [x] Production stranger probe — 33 checks with a throwaway account: reads nothing, writes nothing, can't join a group or grant itself Plus, anon gets nothing, every function gate holds (`supabase/tests/stranger_probe.py`, re-run after 0018)
+- [x] Fresh-database replay 0001→0018 on an empty project, then rollback + `--include-all` re-apply; project deleted
+- [x] `0018_revoke_anon.sql` — anon has zero grants on public tables/sequences/functions, defaults too (RLS already denied; this makes a future `to public` policy harmless). Applied to production
+- [x] Unit tests: digest window/timezone/week arithmetic (`_shared/schedule.ts`, extracted from send-digest) and group fallbacks (feed key, tokens-minus-sender, display names, email→group); 24 Deno tests. CI now type-checks every function and checks migration numbering
+- [x] Forced digest run on production through the per-group path: 53 sent / 0 gone / 0 failed
+- [x] Batteries + runbook committed under `supabase/tests/` — every future RLS/drop/NOT NULL migration gets the same up/down/up rehearsal
+- Follow-up: 53 APNs tokens for two phones — old installs' tokens are still accepted; keep one token per device (send `identifierForVendor`, upsert on it) before the digest grows a wider audience
+
 Found by the rehearsal, fixed before production: tokens registered between 1a and 1b had no `user_id` (NOT NULL would have failed — 0017 now backfills); the 1a mirror trigger's unfiltered UPDATE was rejected by safeupdate, so changing the digest time in build 40 never worked (1b removes the singleton); `gen_random_bytes` needs the `extensions.` prefix; `is_member()` had to go after its own table.
 
 ### Phase 2

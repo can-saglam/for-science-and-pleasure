@@ -8,11 +8,28 @@ on:
 
 jobs:
   edge:
-    name: Edge (Deno geo tests)
+    name: Edge functions (type-check + unit tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: deno test --allow-env supabase/functions/_shared/
+      # A type error in any function is a broken deploy; check them all.
+      - run: deno check supabase/functions/*/index.ts supabase/functions/_shared/*.ts
+      - run: deno test --allow-env --allow-net --allow-read supabase/functions/_shared/
+
+  migrations:
+    name: Migrations (sanity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Every migration has a unique 4-digit prefix and every 00NN in the
+      # sequence exists — a skipped or duplicated number breaks `db push`.
+      - run: |
+          set -e
+          cd supabase/migrations
+          ls *.sql | cut -c1-4 | sort | uniq -d | { ! grep .; } || { echo "duplicate migration number"; exit 1; }
+          n=$(ls *.sql | wc -l)
+          for i in $(seq -f '%04g' 1 "$n"); do ls "${i}_"*.sql >/dev/null 2>&1 || { echo "missing migration $i"; exit 1; }; done
+          echo "$n migrations, contiguous"

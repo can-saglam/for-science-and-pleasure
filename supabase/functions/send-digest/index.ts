@@ -9,44 +9,7 @@
 import { apnsConfigured, sendApnsAlert } from "../_shared/apns.ts";
 import { buildDigest } from "../_shared/digest.ts";
 import { admin, groupTokens } from "../_shared/groups.ts";
-
-interface Schedule {
-  group_id: string;
-  day_of_week: number;
-  hour: number;
-  minute: number;
-  timezone: string;
-}
-
-function localNow(timeZone: string) {
-  let parts;
-  try {
-    parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone,
-      weekday: "short",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date());
-  } catch {
-    return localNow("Europe/London"); // bad tz string in the row
-  }
-  return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-}
-
-const ISO_DOW: Record<string, number> = {
-  Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
-};
-
-function previousMonday(date: string): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  const dow = (d.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
-}
+import { isDue, localClock, localDate, type Schedule, weekMonday } from "../_shared/schedule.ts";
 
 type GroupResult =
   | { group_id: string; skipped: true; reason: string }
@@ -58,17 +21,13 @@ async function runGroup(
   sched: Schedule,
   force: boolean,
 ): Promise<GroupResult> {
-  const local = localNow(sched.timezone);
-  const nowMinutes = Number(local.hour) * 60 + Number(local.minute);
-  const schedMinutes = sched.hour * 60 + sched.minute;
-  const due = ISO_DOW[local.weekday] === sched.day_of_week &&
-    nowMinutes >= schedMinutes && nowMinutes <= schedMinutes + 59;
-  if (!force && !due) {
+  const clock = localClock(sched.timezone);
+  if (!force && !isDue(sched, clock)) {
     return { group_id: sched.group_id, skipped: true, reason: "outside schedule" };
   }
 
-  const localDate = `${local.year}-${local.month}-${local.day}`;
-  const weekStart = previousMonday(localDate);
+  const today = localDate(clock);
+  const weekStart = weekMonday(today);
 
   if (!force) {
     const { data: existingRun } = await supabase
@@ -103,7 +62,7 @@ async function runGroup(
 
     // The app computes the sheet live from its items; the push carries the
     // text and a flag that routes the tap to the digest sheet.
-    const text = buildDigest(items ?? [], localDate);
+    const text = buildDigest(items ?? [], today);
 
     let apnsSent = 0;
     let apnsGone = 0;
