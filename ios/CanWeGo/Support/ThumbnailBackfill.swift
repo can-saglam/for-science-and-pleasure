@@ -23,7 +23,7 @@ enum ThumbnailBackfill {
         let liveURLs = Set(missing.compactMap(\.url))
         attempts = attempts.filter { liveURLs.contains($0.key) }
 
-        var found = false
+        var found: [(id: UUID, image: String)] = []
         for item in missing {
             guard let raw = item.url, let url = URL(string: raw),
                   url.scheme?.hasPrefix("http") == true,
@@ -34,17 +34,24 @@ enum ThumbnailBackfill {
             }
             if let image = await ogImage(at: url) {
                 item.imageUrl = image
-                // Fresh timestamp or the found image never pushes to the
-                // shared table — it would stay stuck on this one phone.
-                item.updatedAt = .now
-                found = true
+                found.append((item.id, image))
                 attempts.removeValue(forKey: raw)
             } else {
                 attempts[raw] = .now
             }
         }
         defaults.set(attempts, forKey: attemptsKey)
-        if found { try? context.save() }
+        guard !found.isEmpty else { return }
+        try? context.save()
+        // Reach the shared table as a column patch, not a full-row push:
+        // this is machine work, not an edit. It must never carry the rest of
+        // the row (which could overwrite a partner's fresher change) and
+        // never look like a person touched the item. The server keeps
+        // updated_at unchanged for image-only writes; other phones derive
+        // their own thumbnail the same way, so nothing needs propagating.
+        for (id, image) in found {
+            await SupabaseSync.patch(id, ["image_url": image])
+        }
     }
 
     /// Maps pages only ever offer the Google Maps app icon as their

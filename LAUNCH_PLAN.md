@@ -489,8 +489,8 @@ shippable to TestFlight, so daily use continues while it transforms.
 ## Checklist
 
 ### Phase 0 — this week
-- [ ] `app_config.min_build` + forced-update screen, shipped to TestFlight before anything else
-- [ ] Backfills/enrichment PATCH their own columns; only human edits bump `updated_at`
+- [x] `app_config.min_build` + forced-update screen, shipped to TestFlight before anything else (build 36)
+- [x] Backfills/enrichment PATCH their own columns; only human edits bump `updated_at`
 - [ ] Supabase paid tier
 - [ ] Duplicate detection on save (URL or title+date), warn not block
 - [ ] Stale-sync banner

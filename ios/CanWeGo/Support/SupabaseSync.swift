@@ -331,21 +331,47 @@ enum SupabaseSync {
         item.updatedAt = row.updated_at
     }
 
-    // MARK: - Deletes
+    // MARK: - Column patches
 
-    /// Mirrors the web's soft delete; `undelete` covers the 5-second Undo.
-    static func setDeleted(_ id: UUID, _ deleted: Bool) {
-        Task {
-            guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
+    /// Writes just the given columns of one row. This is how machine-derived
+    /// data (a backfilled thumbnail) and fill-only enrichment reach the
+    /// server: a full-row push would carry every other field as this phone
+    /// last saw it and could overwrite a partner's fresher edit. Values are
+    /// JSON-ready (String, Double, NSNull). Returns whether the write landed.
+    @discardableResult
+    static func patch(_ id: UUID, _ fields: [String: Any]) async -> Bool {
+        guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return false }
+        do {
             var request = try await request(
                 path: "rest/v1/items",
                 query: [.init(name: "id", value: "eq.\(id.uuidString.lowercased())")]
             )
             request.httpMethod = "PATCH"
             request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
-            let stamp: Any = deleted ? isoFractional.string(from: .now) : NSNull()
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["deleted_at": stamp])
-            _ = try? await URLSession.shared.data(for: request)
+            request.httpBody = try JSONSerialization.data(withJSONObject: fields)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0)
+        } catch {
+            return false
         }
+    }
+
+    /// Column patch with a safety net for edits that must reach the partner:
+    /// if it can't land now (offline, signed out), the item is stamped so
+    /// the next regular sync carries the change as a full row instead.
+    static func patchOrSync(_ item: Item, _ fields: [String: Any], context: ModelContext) async {
+        let landed = await patch(item.id, fields)
+        if !landed {
+            item.updatedAt = .now
+            try? context.save()
+        }
+    }
+
+    // MARK: - Deletes
+
+    /// Mirrors the web's soft delete; `undelete` covers the 5-second Undo.
+    static func setDeleted(_ id: UUID, _ deleted: Bool) {
+        let stamp: Any = deleted ? isoFractional.string(from: .now) : NSNull()
+        Task { await patch(id, ["deleted_at": stamp]) }
     }
 }

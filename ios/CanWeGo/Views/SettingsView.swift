@@ -546,17 +546,26 @@ private struct LocateProposalsSheet: View {
     }
 
     private func apply() {
+        // Fill-only, and sent as column patches so a partner's concurrent
+        // edit elsewhere on the row is never overwritten.
+        var patches: [(Item, [String: Any])] = []
         for p in proposals where accepted.contains(p.id) {
             guard let item = item(for: p) else { continue }
+            var fields: [String: Any] = ["lat": p.lat, "lng": p.lng]
             item.lat = p.lat
             item.lng = p.lng
-            if item.venue == nil { item.venue = p.venue }
-            if item.area == nil { item.area = p.area }
-            if item.address == nil { item.address = p.address }
-            item.updatedAt = .now
+            if item.venue == nil, let venue = p.venue { item.venue = venue; fields["venue"] = venue }
+            if item.area == nil, let area = p.area { item.area = area; fields["area"] = area }
+            if item.address == nil, let address = p.address { item.address = address; fields["address"] = address }
+            patches.append((item, fields))
         }
         try? context.save()
         onDone()
+        Task {
+            for (item, fields) in patches {
+                await SupabaseSync.patchOrSync(item, fields, context: context)
+            }
+        }
     }
 }
 
@@ -600,30 +609,36 @@ struct EnrichProposal: Identifiable {
         additions = adds
     }
 
-    /// Writes only into empty fields, then stamps the item for sync.
-    func apply(to item: Item) {
-        func fill(_ path: ReferenceWritableKeyPath<Item, String?>, _ value: String?) {
+    /// Writes only into empty fields and returns exactly the columns it
+    /// filled — the patch the caller sends, so nothing else on the row is
+    /// touched.
+    func apply(to item: Item) -> [String: Any] {
+        var fields: [String: Any] = [:]
+        func fill(_ path: ReferenceWritableKeyPath<Item, String?>, _ column: String, _ value: String?) {
             guard item[keyPath: path]?.isEmpty != false,
                   let value, !value.isEmpty else { return }
             item[keyPath: path] = value
+            fields[column] = value
         }
-        fill(\.summary, card.summary)
-        fill(\.venue, card.venue)
-        fill(\.area, card.area)
-        fill(\.address, card.address)
-        fill(\.category, card.category)
-        fill(\.price, card.price)
-        fill(\.imageUrl, card.image_url)
-        fill(\.colorHex, card.color)
+        fill(\.summary, "summary", card.summary)
+        fill(\.venue, "venue", card.venue)
+        fill(\.area, "area", card.area)
+        fill(\.address, "address", card.address)
+        fill(\.category, "category", card.category)
+        fill(\.price, "price", card.price)
+        fill(\.imageUrl, "image_url", card.image_url)
+        fill(\.colorHex, "color", card.color)
         if item.lat == nil, let lat = card.lat, let lng = card.lng {
             item.lat = lat
             item.lng = lng
+            fields["lat"] = lat
+            fields["lng"] = lng
         }
         if item.isEvent {
-            fill(\.startsOn, card.starts_on)
-            fill(\.endsOn, card.ends_on)
+            fill(\.startsOn, "starts_on", card.starts_on)
+            fill(\.endsOn, "ends_on", card.ends_on)
         }
-        item.updatedAt = .now
+        return fields
     }
 }
 
@@ -699,12 +714,19 @@ private struct EnrichProposalsSheet: View {
 
     private func apply() {
         Haptics.success()
+        var patches: [(Item, [String: Any])] = []
         for p in proposals where accepted.contains(p.id) {
             guard let item = item(for: p) else { continue }
-            p.apply(to: item)
+            let fields = p.apply(to: item)
+            if !fields.isEmpty { patches.append((item, fields)) }
         }
         try? context.save()
         onDone()
+        Task {
+            for (item, fields) in patches {
+                await SupabaseSync.patchOrSync(item, fields, context: context)
+            }
+        }
     }
 }
 
