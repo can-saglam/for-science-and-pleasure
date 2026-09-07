@@ -154,7 +154,7 @@ struct ShareView: View {
                     .foregroundStyle(.white)
                 Text("Already in your library")
                     .font(.headline)
-                Text("You saved this link before.")
+                Text("One of you saved this link before.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button {

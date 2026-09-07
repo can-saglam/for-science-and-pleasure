@@ -24,6 +24,11 @@ struct CaptureView: View {
     @State private var manual = false
     @State private var confetti = false
     @State private var saved = false
+    /// A save already in the library that the input points at — shown as a
+    /// notice with a way to open it, never as a wall. "Save anyway" sets the
+    /// override and the same input parses through.
+    @State private var existing: Item?
+    @State private var saveAnyway = false
     /// Half height for the one-field input stage; the card preview gets the
     /// full sheet.
     @State private var detent: PresentationDetent = .medium
@@ -89,10 +94,22 @@ struct CaptureView: View {
                 editing = true
                 manual = true
             }
+            // CWG_DUPE (screenshot runs): type in a link already in the
+            // library and send it, to photograph the duplicate notice.
+            if ProcessInfo.processInfo.environment["CWG_DUPE"] != nil,
+               let url = library.compactMap(\.url).first {
+                text = url
+                Task { await parse() }
+            }
         }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task { await loadPhoto(item) }
+        }
+        // A changed input is a new question; the old duplicate verdict goes.
+        .onChange(of: text) { _, _ in
+            existing = nil
+            saveAnyway = false
         }
         .fullScreenCover(isPresented: $cameraOpen) {
             CameraPicker { image in
@@ -216,6 +233,15 @@ struct CaptureView: View {
                 .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
 
+        if let existing {
+            duplicateNotice(existing) {
+                saveAnyway = true
+                self.existing = nil
+                Task { await parse() }
+            }
+            .transition(.opacity)
+        }
+
         Button {
             Haptics.tap()
             let blank = Item()
@@ -304,12 +330,12 @@ struct CaptureView: View {
                 .transition(.opacity)
         }
 
-        // The parser may land on a URL we already have (e.g. after
-        // redirects) — flag it, but leave the decision to the user.
-        if !saved && duplicate(of: draft.url) != nil {
-            Label("Looks like this one's already in your library.", systemImage: "books.vertical")
-                .font(.footnote)
-                .foregroundStyle(.orange)
+        // The parser may land on something we already have — the same URL
+        // after redirects, or the same gig from a different ticket site.
+        // Flag it with a way to the original; the Save button below is the
+        // "save anyway".
+        if !saved, !saveAnyway, let twin = duplicate(ofCard: draft) {
+            duplicateNotice(twin, saveAnyway: nil)
         }
 
         VStack(spacing: 10) {
@@ -376,11 +402,79 @@ struct CaptureView: View {
         return detector?.firstMatch(in: text, range: range)?.url?.absoluteString
     }
 
+    private var library: [Item] {
+        (try? context.fetch(FetchDescriptor<Item>())) ?? []
+    }
+
     private func duplicate(of url: String?) -> Item? {
-        guard let url, !url.isEmpty else { return nil }
-        let target = SavedURLIndex.normalize(url)
-        let all = (try? context.fetch(FetchDescriptor<Item>())) ?? []
-        return all.first { $0.url.map(SavedURLIndex.normalize) == target }
+        DuplicateFinder.match(url: url, title: nil, startsOn: nil, kind: nil, in: library)
+    }
+
+    private func duplicate(ofCard card: Item) -> Item? {
+        DuplicateFinder.match(
+            url: card.url, title: card.title, startsOn: card.startsOn, kind: card.kind,
+            in: library.filter { $0 !== card }
+        )
+    }
+
+    /// "Joyce saved this 2 weeks ago" with a way to the original. Warn, don't
+    /// block: the pair may genuinely want two entries.
+    private func duplicateNotice(_ twin: Item, saveAnyway: (() -> Void)?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(DuplicateFinder.describe(twin))
+                        .font(.footnote.weight(.semibold))
+                    Text("\u{201c}\(twin.title)\u{201d}")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } icon: {
+                Image(systemName: "books.vertical")
+            }
+            .foregroundStyle(.orange)
+
+            HStack(spacing: 10) {
+                Button {
+                    Haptics.tap()
+                    openExisting(twin)
+                } label: {
+                    Label("Open it", systemImage: "arrow.up.right")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(.white.opacity(0.92))
+                .foregroundStyle(AppBackground.base)
+
+                if let saveAnyway {
+                    Button {
+                        Haptics.tap()
+                        saveAnyway()
+                    } label: {
+                        Label("Save anyway", systemImage: "plus")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Close the composer and bring up the original — the same route a
+    /// tapped notification takes.
+    private func openExisting(_ twin: Item) {
+        let id = twin.id
+        dismiss()
+        Task {
+            try? await Task.sleep(for: .seconds(0.4))
+            NotificationCenter.default.post(name: .cwgOpenItem, object: id)
+        }
     }
 
     private func parse() async {
@@ -389,9 +483,10 @@ struct CaptureView: View {
         inputFocused = false
         defer { busy = false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Known URL? Skip the whole parse — nothing new to learn.
-        if let existing = duplicate(of: firstURL(in: trimmed)) {
-            errorMessage = "Already in your library as \u{201c}\(existing.title)\u{201d}."
+        // Known URL? Say so before spending a parse — unless they've already
+        // chosen to save it anyway.
+        if !saveAnyway, let twin = duplicate(of: firstURL(in: trimmed)) {
+            withAnimation(.snappy) { existing = twin }
             return
         }
         do {

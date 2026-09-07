@@ -492,7 +492,7 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] `app_config.min_build` + forced-update screen, shipped to TestFlight before anything else (build 36)
 - [x] Backfills/enrichment PATCH their own columns; only human edits bump `updated_at`
 - [ ] Supabase paid tier
-- [ ] Duplicate detection on save (URL or title+date), warn not block
+- [x] Duplicate detection on save (URL or title+date), warn not block
 - [ ] Stale-sync banner
 - [ ] Search includes the journal
 - [ ] Gone-item states for notification/widget/Spotlight taps
