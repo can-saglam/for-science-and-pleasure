@@ -25,6 +25,8 @@ struct ContentView: View {
     /// An item summoned from outside the lists: a tapped last-chance
     /// notification or a Spotlight result.
     @State private var deepLinked: Item?
+    /// A notification/widget/Spotlight tap on a save that no longer exists.
+    @State private var goneItem = false
 
     /// Drives the stretchy selection pill in the bottom bar.
     @Namespace private var barNamespace
@@ -68,6 +70,11 @@ struct ContentView: View {
             digestOpen = true
         }
         .sheet(item: $deepLinked) { ItemDetailView(item: $0) }
+        .alert("This save was removed", isPresented: $goneItem) {
+            Button("OK") {}
+        } message: {
+            Text("One of you deleted it since, so there's nothing left to open. Everything else is where you left it.")
+        }
         // A last-chance notification tapped while the app is alive.
         .onReceive(NotificationCenter.default.publisher(for: .cwgOpenItem)) { note in
             if let id = note.object as? UUID { openItem(id) }
@@ -226,11 +233,15 @@ struct ContentView: View {
         }
     }
 
-    /// Deep link from a notification or Spotlight: present the item if it
-    /// exists (it may have been deleted since the notification fired).
+    /// Deep link from a notification, the widget or Spotlight: present the
+    /// item if it exists. It may have been deleted since — then say so,
+    /// rather than a tap that appears to do nothing.
     private func openItem(_ id: UUID) {
         ItemGate.pending = nil
-        guard let match = items.first(where: { $0.id == id }) else { return }
+        guard let match = items.first(where: { $0.id == id }) else {
+            goneItem = true
+            return
+        }
         deepLinked = match
     }
 

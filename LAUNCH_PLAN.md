@@ -493,9 +493,9 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [x] Backfills/enrichment PATCH their own columns; only human edits bump `updated_at`
 - [ ] Supabase paid tier
 - [x] Duplicate detection on save (URL or title+date), warn not block
-- [ ] Stale-sync banner
-- [ ] Search includes the journal
-- [ ] Gone-item states for notification/widget/Spotlight taps
+- [x] Stale-sync banner
+- [x] Search includes the journal
+- [x] Gone-item states for notification/widget/Spotlight taps
 - [ ] Accessibility pass (Dynamic Type, VoiceOver, Reduce Motion)
 - [ ] Pull-to-refresh; per-category empty states; share card as image
 - [ ] Transport choice in Settings (Google Maps default; Apple Maps / Citymapper)

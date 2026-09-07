@@ -33,8 +33,9 @@ struct LibraryView: View {
     @FocusState private var searchFocused: Bool
     @State private var archiveOpen = false
     @State private var archiveSide: ArchiveSide = .all
-    /// Brief notice when a pull-to-refresh couldn't reach the server.
-    @State private var refreshFailed = false
+    /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
+    @State private var refreshNotice: (text: String, icon: String)?
+    @State private var syncStatus = SyncStatus.shared
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
 
@@ -302,11 +303,10 @@ struct LibraryView: View {
                         .transition(.opacity)
                 }
             }
-            // A quiet drop-in when pull-to-refresh couldn't reach the
-            // server — success stays silent apart from the haptic.
+            // A quiet drop-in after pull-to-refresh, either way.
             .overlay(alignment: .top) {
-                if refreshFailed {
-                    Label("Couldn't refresh. Check your connection", systemImage: "wifi.slash")
+                if let refreshNotice {
+                    Label(refreshNotice.text, systemImage: refreshNotice.icon)
                         .font(.footnote.weight(.medium))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -438,8 +438,85 @@ struct LibraryView: View {
         }
     }
 
+    private func showRefreshNotice(_ text: String, icon: String) {
+        withAnimation(.snappy) { refreshNotice = (text, icon) }
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            withAnimation(.snappy) { refreshNotice = nil }
+        }
+    }
+
+    /// A day without a successful sync while online: say so, say why if we
+    /// know, and offer a retry. Dismissible, but it returns after another
+    /// day of the same — a library quietly drifting apart is the one thing
+    /// a shared list must never do silently.
+    private var staleBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Last synced \(syncStatus.lastSyncedAt?.formatted(.relative(presentation: .named)) ?? "a while ago")")
+                            .font(.footnote.weight(.semibold))
+                        Text(syncStatus.problem ?? "Couldn't reach the server, though you're online.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.triangle.2.circlepath.circle")
+                }
+                .foregroundStyle(.orange)
+                Spacer(minLength: 0)
+                Button {
+                    Haptics.tap()
+                    withAnimation(.snappy) { syncStatus.staleBannerDismissedAt = .now }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+            Button {
+                Haptics.tap()
+                Task {
+                    await SupabaseSync.sync(context: context)
+                    if SyncStatus.shared.problem == nil {
+                        Haptics.success()
+                        showRefreshNotice("Updated just now", icon: "checkmark")
+                    }
+                }
+            } label: {
+                Label(syncStatus.syncing ? "Syncing…" : "Try again", systemImage: "arrow.clockwise")
+                    .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .disabled(syncStatus.syncing)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.06), in: .rect(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.orange.opacity(0.25), lineWidth: 1)
+        )
+    }
+
     private var list: some View {
         List {
+            // CWG_STALE only exists so screenshot runs can photograph the banner.
+            if (syncStatus.isStale && SupabaseAuth.shared.signedIn)
+                || ProcessInfo.processInfo.environment["CWG_STALE"] != nil {
+                staleBanner
+                    .padding(.top, 6)
+                    .cardListRow()
+                    .transition(.opacity)
+            }
+
             if categories.count > 1 || areas.count > 1 {
                 // Not cardListRow(): its insets would win over these, and
                 // the row above and below the chips wants to be tighter.
@@ -465,13 +542,13 @@ struct LibraryView: View {
             if visible.isEmpty && been.isEmpty && missed.isEmpty {
                 ContentUnavailableView {
                     Label(
-                        base.isEmpty ? "Nothing saved yet" : "Nothing matches",
+                        base.isEmpty ? emptyTitle : "Nothing matches",
                         systemImage: kind == Item.Kind.place ? "fork.knife" : "building.columns"
                     )
                 } description: {
                     Text(
                         base.isEmpty
-                            ? "Anything you two save lands here."
+                            ? emptyPrompt
                             : "Try a different word, or clear the filters."
                     )
                 } actions: {
@@ -499,18 +576,15 @@ struct LibraryView: View {
         // short row pins the old height back explicitly (frame(minHeight:))
         // so the rest of the page keeps its original rhythm.
         .environment(\.defaultMinListRowHeight, 1)
-        // Pull-to-refresh answers either way: a success thump, or a brief
-        // notice when the sync couldn't get through.
+        // Pull-to-refresh answers either way: a thump and "Updated just
+        // now", or a brief notice when the sync couldn't get through.
         .refreshable {
             await SupabaseSync.sync(context: context)
             if SyncStatus.shared.problem == nil {
                 Haptics.success()
+                showRefreshNotice("Updated just now", icon: "checkmark")
             } else {
-                withAnimation(.snappy) { refreshFailed = true }
-                Task {
-                    try? await Task.sleep(for: .seconds(3))
-                    withAnimation(.snappy) { refreshFailed = false }
-                }
+                showRefreshNotice("Couldn't refresh. Check your connection", icon: "wifi.slash")
             }
         }
         // Tapping the tab you're already on brings the list home.
@@ -560,12 +634,39 @@ struct LibraryView: View {
         .onMove(perform: canReorder ? move : nil)
     }
 
+    // MARK: - Empty states
+
+    private var emptyTitle: String {
+        kind == Item.Kind.place ? "No places yet" : "No events yet"
+    }
+
+    /// One concrete way to get the first save in, tuned to the tab.
+    private var emptyPrompt: String {
+        kind == Item.Kind.place
+            ? "Share a restaurant, bar or shop from Safari, Google Maps or Instagram — it lands here for both of you."
+            : "Share a gig from DICE, an exhibition from a gallery's page, or paste any link — it lands here for both of you."
+    }
+
     /// The journal at the end of the list. Events keep theirs folded into a
-    /// collapsed Archive; Places just show where you've been.
+    /// collapsed Archive; Places just show where you've been. A search
+    /// unfolds it: "did we go to that?" is half of what search is for.
     @ViewBuilder
     private var journal: some View {
         if kind == Item.Kind.event {
-            eventArchive
+            if !query.isEmpty {
+                if !archiveAll.isEmpty {
+                    SectionHeader(title: "We Did Go", count: archiveAll.count)
+                        .frame(minHeight: 44)
+                        .cardListRow()
+                    ForEach(archiveAll) { item in
+                        ItemCardRow(item: item, compact: true) {
+                            selected = item
+                        }
+                    }
+                }
+            } else {
+                eventArchive
+            }
         } else if !been.isEmpty {
             SectionHeader(title: "Been", count: been.count)
                 .frame(minHeight: 44)
