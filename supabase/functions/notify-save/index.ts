@@ -1,7 +1,8 @@
 // notify-save: called by the app right after a confirmed in-app save.
-// Pushes "X added: …" to the other member's devices (never the caller's).
-import { createClient } from "npm:@supabase/supabase-js@2";
+// Pushes "X added: …" to the other members of the caller's group (never
+// the caller's own devices, never anyone outside the group).
 import { corsHeaders } from "../_shared/geo.ts";
+import { admin, resolveCaller } from "../_shared/groups.ts";
 import { notifyPartnersOfSave } from "../_shared/notify.ts";
 
 Deno.serve(async (req) => {
@@ -9,16 +10,9 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
   try {
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const userClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: isMember } = await userClient.rpc("is_member");
-    const { data: userData } = await userClient.auth.getUser();
-    if (!isMember || !userData.user) {
-      return new Response(JSON.stringify({ error: "not a member" }), {
+    const caller = await resolveCaller(req);
+    if (!caller) {
+      return new Response(JSON.stringify({ error: "not in a group" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -32,13 +26,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-    const { data: item } = await admin
+    // Read through the caller's own RLS: an item outside their group is
+    // simply not found, so nobody can make us notify a group they're not in.
+    const { data: item } = await caller.client
       .from("items")
-      .select("id, title, venue, status, deleted_at")
+      .select("id, title, venue, status, deleted_at, group_id")
       .eq("id", item_id)
       .maybeSingle();
     if (!item || item.deleted_at || item.status !== "saved") {
@@ -47,12 +39,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    const result = await notifyPartnersOfSave(admin, {
+    const result = await notifyPartnersOfSave(admin(), {
       itemId: item.id,
       title: item.title,
       venue: item.venue,
-      adderUserId: userData.user.id,
-      adderEmail: userData.user.email,
+      groupId: item.group_id,
+      adderUserId: caller.userId,
+      adderEmail: caller.email,
     });
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

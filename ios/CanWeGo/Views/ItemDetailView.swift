@@ -25,7 +25,7 @@ struct ItemDetailView: View {
 
     /// "Added by Can" — same as the web; quietly absent when unknown.
     private var addedBy: String? {
-        item.addedByEmail.map { "Added by \(MembersStore.shared.name(for: $0))" }
+        MembersStore.shared.saverName(for: item).map { "Added by \($0)" }
     }
 
     /// "Edited by Joyce · yesterday" — only once the row has actually been

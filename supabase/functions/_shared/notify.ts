@@ -1,14 +1,16 @@
-// Partner-save notifications: push "X added: …" to the other member's
-// iPhones via APNs (apns_tokens, written by the iOS app after sign-in).
-// Web push is retired — the PWA isn't used anymore.
+// Partner-save notifications: push "X added: …" to the other members of
+// the saver's group (apns_tokens, written by the iOS app after sign-in).
+// Scoped by group since 1b — a token outside the group never hears about it.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { apnsConfigured, sendApnsAlert } from "./apns.ts";
+import { displayName, groupTokens } from "./groups.ts";
 
 export interface SaveNotification {
   itemId: string;
   title: string;
   venue: string | null;
-  adderUserId?: string | null;
+  groupId: string;
+  adderUserId: string | null;
   adderEmail?: string | null;
 }
 
@@ -18,35 +20,19 @@ export async function notifyPartnersOfSave(
 ): Promise<{ sent: number; failed: number }> {
   if (!apnsConfigured()) return { sent: 0, failed: 0 };
 
-  let name = save.adderEmail?.split("@")[0] ?? "Someone";
-  if (save.adderEmail) {
-    const { data: member } = await admin
-      .from("members")
-      .select("display_name")
-      .eq("email", save.adderEmail)
-      .maybeSingle();
-    if (member?.display_name) name = member.display_name;
-  }
-
-  const { data: tokens } = await admin
-    .from("apns_tokens")
-    .select("token, email");
-  const adderEmail = save.adderEmail?.toLowerCase();
-  const iphones = (tokens ?? []).filter(
-    (t: { token: string; email: string }) =>
-      !adderEmail || t.email.toLowerCase() !== adderEmail,
-  );
+  const name = await displayName(admin, save.adderUserId, save.adderEmail);
+  const tokens = await groupTokens(admin, save.groupId, save.adderUserId);
 
   const body = `${name} added: ${save.title}${save.venue ? ` — ${save.venue}` : ""}`;
   let sent = 0;
   let failed = 0;
-  for (const device of iphones) {
+  for (const token of tokens) {
     try {
-      const result = await sendApnsAlert(device.token, body);
+      const result = await sendApnsAlert(token, body);
       if (result === "sent") {
         sent++;
       } else if (result === "gone") {
-        await admin.from("apns_tokens").delete().eq("token", device.token);
+        await admin.from("apns_tokens").delete().eq("token", token);
       } else {
         failed++;
       }

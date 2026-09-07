@@ -1,9 +1,9 @@
 // ingest: capture endpoint for the iOS share-sheet Shortcut. No user JWT —
 // authenticated by a shared secret header. Parses the input and inserts the
 // item directly (service role) into the shared library.
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard } from "../_shared/extract.ts";
+import { admin, groupForEmail } from "../_shared/groups.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 import { notifyPartnersOfSave } from "../_shared/notify.ts";
 
@@ -37,10 +37,18 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const supabase = admin();
+
+    // No JWT on this path, so the group comes from the Shortcut's added_by
+    // email. Unknown sender → nowhere to file the save → refuse rather than
+    // guess a group.
+    const owner = await groupForEmail(supabase, body.added_by);
+    if (!owner) {
+      return new Response(
+        JSON.stringify({ error: "added_by must be the email of a member of a group" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     let row;
     try {
@@ -51,6 +59,7 @@ Deno.serve(async (req) => {
         const { data: existing } = await supabase
           .from("items")
           .select("id, title")
+          .eq("group_id", owner.groupId)
           .eq("url", card.url)
           .is("deleted_at", null)
           .limit(1)
@@ -83,6 +92,9 @@ Deno.serve(async (req) => {
         source: "shortcut",
         raw_input: body.text ?? "(screenshot)",
         added_by_email: body.added_by ?? null,
+        group_id: owner.groupId,
+        created_by: owner.userId,
+        updated_by: owner.userId,
       };
     } catch (parseErr) {
       // Parsing failed (e.g. missing API key) — still save the raw dump so
@@ -96,6 +108,9 @@ Deno.serve(async (req) => {
         source: "shortcut",
         raw_input: body.text ?? "(screenshot)",
         added_by_email: body.added_by ?? null,
+        group_id: owner.groupId,
+        created_by: owner.userId,
+        updated_by: owner.userId,
       };
     }
 
@@ -108,6 +123,8 @@ Deno.serve(async (req) => {
         itemId: data.id,
         title: data.title,
         venue: data.venue,
+        groupId: owner.groupId,
+        adderUserId: owner.userId,
         adderEmail: row.added_by_email ?? null,
       });
     } catch (notifyErr) {

@@ -1,8 +1,8 @@
 // suggest: "free on Saturday?" — Claude proposes 2-3 day plans from the
 // couple's own library for a given date. Authenticated (member JWT).
 import Anthropic from "npm:@anthropic-ai/sdk";
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/extract.ts";
+import { resolveCaller } from "../_shared/groups.ts";
 
 const PLANS_SCHEMA = {
   type: "object",
@@ -38,15 +38,9 @@ const PLANS_SCHEMA = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } },
-    );
-    const { data: isMember } = await supabase.rpc("is_member");
-    if (!isMember) {
-      return new Response(JSON.stringify({ error: "not a member" }), {
+    const caller = await resolveCaller(req);
+    if (!caller) {
+      return new Response(JSON.stringify({ error: "not in a group" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -61,7 +55,7 @@ Deno.serve(async (req) => {
     }
 
     // RLS-scoped read via the caller's JWT
-    const { data: items, error } = await supabase
+    const { data: items, error } = await caller.client
       .from("items")
       .select("id, kind, status, title, venue, area, category, price, starts_on, ends_on, lat, lng")
       .is("deleted_at", null)

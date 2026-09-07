@@ -36,6 +36,9 @@ final class Item {
     /// Who last made a *human* edit — stamped server-side from the JWT, so
     /// a backfill or thumbnail write never changes it.
     var updatedBy: UUID?
+    /// Who saved it — stamped server-side from the JWT (Phase 1b). Replaces
+    /// addedByEmail as the source for "Added by"; the email stays for old rows.
+    var createdBy: UUID?
     /// Manual position in the Places list (long-press drag). Local-only —
     /// never synced, so each of you can keep your own order.
     var sortOrder: Double?

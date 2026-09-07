@@ -1,9 +1,10 @@
 import Foundation
 import Observation
 
-/// The weekly digest's send time — one shared row in Supabase that both
-/// members read and write, so the notification always lands on both phones
-/// at the same moment. ISO weekday: Monday = 1.
+/// The weekly digest's send time — one row per group in Supabase
+/// (`digest_schedules`, RLS: yours only) that every member reads and
+/// writes, so the notification lands on all phones at the same moment.
+/// ISO weekday: Monday = 1.
 @Observable
 @MainActor
 final class DigestScheduleStore {
@@ -13,6 +14,9 @@ final class DigestScheduleStore {
     var hour = 10
     var minute = 0
     var loaded = false
+    /// The group the row belongs to — learned on pull, used to target the
+    /// PATCH. RLS would scope an unfiltered PATCH anyway; this is belt and braces.
+    private var groupId: UUID?
 
     private static let cacheKey = "digestSchedule"
 
@@ -44,12 +48,20 @@ final class DigestScheduleStore {
         var minute: Int
     }
 
+    private struct PulledRow: Decodable {
+        var group_id: UUID
+        var day_of_week: Int
+        var hour: Int
+        var minute: Int
+    }
+
     func pull() async {
         guard SupabaseAuth.shared.signedIn else { return }
         do {
-            let request = try await request(query: "select=day_of_week,hour,minute&limit=1")
+            let request = try await request(query: "select=group_id,day_of_week,hour,minute&limit=1")
             let (data, _) = try await URLSession.shared.data(for: request)
-            guard let row = try JSONDecoder().decode([Row].self, from: data).first else { return }
+            guard let row = try JSONDecoder().decode([PulledRow].self, from: data).first else { return }
+            groupId = row.group_id
             dayOfWeek = row.day_of_week
             hour = row.hour
             minute = row.minute
@@ -63,7 +75,8 @@ final class DigestScheduleStore {
     func push() async {
         guard SupabaseAuth.shared.signedIn else { return }
         do {
-            var request = try await request(query: "id=eq.true")
+            let filter = groupId.map { "group_id=eq.\($0.uuidString.lowercased())" } ?? "group_id=not.is.null"
+            var request = try await request(query: filter)
             request.httpMethod = "PATCH"
             request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
             request.httpBody = try JSONEncoder().encode(
@@ -79,7 +92,7 @@ final class DigestScheduleStore {
     private func request(query: String) async throws -> URLRequest {
         let jwt = try await SupabaseAuth.shared.validToken()
         var components = URLComponents(
-            url: SupabaseAuth.baseURL.appending(path: "rest/v1/digest_schedule"),
+            url: SupabaseAuth.baseURL.appending(path: "rest/v1/digest_schedules"),
             resolvingAgainstBaseURL: false
         )!
         components.percentEncodedQuery = query

@@ -34,6 +34,21 @@ final class SupabaseAuth {
     var signedIn: Bool { session != nil }
     var email: String? { session?.email }
 
+    /// The signed-in user's id, read from the access token's `sub` claim
+    /// (so it needs no extra field in the stored session).
+    var userId: UUID? {
+        guard let token = session?.accessToken else { return nil }
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var b64 = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sub = claims["sub"] as? String
+        else { return nil }
+        return UUID(uuidString: sub)
+    }
+
     private static let storeKey = "supabaseSession"
     private var defaults: UserDefaults {
         UserDefaults(suiteName: SharedInbox.groupID) ?? .standard

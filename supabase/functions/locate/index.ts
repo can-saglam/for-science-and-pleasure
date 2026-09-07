@@ -5,8 +5,8 @@
 // Auth mirrors parse: members' JWTs from the web app, or the ingest secret
 // from the iOS app. Stateless — proposals are returned, never written.
 import Anthropic from "npm:@anthropic-ai/sdk";
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders, geocode, resolveMapsLink } from "../_shared/geo.ts";
+import { resolveCaller } from "../_shared/groups.ts";
 
 interface LocateItem {
   id: string;
@@ -62,15 +62,11 @@ Deno.serve(async (req) => {
     const secret = req.headers.get("x-ingest-secret");
     const secretOk = Boolean(secret) && secret === Deno.env.get("INGEST_SECRET");
     if (!secretOk) {
-      const authHeader = req.headers.get("Authorization") ?? "";
-      const supabase = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_ANON_KEY")!,
-        { global: { headers: { Authorization: authHeader } } },
-      );
-      const { data: isMember, error: memberErr } = await supabase.rpc("is_member");
-      if (memberErr || !isMember) {
-        return new Response(JSON.stringify({ error: "not a member" }), {
+      // A signed-in user who isn't in a group yet can't use the parser
+      // either — there's nowhere for the result to go.
+      const caller = await resolveCaller(req);
+      if (!caller) {
+        return new Response(JSON.stringify({ error: "not in a group" }), {
           status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });

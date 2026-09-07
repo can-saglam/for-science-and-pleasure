@@ -2,8 +2,7 @@
 // Google/Apple Calendar and opening/closing markers stay in sync automatically.
 // Auth via ?key= (calendar apps need URL-embedded auth). Prefer FEED_SECRET;
 // falls back to INGEST_SECRET until FEED_SECRET is configured.
-import { createClient } from "npm:@supabase/supabase-js@2";
-import { isFeedKeyAuthorized } from "../_shared/auth.ts";
+import { admin, groupForFeedKey } from "../_shared/groups.ts";
 
 function icsEscape(s: string): string {
   return s.replace(/([,;\\])/g, "\\$1");
@@ -30,18 +29,19 @@ function allDay(uid: string, date: string, summary: string, url?: string | null)
 }
 
 Deno.serve(async (req) => {
-  const key = new URL(req.url).searchParams.get("key");
-  if (!isFeedKeyAuthorized(key)) {
+  // The key in the URL is the group's feed_token (or the pre-groups
+  // secret, which still maps to the founding group). It picks the group;
+  // everything below is scoped to it.
+  const supabase = admin();
+  const groupId = await groupForFeedKey(supabase, new URL(req.url).searchParams.get("key"));
+  if (!groupId) {
     return new Response("unauthorized", { status: 401 });
   }
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
   const { data: items, error } = await supabase
     .from("items")
     .select("id, kind, status, title, starts_on, ends_on, url")
+    .eq("group_id", groupId)
     .is("deleted_at", null)
     .in("status", ["saved", "planned"]);
   if (error) return new Response(String(error.message), { status: 500 });

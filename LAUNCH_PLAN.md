@@ -210,9 +210,11 @@ than a hope.
   friends; `group_id` becomes non-null; membership-count trigger enforces the
   4-person cap. Retire the singleton `digest_schedule` and `members`.
 - **Ships with a tested down-migration.** The RLS flip is the one step that
-  can lock you out of your own data; the revert script is written and run
-  once against a local `supabase db reset` copy *before* 1b goes up, so
-  rolling back is minutes, not a scramble.
+  can lock you out of your own data; the revert script
+  (`supabase/rollback/0017_groups_flip_down.sql`) was run against a staging
+  copy of production *before* 1b went up, so rolling back is minutes, not a
+  scramble. To revert: run it with `supabase db query --linked -f`, redeploy
+  the edge functions from the commit before 1b, lower `min_build` if raised.
 - Raise `min_build` to the 1a client so nothing older can write.
 - Update edge functions that use the service role to scope by group:
   `notify.ts` (notify group members, not "all tokens"), `send-digest` (loop
@@ -515,14 +517,17 @@ shippable to TestFlight, so daily use continues while it transforms.
 - [ ] Time labels + This Week + widget evaluate in home timezone (snapshot carries it); dates format in device locale
 - [ ] Map default by distance from home; distance chips hide beyond 100 km
 - [x] "Edited by" line from `updated_by` (build 40)
-- [ ] iOS sync carries `group_id` end to end — shipped in build 40 on 7 Sep; run for a week → 1b no earlier than 14 Sep
+- [x] iOS sync carries `group_id` end to end — build 40, 7 Sep. The week-long soak was replaced (at Can's call) by a full rehearsal on a throwaway staging project: production restored from the JSON backup, 46-check RLS battery with real JWTs (Can, Joyce, a stranger) run in the 1a state, after the flip, after the rollback, and after re-applying
 
 ### Phase 1b — flip security
-- [ ] RLS → `is_in_group`; `group_id` non-null; 4-member trigger; retire singleton digest schedule and `members`
-- [ ] Down-migration written and tested on a local copy before 1b goes up
-- [ ] Raise `min_build` to the 1a client
-- [ ] Scope edge functions (notify, digest, ingest, calendar, suggest) by group
-- [ ] Per-group ICS token, rotated on leave
+- [x] RLS → `is_in_group`; `group_id` non-null; `created_by` added and backfilled; 4-member trigger; retire singleton digest schedule, `members`, dead `digests`/`push_subscriptions` (`0017_groups_flip.sql`, applied 7 Sep, ledger 0017)
+- [x] Down-migration written and tested — `supabase/rollback/0017_groups_flip_down.sql`; on staging: 1a green → up → 1b green → down → 1a green → up → 1b green
+- [ ] Raise `min_build` to 41 once build 41 is installed on both phones (40 still reads/writes items fine against 1b; only its digest-time setting is dead)
+- [x] Scope edge functions by group — `_shared/groups.ts` (`resolveCaller`, `groupForFeedKey`, `groupForEmail`, `groupTokens`); notify, notify-save, parse, locate, suggest, ingest, calendar, digest, send-digest (per-group runs in the group's timezone, `digest_runs` keyed by group + week); 23-check function battery on staging
+- [x] Per-group ICS token (`groups.feed_token`); the old key still resolves to the founding group so existing calendar subscriptions keep updating — rotation on leave lands with Phase 2b
+- [x] iOS build 41: `digest_schedules` per group, `created_by` synced, "Added by" from profiles, `members` gone from the client
+
+Found by the rehearsal, fixed before production: tokens registered between 1a and 1b had no `user_id` (NOT NULL would have failed — 0017 now backfills); the 1a mirror trigger's unfiltered UPDATE was rejected by safeupdate, so changing the digest time in build 40 never worked (1b removes the singleton); `gen_random_bytes` needs the `extensions.` prefix; `is_member()` had to go after its own table.
 
 ### Phase 2
 - [ ] Sign in with Apple via Supabase id_token exchange

@@ -4,33 +4,35 @@ import Observation
 /// Display names for the people in your library — "Added by Can",
 /// "Edited by Joyce" — cached in the App Group so they survive offline.
 ///
-/// Two lookups for now: by email (the legacy `members` table and
-/// `items.added_by_email`) and by user id (`profiles`, which replaces it
-/// from Phase 1a). The email path goes away with the `members` table in 1b.
+/// Names come from `profiles` (RLS: your group only), keyed by user id.
+/// Rows saved before Phase 1b only carry an email; for those the bit before
+/// the @ is shown, so nothing ever renders as a raw address.
 @Observable
 @MainActor
 final class MembersStore {
     static let shared = MembersStore()
 
-    private static let cacheKey = "memberNames"
     private static let profilesCacheKey = "profileNames"
 
-    /// email → display name.
-    private(set) var names: [String: String]
     /// user id (lowercased uuid string) → display name.
     private(set) var namesByUser: [String: String]
 
     private init() {
         let defaults = UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
-        names = defaults.dictionary(forKey: Self.cacheKey) as? [String: String] ?? [:]
         namesByUser = defaults.dictionary(forKey: Self.profilesCacheKey) as? [String: String] ?? [:]
     }
 
-    /// "Added by Can" — display name if known, otherwise the bit before
-    /// the @, capitalised, so the row never shows a raw address.
+    /// Who saved an item: profile name when the row carries a user id,
+    /// otherwise derived from the legacy email. Nil when there's neither.
+    func saverName(for item: Item) -> String? {
+        if let id = item.createdBy, let name = name(forUser: id) { return name }
+        if let email = item.addedByEmail { return name(for: email) }
+        return nil
+    }
+
+    /// Fallback for legacy email-only rows: the bit before the @, capitalised.
     func name(for email: String) -> String {
-        if let name = names[email.lowercased()], !name.isEmpty { return name }
-        return String(email.split(separator: "@").first ?? "").capitalized
+        String(email.split(separator: "@").first ?? "").capitalized
     }
 
     /// Display name for a user id, or nil when we don't know them (yet).
@@ -41,24 +43,6 @@ final class MembersStore {
 
     func refresh() async {
         guard SupabaseAuth.shared.signedIn else { return }
-        await refreshMembers()
-        await refreshProfiles()
-    }
-
-    private func refreshMembers() async {
-        struct Row: Decodable {
-            let email: String
-            let display_name: String?
-        }
-        guard let rows: [Row] = await fetch(table: "members", select: "email,display_name"),
-              !rows.isEmpty else { return }
-        names = Dictionary(
-            uniqueKeysWithValues: rows.map { ($0.email.lowercased(), $0.display_name ?? "") }
-        )
-        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(names, forKey: Self.cacheKey)
-    }
-
-    private func refreshProfiles() async {
         struct Row: Decodable {
             let user_id: UUID
             let display_name: String?
@@ -71,7 +55,7 @@ final class MembersStore {
         (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
     }
 
-    /// RLS scopes both tables to the caller's group; a failure just leaves
+    /// RLS scopes the table to the caller's group; a failure just leaves
     /// the cached (or derived) names in place.
     private func fetch<T: Decodable>(table: String, select: String) async -> [T]? {
         do {

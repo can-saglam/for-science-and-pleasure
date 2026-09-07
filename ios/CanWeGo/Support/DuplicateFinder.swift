@@ -41,12 +41,10 @@ enum DuplicateFinder {
     /// moved to the journal.
     @MainActor
     static func describe(_ existing: Item) -> String {
-        let who: String
-        if let email = existing.addedByEmail {
-            who = email == SupabaseAuth.shared.email ? "You" : MembersStore.shared.name(for: email)
-        } else {
-            who = "Someone"
-        }
+        let mine = (existing.createdBy != nil && existing.createdBy == SupabaseAuth.shared.userId)
+            || (existing.createdBy == nil && existing.addedByEmail != nil
+                && existing.addedByEmail == SupabaseAuth.shared.email)
+        let who = mine ? "You" : (MembersStore.shared.saverName(for: existing) ?? "Someone")
         let when = existing.createdAt.formatted(.relative(presentation: .named))
         var line = "\(who) saved this \(when)."
         if existing.isDone { line += " It's in We Did Go." }
