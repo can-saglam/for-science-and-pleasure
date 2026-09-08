@@ -467,12 +467,19 @@ than a hope.
   metrics, no third-party SDKs.
 - **Export my data** in Settings: a JSON of the group's items (active +
   journal, with notes and attribution) via the share sheet.
-- **App Review kit**: a permanent demo group with seeded saves, a
-  never-expiring invite code, and a demo sign-in in the review notes, so
-  reviewers can walk invite → join → shared library alone. The demo group is
-  free-tier and seeded with **exactly four exhibitions**, so the reviewer
-  meets the paywall on the fifth save and can exercise the sandbox purchase
-  without hunting for it.
+- **App Review kit**: a permanent demo group with seeded saves and a
+  never-expiring invite code, so reviewers can walk invite → join → shared
+  library alone. **No credentials, ever**: reviewers sign in with their own
+  Apple ID and the review notes carry only the invite code. (Lesson from
+  8 Sep: the real account's password sat in TestFlight's "Sign-in required"
+  for a month, and Apple's automated build runs signed in daily and marked,
+  edited and deleted real saves.) The demo group is a sandbox by
+  construction — a nightly job re-seeds its items, drops every member but
+  the demo owner (so reviewer Apple IDs don't fill the 4-seat cap) and
+  prunes the orphan personal groups those sign-ins create. It is free-tier
+  and seeded with **exactly four exhibitions**, so the reviewer meets the
+  paywall on the fifth save and can exercise the sandbox purchase without
+  hunting for it.
 - **External TestFlight beta** for a few weeks with the real paywall active
   (TestFlight makes purchases sandbox/free anyway).
 - **Apple Small Business Program**: enrol before the first sale — 15%
@@ -568,7 +575,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 ### Phase 4
 - [ ] Legal pages, App Store assets, privacy labels
 - [ ] Export my data (JSON)
-- [ ] App Review kit: free-tier demo group seeded to the cap, permanent invite code, review notes
+- [ ] App Review kit: free-tier demo group seeded to the cap, permanent invite code, nightly reset; review notes carry the code only — never an account password
 - [ ] Apple Small Business Program enrolment
 - [ ] Production APNs key check
 - [ ] External TestFlight beta, then launch
