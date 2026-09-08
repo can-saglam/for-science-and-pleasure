@@ -43,22 +43,30 @@ struct MapPinsView: View {
         )
     }
 
+    /// The opening frame is the city, not the region: ~40 km covers Greater
+    /// London edge to edge (or any metro), while a sculpture park on the
+    /// coast an hour away stays on the map but doesn't drag the first view
+    /// out to show the whole south-east. Being "at home" for the user's own
+    /// dot is the looser 100 km in `HomeStore` — a day trip is still home.
+    private static let openingRadius: CLLocationDistance = 40_000
+
     /// What the map frames when it opens: the saves around home (a single
     /// Paris pin mustn't zoom a London library out to show both), plus the
-    /// user when they're within ~100 km of home. Away from home the map opens
-    /// on home, not on the user — that's where the library is. A library
-    /// with nothing near home at all frames whatever it has.
+    /// user when they're within the same radius. Away from home the map
+    /// opens on home, not on the user — that's where the library is. A
+    /// library with nothing near home at all frames whatever it has.
     private var openingCoordinates: [CLLocationCoordinate2D] {
         let home = HomeStore.shared
         let here = LocationStore.shared.location
         let all = pinned.map(\.coordinate)
         guard let homeCoord = home.home.coordinate else { return all }
         let homeLoc = CLLocation(latitude: homeCoord.latitude, longitude: homeCoord.longitude)
-        var near = all.filter {
-            CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: homeLoc) < 100_000
+        func close(_ c: CLLocationCoordinate2D) -> Bool {
+            CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: homeLoc) < Self.openingRadius
         }
+        var near = all.filter(close)
         if near.isEmpty { return all }
-        if let here, home.isNearHome(here) { near.append(here.coordinate) }
+        if let here, close(here.coordinate) { near.append(here.coordinate) }
         return near
     }
 
