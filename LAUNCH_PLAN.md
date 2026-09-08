@@ -555,7 +555,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [ ] Home confirmation step in onboarding (city not borough; metro name offered as default; free-text fix)
 - [x] Persist Apple's one-time full name before onboarding renders — `MembersStore.claimDisplayName` (fill-only: never overwrites a chosen name) runs inside the sign-in, short style ("Can")
 - [ ] Onboarding: personal group, display name (required), home detection (or typed; ambiguous → pick), solo/join, notification priming; skipped on a second device
-- [~] Apple ID revocation check on launch (`AppleSignIn.checkCredentialState`: revoked/notFound → sign out, local store untouched; offline leaves it alone); re-auth sheet on refresh failure still to do
+- [x] Apple ID revocation check on launch (`AppleSignIn.checkCredentialState`: revoked/notFound → sign out, local store untouched; offline leaves it alone). Re-auth on refresh failure: a 4xx on renewal already signed out; the sign-in screen now explains it ("Your session expired — sign in again to keep syncing. Everything you saved is still here.") — `SupabaseAuth.sessionExpired`, cleared by the next sign-in. The SwiftData store is never touched by sign-out
 - [ ] "Former member" tombstone on account deletion
 - [ ] Guided first save with own link; share-sheet teaching (onboarding step + library card)
 - [ ] Invite codes + share-sheet message; reserve `canwego.app`, fix `/join/CODE` format

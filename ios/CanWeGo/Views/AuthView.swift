@@ -14,6 +14,7 @@ struct AuthView: View {
     /// One nonce per Apple attempt; regenerated when the sheet is requested.
     @State private var nonce = AppleSignIn.makeNonce()
     @FocusState private var focused: Field?
+    private var auth: SupabaseAuth { SupabaseAuth.shared }
 
     private enum Field { case email, password }
 
@@ -27,9 +28,12 @@ struct AuthView: View {
 
             VStack(spacing: 18) {
                 LogoTitle(height: 46)
-                Text("Sign in to your shared library.")
+                Text(auth.sessionExpired
+                     ? "Your session expired — sign in again to keep syncing. Everything you saved is still here."
+                     : "Sign in to your shared library.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             .padding(.bottom, 36)
 

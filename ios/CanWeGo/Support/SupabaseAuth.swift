@@ -28,8 +28,17 @@ final class SupabaseAuth {
     }
 
     private(set) var session: Session? {
-        didSet { persist() }
+        didSet {
+            persist()
+            if session != nil { sessionExpired = false }
+        }
     }
+
+    /// Set when the server refused to renew the session (revoked token
+    /// family, deleted account…) and the app signed itself out. The sign-in
+    /// screen reads it to explain the sudden front door — and to say that
+    /// nothing local was lost, because it wasn't: the store stays put.
+    private(set) var sessionExpired = false
 
     var signedIn: Bool { session != nil }
     var email: String? { session?.email }
@@ -162,6 +171,7 @@ final class SupabaseAuth {
             // Anything else (offline, 5xx) keeps the session for next time.
             if let rejection = error as? AuthError, (400...499).contains(rejection.status) {
                 signOut()
+                sessionExpired = true
             }
             throw error
         }
