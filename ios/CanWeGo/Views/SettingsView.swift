@@ -16,9 +16,6 @@ struct SettingsView: View {
     @State private var enrichProposals: [EnrichProposal]?
     @State private var digest = DigestScheduleStore.shared
     @State private var digestPreview = false
-    /// Photos bleeding into list cards — same key ItemCard reads.
-    @AppStorage("cardThumbnails", store: UserDefaults(suiteName: SharedInbox.groupID))
-    private var cardThumbnails = true
     /// Which maps app gets the directions taps — same key `TransportApp` reads.
     @AppStorage(TransportApp.key, store: UserDefaults(suiteName: SharedInbox.groupID))
     private var transportApp = TransportApp.google.rawValue
@@ -117,11 +114,6 @@ struct SettingsView: View {
 
                 Section("Appearance") {
                     themeRow
-                    Toggle(isOn: $cardThumbnails) {
-                        row("Photos on cards", icon: "photo.fill")
-                    }
-                    .tint(AppBackground.accent)
-                    .sensoryFeedback(.selection, trigger: cardThumbnails)
                     Picker(selection: $transportApp) {
                         ForEach(TransportApp.allCases) { app in
                             Text(app.name).tag(app.rawValue)

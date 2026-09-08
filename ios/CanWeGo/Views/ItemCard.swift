@@ -78,12 +78,8 @@ struct ItemCard: View {
 
     private var radius: CGFloat { compact ? 14 : 18 }
 
-    /// Settings can switch thumbnails off, restoring the pre-thumbnail card.
-    @AppStorage("cardThumbnails", store: UserDefaults(suiteName: SharedInbox.groupID))
-    private var thumbnailsOn = true
-
     private var imageURL: URL? {
-        guard thumbnailsOn, !compact else { return nil }
+        guard !compact else { return nil }
         return item.imageUrl.flatMap(URL.init(string:))
     }
 
