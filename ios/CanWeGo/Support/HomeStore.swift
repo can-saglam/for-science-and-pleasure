@@ -38,7 +38,7 @@ final class HomeStore {
         }
     }
 
-    private static let cacheKey = "groupHome"
+    nonisolated private static let cacheKey = "groupHome"
 
     private(set) var home: Home
 
