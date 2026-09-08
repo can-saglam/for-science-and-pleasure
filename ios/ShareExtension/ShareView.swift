@@ -206,6 +206,7 @@ struct ShareView: View {
     // MARK: - Pipeline
 
     private func run() async {
+        _ = HomeStore.shared // home clock for the preview card's time label
         await loadAttachments()
         guard payloadText != nil || payloadImage != nil else {
             stage = .failed("Nothing shareable found.", retryText: nil)

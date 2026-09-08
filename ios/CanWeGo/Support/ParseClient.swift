@@ -122,6 +122,11 @@ enum ParseClient {
         request.timeoutInterval = 120 // web-search fallback can take a while
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(secrets.ingestSecret, forHTTPHeaderField: "x-ingest-secret")
+        // The session token is what tells the server which group — and so
+        // which home city — to parse for. Without it, the server assumes London.
+        if let jwt = try? await SupabaseAuth.shared.validToken() {
+            request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -178,6 +183,9 @@ enum ParseClient {
         request.timeoutInterval = 120 // model + geocoding take a while
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(secrets.ingestSecret, forHTTPHeaderField: "x-ingest-secret")
+        if let jwt = try? await SupabaseAuth.shared.validToken() {
+            request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JSONEncoder().encode(["items": items.map(LocateItemPayload.init)])
 
         let (data, response) = try await URLSession.shared.data(for: request)

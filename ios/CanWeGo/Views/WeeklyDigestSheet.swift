@@ -14,7 +14,7 @@ struct WeeklyDigestSheet: View {
     // or the rest of the current weekend once it's under way.
 
     private var weekend: (start: String, end: String) {
-        let calendar = Calendar.current
+        let calendar = DayString.calendar // the home week, not the phone's
         let today = calendar.startOfDay(for: .now)
         let dow = calendar.component(.weekday, from: today) // 1 = Sunday
         let sunday = calendar.date(byAdding: .day, value: (8 - dow) % 7, to: today)!
@@ -93,12 +93,12 @@ struct WeeklyDigestSheet: View {
     }
 
     private var weekendSpan: String {
-        guard let start = DayString.date(weekend.start),
-              let end = DayString.date(weekend.end)
-        else { return "" }
         let f = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
-        if start == end { return start.formatted(f) }
-        return "\(start.formatted(f)) – \(end.formatted(f))"
+        guard let start = DayString.text(weekend.start, f),
+              let end = DayString.text(weekend.end, f)
+        else { return "" }
+        if weekend.start == weekend.end { return start }
+        return "\(start) – \(end)"
     }
 
     var body: some View {
@@ -182,8 +182,8 @@ struct WeeklyDigestSheet: View {
     }
 
     private func friendly(_ day: String?) -> String? {
-        guard let day, let date = DayString.date(day) else { return nil }
-        return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        guard let day else { return nil }
+        return DayString.text(day, .dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 }
 

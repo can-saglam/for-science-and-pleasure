@@ -21,8 +21,10 @@ struct MapPinsView: View {
               let minLon = coords.map(\.longitude).min(),
               let maxLon = coords.map(\.longitude).max()
         else {
+            // Nothing pinned yet: open on home, wherever home is.
             return MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 51.5074, longitude: -0.1278),
+                center: HomeStore.shared.home.coordinate
+                    ?? CLLocationCoordinate2D(latitude: 51.5074, longitude: -0.1278),
                 span: MKCoordinateSpan(latitudeDelta: 0.25, longitudeDelta: 0.25)
             )
         }
@@ -39,6 +41,25 @@ struct MapPinsView: View {
                 longitudeDelta: max((maxLon - minLon) * 1.7, 0.03)
             )
         )
+    }
+
+    /// What the map frames when it opens: the saves around home (a single
+    /// Paris pin mustn't zoom a London library out to show both), plus the
+    /// user when they're within ~100 km of home. Away from home the map opens
+    /// on home, not on the user — that's where the library is. A library
+    /// with nothing near home at all frames whatever it has.
+    private var openingCoordinates: [CLLocationCoordinate2D] {
+        let home = HomeStore.shared
+        let here = LocationStore.shared.location
+        let all = pinned.map(\.coordinate)
+        guard let homeCoord = home.home.coordinate else { return all }
+        let homeLoc = CLLocation(latitude: homeCoord.latitude, longitude: homeCoord.longitude)
+        var near = all.filter {
+            CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: homeLoc) < 100_000
+        }
+        if near.isEmpty { return all }
+        if let here, home.isNearHome(here) { near.append(here.coordinate) }
+        return near
     }
 
     /// Items paired with their coordinates up front — no force unwraps in
@@ -151,7 +172,7 @@ struct MapPinsView: View {
             }
         }
         .onAppear {
-            let region = Self.region(fitting: pinned.map(\.coordinate))
+            let region = Self.region(fitting: openingCoordinates)
             camera = .region(region)
             span = region.span
         }

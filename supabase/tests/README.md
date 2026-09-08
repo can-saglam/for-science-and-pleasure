@@ -13,6 +13,14 @@ Three scripts, no dependencies beyond Python 3 and the Supabase CLI:
 | `rls_battery.py 1a\|1b` | staging | Real users see/write exactly their group; strangers see nothing; triggers stamp `group_id`/`created_by`/`updated_by`; stale-write guard; member cap; dispatcher runs |
 | `function_battery.py` | staging | Every edge function's auth gate and group scoping (feeds, ingest, notify, digest) |
 | `stranger_probe.py` | **production-safe** | A fresh account can read/insert/update/delete nothing, can't join a group or grant itself Plus; anon gets nothing; function gates hold. Creates and deletes its own user |
+| `parse_gate.ts` | **production-safe** (reads only; spends model calls) | Replays a sample of the library's URLs through the *local* extractor with a given home and diffs the cards against what's stored. Run before any prompt change: ship when the diff is noise. `--home "Lisbon\|Portugal\|Europe/Lisbon" --url …` spot-checks another home |
+
+`parse_gate.ts` ran on 8 Sep for the home-string prompts (`deno run -A
+supabase/tests/parse_gate.ts --n 14 --seed 42`): 10 clean, 2 soft (area
+wording), 2 "hard" that were the *stored* card being wrong (Tate page says
+14 July, we had 15) or the source having moved on (Notting Hill Carnival now
+advertises 2027). With home = Lisbon, Lisbon museums geocoded in Lisbon with
+€ prices, and a London URL stayed in London with the city in its address.
 
 `stranger_probe.py` can be run against production any time (it did run after
 1b and after 0018). The other two need a staging copy with the two member

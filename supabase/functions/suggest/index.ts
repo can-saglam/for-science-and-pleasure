@@ -3,6 +3,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { corsHeaders } from "../_shared/extract.ts";
 import { resolveCaller } from "../_shared/groups.ts";
+import { groupHome, homeLabel } from "../_shared/home.ts";
 
 const PLANS_SCHEMA = {
   type: "object",
@@ -46,6 +47,7 @@ Deno.serve(async (req) => {
       });
     }
 
+    const home = await groupHome(caller.client, caller.groupId);
     const { date } = await req.json();
     if (!date) {
       return new Response(JSON.stringify({ error: "date required" }), {
@@ -79,7 +81,7 @@ Deno.serve(async (req) => {
         {
           role: "user",
           content:
-            `A couple in London is free on ${date} and wants day-plan ideas built ONLY from their own saved list below (coordinates included where known — use them to keep each plan geographically sensible and walkable). Prioritise events that close soon after ${date}. Combine an event with a nearby saved food/drink/cafe spot where possible. Propose 1-3 distinct plans.\n\n` +
+            `Someone living in ${homeLabel(home)} is free on ${date} and wants day-plan ideas built ONLY from their own saved list below (coordinates included where known — use them to keep each plan geographically sensible and walkable). Prioritise events that close soon after ${date}. Combine an event with a nearby saved food/drink/cafe spot where possible. Propose 1-3 distinct plans.\n\n` +
             JSON.stringify(relevant),
         },
       ],

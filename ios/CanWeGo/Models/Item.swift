@@ -60,18 +60,47 @@ final class Item {
 
 // MARK: - Date-only helpers
 
+/// Date-only arithmetic on the *home* clock. Saved dates are plain
+/// YYYY-MM-DD strings; "today", and so every "3 days left" / "Last Day" /
+/// This Week judgement, is measured in the group's home timezone rather than
+/// the phone's, so the shared library reads identically for every member
+/// wherever they are. HomeStore sets the zone on launch and after each pull.
 enum DayString {
-    static let formatter: DateFormatter = {
+    /// The home timezone; London until HomeStore says otherwise.
+    /// Written on the main actor only (HomeStore), read anywhere.
+    nonisolated(unsafe) private(set) static var timeZone: TimeZone = TimeZone(identifier: "Europe/London")!
+
+    nonisolated(unsafe) private(set) static var calendar: Calendar = homeCalendar(timeZone)
+
+    nonisolated(unsafe) private(set) static var formatter: DateFormatter = homeFormatter(timeZone)
+
+    static func use(timeZone zone: TimeZone) {
+        guard zone != timeZone else { return }
+        timeZone = zone
+        calendar = homeCalendar(zone)
+        formatter = homeFormatter(zone)
+    }
+
+    private static func homeCalendar(_ zone: TimeZone) -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = zone
+        return c
+    }
+
+    private static func homeFormatter(_ zone: TimeZone) -> DateFormatter {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = zone
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
-    }()
+    }
 
     static func today() -> String {
         formatter.string(from: .now)
     }
 
+    /// Midnight of `s` on the home clock.
     static func date(_ s: String) -> Date? {
         formatter.date(from: s)
     }
@@ -79,7 +108,31 @@ enum DayString {
     /// Whole days from `from` to `to` (negative when `to` is in the past).
     static func daysBetween(_ from: String, _ to: String) -> Int? {
         guard let a = date(from), let b = date(to) else { return nil }
-        return Calendar.current.dateComponents([.day], from: a, to: b).day
+        return calendar.dateComponents([.day], from: a, to: b).day
+    }
+
+    /// A saved day as text: rendered in the home zone (so a home midnight
+    /// never shows as the evening before when you're west of home) and in
+    /// the device locale ("Sun 30 Aug" here, "Sun, Aug 30" there).
+    static func text(_ day: String, _ style: Date.FormatStyle = .dateTime.day().month(.abbreviated)) -> String? {
+        guard let d = date(day) else { return nil }
+        var style = style
+        style.timeZone = timeZone
+        return d.formatted(style)
+    }
+
+    /// Same, for the system date styles ("30 Aug 2026").
+    static func text(_ day: String, date dateStyle: Date.FormatStyle.DateStyle) -> String? {
+        text(day, Date.FormatStyle(date: dateStyle, time: .omitted))
+    }
+
+    /// Sunday of the current home week, as a day string. "This week" means
+    /// through Sunday, not a rolling seven days.
+    static func endOfThisWeek() -> String {
+        let today = calendar.startOfDay(for: .now)
+        let dow = calendar.component(.weekday, from: today) // 1 = Sunday
+        let sunday = calendar.date(byAdding: .day, value: (8 - dow) % 7, to: today)!
+        return formatter.string(from: sunday)
     }
 }
 
@@ -149,10 +202,11 @@ extension Item {
         case 1: return "tomorrow"
         case 2...13:
             guard let date = DayString.date(day) else { return nil }
-            let calendar = Calendar.current
+            // Which weekday "today" is depends on the home clock too.
+            let calendar = DayString.calendar
             let dow = calendar.component(.weekday, from: calendar.startOfDay(for: .now))
             let daysToSunday = (8 - dow) % 7 // 1 = Sunday
-            let name = date.formatted(.dateTime.weekday(.wide))
+            let name = DayString.text(day, .dateTime.weekday(.wide)) ?? date.formatted(.dateTime.weekday(.wide))
             if daysAway <= daysToSunday { return "this \(name)" }
             if daysAway <= daysToSunday + 7 { return "next \(name)" }
             return nil

@@ -16,7 +16,7 @@ jobs:
         with:
           deno-version: v2.x
       # A type error in any function is a broken deploy; check them all.
-      - run: deno check supabase/functions/*/index.ts supabase/functions/_shared/*.ts
+      - run: deno check supabase/functions/*/index.ts supabase/functions/_shared/*.ts supabase/tests/*.ts
       - run: deno test --allow-env --allow-net --allow-read supabase/functions/_shared/
 
   migrations:

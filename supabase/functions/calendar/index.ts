@@ -3,6 +3,7 @@
 // Auth via ?key= (calendar apps need URL-embedded auth). Prefer FEED_SECRET;
 // falls back to INGEST_SECRET until FEED_SECRET is configured.
 import { admin, groupForFeedKey } from "../_shared/groups.ts";
+import { groupHome } from "../_shared/home.ts";
 
 function icsEscape(s: string): string {
   return s.replace(/([,;\\])/g, "\\$1");
@@ -38,6 +39,7 @@ Deno.serve(async (req) => {
     return new Response("unauthorized", { status: 401 });
   }
 
+  const home = await groupHome(supabase, groupId);
   const { data: items, error } = await supabase
     .from("items")
     .select("id, kind, status, title, starts_on, ends_on, url")
@@ -61,7 +63,7 @@ Deno.serve(async (req) => {
     "VERSION:2.0",
     "PRODID:-//Can We Go?//EN",
     "X-WR-CALNAME:Can We Go?",
-    "X-WR-TIMEZONE:Europe/London",
+    `X-WR-TIMEZONE:${home.timezone}`,
     ...events,
     "END:VCALENDAR",
   ].join("\r\n");

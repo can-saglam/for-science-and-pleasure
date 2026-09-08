@@ -7,6 +7,14 @@ import {
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
 import {
+  geocodeNearHome,
+  type Home,
+  homeLabel,
+  homeToday,
+  LONDON,
+  priceExamples,
+} from "./home.ts";
+import {
   fetchImageBase64,
   fetchSocialPost,
   socialPlatform,
@@ -37,7 +45,9 @@ export interface ParsedCard {
   website: string | null;
 }
 
-const CARD_SCHEMA = {
+// The schema carries the home in its examples (area, price, address), so
+// it is built per call rather than once.
+const cardSchema = (home: Home) => ({
   type: "object",
   properties: {
     kind: {
@@ -54,15 +64,20 @@ const CARD_SCHEMA = {
     venue: { type: ["string", "null"], description: "Venue or institution name" },
     area: {
       type: ["string", "null"],
-      description: "London neighbourhood or area, e.g. 'Peckham', 'South Bank', 'Shoreditch'",
+      description:
+        `Neighbourhood or district within its city (for ${home.locality}, the kind of name a local would use, like 'Peckham' or 'South Bank' in London)`,
     },
-    address: { type: ["string", "null"] },
+    address: {
+      type: ["string", "null"],
+      description:
+        `Street address. Include the city (and country) when it is not ${home.locality} — e.g. '12 Rue de Rivoli, Paris, France'`,
+    },
     category: {
       type: ["string", "null"],
       description:
         "One of: exhibition, gig, theatre, film, market, festival, restaurant, drink, cafe, talk, workshop, outdoors, other",
     },
-    price: { type: ["string", "null"], description: "e.g. 'Free', '£12', '£8–£15'" },
+    price: { type: ["string", "null"], description: priceExamples(home) },
     booking_url: { type: ["string", "null"] },
     starts_on: {
       type: ["string", "null"],
@@ -83,7 +98,7 @@ const CARD_SCHEMA = {
     "category", "price", "booking_url", "starts_on", "ends_on", "website",
   ],
   additionalProperties: false,
-} as const;
+}) as const;
 
 const URL_RE = /https?:\/\/\S+/i;
 
@@ -173,6 +188,7 @@ export interface ExtractInput {
 
 export async function extractCard(
   input: ExtractInput,
+  home: Home = LONDON,
 ): Promise<
   ParsedCard & {
     url: string | null;
@@ -238,9 +254,11 @@ export async function extractCard(
         ? colorFromImageUrl(page.ogImage)
         : Promise.resolve(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = homeToday(home);
+  const where = homeLabel(home);
   const parts: string[] = [
-    `Today's date is ${today}. Extract a structured card for a London events/places app.`,
+    `Today's date is ${today}. Extract a structured card for an events/places app.`,
+    `The user lives in ${where}: assume that city when the source doesn't say where something is, and read prices, dates and place names with that in mind. But trust the source — if it clearly places the event or venue somewhere else, keep it there (with the city in the address); never move it home.`,
     "Resolve relative or partial dates to absolute YYYY-MM-DD dates (if a month is named without a year, assume the next occurrence from today).",
     "If a field is genuinely unknown, use null — do not guess venues, prices, or dates.",
     "Fill 'website' with the official homepage of the event or place (the venue's own site — never an aggregator, social media, Reddit, or a maps link). If you used web search and its results name or link the official site, use that; leave null only when no official site turns up.",
@@ -267,7 +285,7 @@ export async function extractCard(
         `The link is a Google Maps pin${mapsLink.name ? ` for "${mapsLink.name}"` : ""}${
           mapsLink.lat !== null ? ` at ${mapsLink.lat},${mapsLink.lng}` : ""
         }.`,
-        "There is no page content to read. Identify this place from its name and your own knowledge of London: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.",
+        `There is no page content to read. Identify this place from its name and your own knowledge of ${home.locality}: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.`,
         "Use the web search tool to find this exact place's official website and fill 'website' — the app fetches its photo from there, so a maps save without it stays pictureless.",
         mapsLink.lat === null
           ? "Also search for the place's exact street address so it can be geocoded — the pin coordinates could not be extracted from the link."
@@ -283,7 +301,7 @@ export async function extractCard(
           : "There is no linked page to read.",
         `Use the web search tool to identify this exact event or place — search with ${
           url ? "the names from the URL slug" : "the names you can see in the input"
-        } plus "London" — and fill in verified details, especially start/end dates, venue, and price.`,
+        } plus "${home.locality}" — and fill in verified details, especially start/end dates, venue, and price.`,
         input.image_base64 ? "Combine that with what the screenshot shows." : "",
         "Also find the official website and fill 'website' — the app fetches the thumbnail photo from it.",
         "If search doesn't confirm a detail, leave it null; never guess.",
@@ -319,7 +337,7 @@ export async function extractCard(
     // Plain page reads stay on opus — no search rounds, so they're quick.
     model: useWebSearch ? "claude-sonnet-5" : "claude-opus-4-8",
     max_tokens: 4096,
-    output_config: { format: { type: "json_schema", schema: CARD_SCHEMA } },
+    output_config: { format: { type: "json_schema", schema: cardSchema(home) } },
     ...(useWebSearch
       ? {
           tools: [
@@ -346,11 +364,13 @@ export async function extractCard(
   // Street addresses geocode far more reliably than small-venue names
   // (Nominatim rarely knows independent restaurants), so try those first.
   if (!coords && card.address) {
-    coords = await geocode(`${card.address}, London`);
+    coords = await geocodeNearHome(geocode, card.address, home);
   }
   if (!coords && (card.venue || card.area)) {
-    coords = await geocode(
-      [card.venue ?? card.title, card.area, "London"].filter(Boolean).join(", "),
+    coords = await geocodeNearHome(
+      geocode,
+      [card.venue ?? card.title, card.area].filter(Boolean).join(", "),
+      home,
     );
   }
 

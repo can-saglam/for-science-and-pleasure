@@ -33,7 +33,9 @@ enum LastChanceNotifier {
             .filter { $0.hasPrefix(prefix) }
         center.removePendingNotificationRequests(withIdentifiers: stale)
 
-        let calendar = Calendar.current
+        // Home calendar: the "week before" is a home day, and the digest
+        // hour is a home wall-clock hour (digest_schedules.timezone).
+        let calendar = DayString.calendar
         let (hour, minute) = await MainActor.run {
             (DigestScheduleStore.shared.hour, DigestScheduleStore.shared.minute)
         }
@@ -47,7 +49,8 @@ enum LastChanceNotifier {
             guard let fire = calendar.date(from: comps), fire > .now else { continue }
 
             let content = UNMutableNotificationContent()
-            let day = end.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+            let day = DayString.text(event.endsOn ?? "", .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                ?? end.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
             // A one-day gig doesn't "close" — it happens.
             if event.isOneDay {
                 content.title = "Coming up"

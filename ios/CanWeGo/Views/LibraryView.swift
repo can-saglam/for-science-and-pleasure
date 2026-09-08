@@ -166,13 +166,7 @@ struct LibraryView: View {
     /// The last day of the current calendar week (Sunday), as a day string.
     /// "This week" means through Sunday, not a rolling seven days: on a
     /// Thursday, a gig next Thursday is 7 days away but it is next week.
-    private var weekEnd: String {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        let dow = calendar.component(.weekday, from: today) // 1 = Sunday
-        let sunday = calendar.date(byAdding: .day, value: (8 - dow) % 7, to: today)!
-        return DayString.formatter.string(from: sunday)
-    }
+    private var weekEnd: String { DayString.endOfThisWeek() }
 
     /// One-offs and openings woven together, chronological: an exhibition
     /// opening Thursday is as much "this week" as a gig on Friday.

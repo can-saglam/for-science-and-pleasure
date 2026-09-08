@@ -354,10 +354,10 @@ struct CaptureView: View {
         // An event that's already happened would land straight in "Ended".
         // Chances are they're logging a night out — offer the journal.
         if !saved, draft.isEvent, draft.timeBucket == .past,
-           let day = (draft.endsOn ?? draft.startsOn).flatMap(DayString.date) {
+           let day = (draft.endsOn ?? draft.startsOn).flatMap({ DayString.text($0) }) {
             VStack(alignment: .leading, spacing: 10) {
                 Label(
-                    "This happened on \(day.formatted(.dateTime.day().month(.abbreviated))). Add it to We Did Go instead?",
+                    "This happened on \(day). Add it to We Did Go instead?",
                     systemImage: "checkmark.seal"
                 )
                 .font(.footnote.weight(.medium))

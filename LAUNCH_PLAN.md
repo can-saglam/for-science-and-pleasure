@@ -512,17 +512,17 @@ shippable to TestFlight, so daily use continues while it transforms.
 ### Phase 1a — additive
 - [x] Backup — JSON dump of every table + auth users via the API (no Docker/pg_dump on this Mac), `~/Backups/canwego/20260907-1731`
 - [x] Groups schema (with `home`), `profiles`, per-user `entitlements`, nullable `group_id`, `updated_by`, per-group digest rows (created with the group), Can+Joyce backfill — RLS untouched (`0016_groups_additive.sql`, applied 7 Sep; 58/58 items backfilled, founder entitlements seeded)
-- [ ] Parse-quality gate: replay existing library URLs with the home-string prompts, diff cards against stored, ship only on noise
-- [ ] Home plumbed through prompts, geocoder (suffix only when no city named; trust out-of-home matches), digest scheduler
-- [ ] Time labels + This Week + widget evaluate in home timezone (snapshot carries it); dates format in device locale
-- [ ] Map default by distance from home; distance chips hide beyond 100 km
+- [x] Parse-quality gate — `supabase/tests/parse_gate.ts`, 8 Sep: 14 library URLs replayed through the home-string prompts, 10 clean / 2 wording / 2 where the *stored* card or the source page was what had changed; Lisbon spot-check right (€, Lisbon coords, London URL left in London)
+- [x] Home plumbed through prompts and geocoder — `_shared/home.ts` (`groupHome`, `priceExamples`, `geocodeNearHome`: home appended only when the address names no city, bare fallback so a Paris address lands in Paris); parse/locate/suggest/ingest/calendar/digest read the caller's group home, London when there's only the secret. iOS sends the session token to parse/locate so the server knows the group. Digest scheduler was already per-group (1b)
+- [x] Time labels, This Week, digest weekend, last-chance nudges all measured on the home clock (`DayString` takes its zone from `HomeStore`, cached in the App Group; the widget's labels come from the app so they follow); saved days render in the home zone and the device locale (`DayString.text`). Verified in the simulator with a Pago Pago group: a London "yesterday" read "Today", London "today" read "Happening tomorrow" (build 43)
+- [x] Map opens on the saves around home (a lone far-away pin no longer zooms the library out), plus the user when within 100 km of home; empty library opens on home. Distance chips already hid beyond 100 km
 - [x] "Edited by" line from `updated_by` (build 40)
 - [x] iOS sync carries `group_id` end to end — build 40, 7 Sep. The week-long soak was replaced (at Can's call) by a full rehearsal on a throwaway staging project: production restored from the JSON backup, 46-check RLS battery with real JWTs (Can, Joyce, a stranger) run in the 1a state, after the flip, after the rollback, and after re-applying
 
 ### Phase 1b — flip security
 - [x] RLS → `is_in_group`; `group_id` non-null; `created_by` added and backfilled; 4-member trigger; retire singleton digest schedule, `members`, dead `digests`/`push_subscriptions` (`0017_groups_flip.sql`, applied 7 Sep, ledger 0017)
 - [x] Down-migration written and tested — `supabase/rollback/0017_groups_flip_down.sql`; on staging: 1a green → up → 1b green → down → 1a green → up → 1b green
-- [ ] Raise `min_build` to 41 once build 41 is installed on both phones (40 still reads/writes items fine against 1b; only its digest-time setting is dead)
+- [ ] Raise `min_build` once both phones report build ≥ 43 — from build 43 each device registers its build (`select user_id, max(build) from apns_tokens group by 1`), so this no longer needs asking in person
 - [x] Scope edge functions by group — `_shared/groups.ts` (`resolveCaller`, `groupForFeedKey`, `groupForEmail`, `groupTokens`); notify, notify-save, parse, locate, suggest, ingest, calendar, digest, send-digest (per-group runs in the group's timezone, `digest_runs` keyed by group + week); 23-check function battery on staging
 - [x] Per-group ICS token (`groups.feed_token`); the old key still resolves to the founding group so existing calendar subscriptions keep updating — rotation on leave lands with Phase 2b
 - [x] iOS build 41: `digest_schedules` per group, `created_by` synced, "Added by" from profiles, `members` gone from the client
@@ -534,7 +534,7 @@ Post-flip hardening, 7 Sep evening (all green):
 - [x] Unit tests: digest window/timezone/week arithmetic (`_shared/schedule.ts`, extracted from send-digest) and group fallbacks (feed key, tokens-minus-sender, display names, email→group); 24 Deno tests. CI now type-checks every function and checks migration numbering
 - [x] Forced digest run on production through the per-group path: 53 sent / 0 gone / 0 failed
 - [x] Batteries + runbook committed under `supabase/tests/` — every future RLS/drop/NOT NULL migration gets the same up/down/up rehearsal
-- Follow-up: 53 APNs tokens for two phones — old installs' tokens are still accepted; keep one token per device (send `identifierForVendor`, upsert on it) before the digest grows a wider audience
+- [x] One APNs token per device — `0019`/`0020`: `register_apns_token(token, device_id, build, platform)` replaces the device's row and sweeps the account's legacy device-less rows (phones only; simulators never sweep a phone's token). The 56 simulator leftovers go the first time Can's phone runs 43
 
 Found by the rehearsal, fixed before production: tokens registered between 1a and 1b had no `user_id` (NOT NULL would have failed — 0017 now backfills); the 1a mirror trigger's unfiltered UPDATE was rejected by safeupdate, so changing the digest time in build 40 never worked (1b removes the singleton); `gen_random_bytes` needs the `extensions.` prefix; `is_member()` had to go after its own table.
 

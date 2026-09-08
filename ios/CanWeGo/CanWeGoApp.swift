@@ -8,6 +8,8 @@ struct CanWeGoApp: App {
     let container: ModelContainer
 
     init() {
+        // Sets the home clock from the cache before any time label renders.
+        _ = HomeStore.shared
         do {
             let cloud = ModelConfiguration(
                 "CanWeGo",
@@ -128,22 +130,31 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         // Simulator or missing entitlement — fine, just no pushes here.
     }
 
+    /// One row per device: `register_apns_token` replaces whatever this
+    /// device registered before (and sweeps the account's legacy rows), and
+    /// records the build so `min_build` can be raised on evidence.
     private static func upload(token: String) async {
-        guard let email = SupabaseAuth.shared.email,
-              let jwt = try? await SupabaseAuth.shared.validToken()
+        guard let jwt = try? await SupabaseAuth.shared.validToken(),
+              let device = await UIDevice.current.identifierForVendor?.uuidString
         else { return }
+        #if targetEnvironment(simulator)
+        let platform = "simulator"
+        #else
+        let platform = "ios"
+        #endif
         var request = URLRequest(
-            url: SupabaseAuth.baseURL.appending(path: "rest/v1/apns_tokens")
+            url: SupabaseAuth.baseURL.appending(path: "rest/v1/rpc/register_apns_token")
         )
         request.httpMethod = "POST"
         request.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "token": token,
-            "email": email,
-        ])
+            "p_token": token,
+            "p_device_id": device,
+            "p_build": SupabaseSync.buildNumber,
+            "p_platform": platform,
+        ] as [String: Any])
         // One quick retry — a dropped upload here used to mean this phone
         // silently never received partner pushes.
         for attempt in 0..<2 {

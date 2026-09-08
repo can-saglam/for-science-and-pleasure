@@ -43,15 +43,15 @@ struct ItemDetailView: View {
     private var dateLine: String? {
         switch (item.startsOn, item.endsOn) {
         case let (s?, e?) where s == e:
-            return DayString.date(s)?.formatted(date: .abbreviated, time: .omitted)
+            return DayString.text(s, date: .abbreviated)
         case let (s?, e?):
-            let from = DayString.date(s)?.formatted(date: .abbreviated, time: .omitted) ?? s
-            let to = DayString.date(e)?.formatted(date: .abbreviated, time: .omitted) ?? e
+            let from = DayString.text(s, date: .abbreviated) ?? s
+            let to = DayString.text(e, date: .abbreviated) ?? e
             return "\(from) – \(to)"
         case let (s?, nil):
-            return "From \(DayString.date(s)?.formatted(date: .abbreviated, time: .omitted) ?? s)"
+            return "From \(DayString.text(s, date: .abbreviated) ?? s)"
         case let (nil, e?):
-            return "Until \(DayString.date(e)?.formatted(date: .abbreviated, time: .omitted) ?? e)"
+            return "Until \(DayString.text(e, date: .abbreviated) ?? e)"
         default:
             return nil
         }

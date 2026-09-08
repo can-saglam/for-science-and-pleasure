@@ -4,6 +4,7 @@
 // FEED_SECRET; falls back to INGEST_SECRET until FEED_SECRET is configured.
 import { admin, groupForFeedKey } from "../_shared/groups.ts";
 import { buildDigest } from "../_shared/digest.ts";
+import { groupHome, homeToday } from "../_shared/home.ts";
 
 Deno.serve(async (req) => {
   // The key in the URL is the group's feed_token (or the pre-groups
@@ -23,7 +24,8 @@ Deno.serve(async (req) => {
     .in("status", ["saved", "planned"]);
   if (error) return new Response(String(error.message), { status: 500 });
 
-  const text = buildDigest(items ?? []);
+  // "This weekend" on the group's clock, not the server's.
+  const text = buildDigest(items ?? [], homeToday(await groupHome(supabase, groupId)));
   return new Response(JSON.stringify({ text }), {
     headers: { "Content-Type": "application/json" },
   });

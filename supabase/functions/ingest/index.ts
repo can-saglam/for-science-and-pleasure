@@ -4,6 +4,7 @@
 import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard } from "../_shared/extract.ts";
 import { admin, groupForEmail } from "../_shared/groups.ts";
+import { groupHome } from "../_shared/home.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 import { notifyPartnersOfSave } from "../_shared/notify.ts";
 
@@ -52,7 +53,7 @@ Deno.serve(async (req) => {
 
     let row;
     try {
-      const card = await extractCard(body);
+      const card = await extractCard(body, await groupHome(supabase, owner.groupId));
 
       // Duplicate guard: same source URL already saved → don't create a twin.
       if (card.url) {

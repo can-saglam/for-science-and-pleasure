@@ -234,6 +234,8 @@ struct ContentView: View {
                 WidgetStore.sync(items: items)
             }
             Task { await MembersStore.shared.refresh() }
+            // Home first: it's the clock every time label below is read on.
+            Task { await HomeStore.shared.refresh() }
         }
         // Any local save (add, edit, done, delete-undo…) syncs to the shared
         // table after a short debounce.

@@ -6,6 +6,7 @@ import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders, extractCard, SocialUnreadableError } from "../_shared/extract.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 import { resolveCaller } from "../_shared/groups.ts";
+import { groupHome, LONDON } from "../_shared/home.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -14,17 +15,19 @@ Deno.serve(async (req) => {
   try {
     const secret = req.headers.get("x-ingest-secret");
     const secretOk = Boolean(secret) && secret === Deno.env.get("INGEST_SECRET");
-    if (!secretOk) {
+    // The caller's JWT is what tells us which group — and so which home
+    // city — the parse is for. The secret alone still gets in (older
+    // builds, the Shortcut) and parses against London.
+    const caller = await resolveCaller(req);
+    if (!secretOk && !caller) {
       // A signed-in user who isn't in a group yet can't use the parser
       // either — there's nowhere for the result to go.
-      const caller = await resolveCaller(req);
-      if (!caller) {
-        return new Response(JSON.stringify({ error: "not in a group" }), {
-          status: 403,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+      return new Response(JSON.stringify({ error: "not in a group" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+    const home = caller ? await groupHome(caller.client, caller.groupId) : LONDON;
 
     const body = await req.json();
     if (!body.text && !body.image_base64) {
@@ -43,7 +46,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const card = await extractCard(body);
+    const card = await extractCard(body, home);
     return new Response(JSON.stringify({ card }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
