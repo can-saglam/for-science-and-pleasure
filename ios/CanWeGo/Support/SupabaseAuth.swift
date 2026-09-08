@@ -83,9 +83,42 @@ final class SupabaseAuth {
         )
     }
 
+    /// Sign in with Apple: the identity token Apple hands the app is
+    /// exchanged at the same token endpoint (`grant_type=id_token`). Supabase
+    /// verifies it against Apple's keys and the bundle id, and — because the
+    /// email is verified by Apple — links it to an existing account with that
+    /// email rather than creating a second one. The nonce ties the token to
+    /// this request so a captured one can't be replayed.
+    func signInWithApple(identityToken: String, nonce: String, appleUserID: String) async throws {
+        session = try await Self.token(
+            grant: "id_token",
+            body: ["provider": "apple", "id_token": identityToken, "nonce": nonce]
+        )
+        Self.appleUserID = appleUserID
+    }
+
     func signOut() {
         session = nil
+        Self.appleUserID = nil
     }
+
+    // MARK: - Apple credential state
+
+    /// Apple's stable per-app user identifier, kept only so the app can ask
+    /// Apple on launch whether the user has since revoked access in
+    /// Settings → Apple Account → Sign in with Apple. Nil for password sessions.
+    private static let appleUserKey = "appleUserID"
+    static var appleUserID: String? {
+        get { (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).string(forKey: appleUserKey) }
+        set {
+            let d = UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
+            if let newValue { d.set(newValue, forKey: appleUserKey) } else { d.removeObject(forKey: appleUserKey) }
+        }
+    }
+
+    /// True when the session was started with Apple, so the UI can say
+    /// "Signed in with Apple" and the launch check knows to run.
+    var usesApple: Bool { signedIn && Self.appleUserID != nil }
 
     /// One renewal at a time: concurrent callers must share a single
     /// rotation, because burning the same refresh token twice more than ten

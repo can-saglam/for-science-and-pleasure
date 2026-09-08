@@ -550,12 +550,12 @@ Places vocabulary, 8 Sep: a gallery homepage saved as a place was filed as `exhi
 Found by the rehearsal, fixed before production: tokens registered between 1a and 1b had no `user_id` (NOT NULL would have failed — 0017 now backfills); the 1a mirror trigger's unfiltered UPDATE was rejected by safeupdate, so changing the digest time in build 40 never worked (1b removes the singleton); `gen_random_bytes` needs the `extensions.` prefix; `is_member()` had to go after its own table.
 
 ### Phase 2
-- [ ] Sign in with Apple via Supabase id_token exchange
-- [ ] Merge Can + Joyce accounts via Apple with real emails; then disable email/password
+- [x] Sign in with Apple via Supabase id_token exchange — build 45. Provider enabled with the bundle id as client id (`supabase config push`, no secret: native flow only); `com.apple.developer.applesignin` entitlement; nonce hashed into the request, raw to Supabase. Sign-ups stay closed for now, so Apple only gets in when its verified email matches an existing account (auto-link) — the screen says so instead of GoTrue's "Signups not allowed". Email/password sits behind "Sign in with email instead"
+- [ ] Merge Can + Joyce accounts via Apple with real emails; then disable email/password — both founder emails are confirmed, so auto-link works if the Apple Account email matches (`cansaglam@gmail.com`, `joycechoong@hotmail.sg`); if an Apple Account uses another address, admin-update the account email to it first
 - [ ] Home confirmation step in onboarding (city not borough; metro name offered as default; free-text fix)
-- [ ] Persist Apple's one-time full name before onboarding renders
+- [x] Persist Apple's one-time full name before onboarding renders — `MembersStore.claimDisplayName` (fill-only: never overwrites a chosen name) runs inside the sign-in, short style ("Can")
 - [ ] Onboarding: personal group, display name (required), home detection (or typed; ambiguous → pick), solo/join, notification priming; skipped on a second device
-- [ ] Apple ID revocation check on launch; re-auth sheet on refresh failure — local store never wiped
+- [~] Apple ID revocation check on launch (`AppleSignIn.checkCredentialState`: revoked/notFound → sign out, local store untouched; offline leaves it alone); re-auth sheet on refresh failure still to do
 - [ ] "Former member" tombstone on account deletion
 - [ ] Guided first save with own link; share-sheet teaching (onboarding step + library card)
 - [ ] Invite codes + share-sheet message; reserve `canwego.app`, fix `/join/CODE` format

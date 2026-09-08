@@ -232,7 +232,8 @@ struct SettingsView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         } label: {
-                            row("Signed in", icon: "person.fill")
+                            row(SupabaseAuth.shared.usesApple ? "Signed in with Apple" : "Signed in",
+                                icon: SupabaseAuth.shared.usesApple ? "apple.logo" : "person.fill")
                         }
                         if let synced = SyncStatus.shared.lastSyncedAt {
                             LabeledContent {

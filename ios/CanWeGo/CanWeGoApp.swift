@@ -45,7 +45,12 @@ private struct RootGate: View {
     var body: some View {
         if auth.signedIn || ProcessInfo.processInfo.environment["CWG_SKIP_AUTH"] != nil {
             ContentView()
-                .task { PushRegistrar.register() }
+                .task {
+                    PushRegistrar.register()
+                    // Apple lets people revoke an app in Settings; a revoked
+                    // account must not carry on syncing. Local data stays put.
+                    await AppleSignIn.checkCredentialState()
+                }
                 // Re-register on every foreground: uploading the token is
                 // idempotent, and it self-heals a device whose first upload
                 // failed (offline, expired session…).

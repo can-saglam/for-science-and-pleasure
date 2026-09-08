@@ -55,6 +55,46 @@ final class MembersStore {
         (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
     }
 
+    /// Writes the signed-in user's display name — but only into an empty
+    /// slot. Apple hands over the full name exactly once (the first
+    /// authorisation, never again), so it's persisted immediately after
+    /// sign-in; a name already chosen in-app must not be overwritten by it.
+    /// Returns the name now on record, whichever it is.
+    @discardableResult
+    func claimDisplayName(_ proposed: String) async -> String? {
+        let name = proposed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let uid = SupabaseAuth.shared.userId,
+              let token = try? await SupabaseAuth.shared.validToken() else { return nil }
+        let key = uid.uuidString.lowercased()
+
+        // Fresh read rather than the cache: the cache may be another device's.
+        struct Row: Decodable { let display_name: String? }
+        var read = URLRequest(url: SupabaseAuth.baseURL.appending(path: "rest/v1/profiles")
+            .appending(queryItems: [.init(name: "select", value: "display_name"), .init(name: "user_id", value: "eq.\(key)")]))
+        read.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
+        read.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let (data, _) = try? await URLSession.shared.data(for: read),
+           let rows = try? JSONDecoder().decode([Row].self, from: data),
+           let existing = rows.first?.display_name, !existing.isEmpty {
+            return existing
+        }
+
+        // Upsert: the row may not exist yet for a brand-new account.
+        var write = URLRequest(url: SupabaseAuth.baseURL.appending(path: "rest/v1/profiles")
+            .appending(queryItems: [.init(name: "on_conflict", value: "user_id")]))
+        write.httpMethod = "POST"
+        write.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
+        write.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        write.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        write.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        write.httpBody = try? JSONSerialization.data(withJSONObject: ["user_id": key, "display_name": name])
+        guard let (_, response) = try? await URLSession.shared.data(for: write),
+              (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return nil }
+        namesByUser[key] = name
+        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
+        return name
+    }
+
     /// RLS scopes the table to the caller's group; a failure just leaves
     /// the cached (or derived) names in place.
     private func fetch<T: Decodable>(table: String, select: String) async -> [T]? {
