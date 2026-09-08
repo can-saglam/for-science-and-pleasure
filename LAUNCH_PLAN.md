@@ -556,16 +556,16 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [x] Persist Apple's one-time full name before onboarding renders — `MembersStore.claimDisplayName` (fill-only: never overwrites a chosen name) runs inside the sign-in, short style ("Can")
 - [ ] Onboarding: personal group, display name (required), home detection (or typed; ambiguous → pick), solo/join, notification priming; skipped on a second device
 - [x] Apple ID revocation check on launch (`AppleSignIn.checkCredentialState`: revoked/notFound → sign out, local store untouched; offline leaves it alone). Re-auth on refresh failure: a 4xx on renewal already signed out; the sign-in screen now explains it ("Your session expired — sign in again to keep syncing. Everything you saved is still here.") — `SupabaseAuth.sessionExpired`, cleared by the next sign-in. The SwiftData store is never touched by sign-out
-- [ ] "Former member" tombstone on account deletion
+- [x] "Former member" tombstone on account deletion — 0021: `profiles` no longer cascades from `auth.users` and item attribution stops being a FK, so the row (id kept) outlives the account; the profiles read policy also covers anyone who saved/edited one of the group's items. Clearing name/colour + `former_at` is the delete-account function's job (Phase 4)
 - [ ] Guided first save with own link; share-sheet teaching (onboarding step + library card)
 - [ ] Invite codes + share-sheet message; reserve `canwego.app`, fix `/join/CODE` format
 - [ ] Join screen, clipboard code detection, dead-end screens (expired/revoked/full/unknown/own)
-- [ ] Two-rule membership: join moves saves (URL dedupe); leave asks "keep a copy?"; atomic leave-and-join
+- [x] Two-rule membership (server): `membership_join` moves saves in with URL dedupe (twin keeps its row, gains the notes) and dissolves the emptied personal group; `membership_leave` provisions a fresh personal group (home + digest time inherited), copies the library on request, rotates the feed token; leaving a shared group *for* another is one call (`join` with `keep_copy`). iOS flows still to build
 - [ ] Sync handles membership change as a state (swap group, one sheet, rebuild Spotlight/widget/URL index/image cache; re-home or discard old-group dirty rows before push)
 - [ ] My group: auto names, avatar colours, name-length limits, rename, invite/revoke, leave, home
-- [ ] `group-membership` edge function holding all invariants; row lock on the group for the last seat; no pushes for bulk writes
+- [x] `group-membership` edge function (build-independent; deployed 8 Sep) over security-definer SQL in 0021: cap 2 free / 4 Plus (the joiner's own Plus counts), one group per user, `for update` on both groups in id order for the last seat, `cwg.membership` transaction flag lets the items guard step aside for moves; bulk writes are plain SQL so no pushes fire. Invites: `group_invites` (6 chars, no 0/O/1/I, 7 days, multi-use, revocable); groups auto-name ("Can's saves" / "Can & Joyce" / "Can, Joyce & Sam") until renamed; avatar colours from a fixed palette, first unused in the group; every new auth user is provisioned a personal group + profile + digest schedule by trigger
 - [ ] Pushes carry threadIdentifier per group
-- [ ] Deno tests for `group-membership` (cap, last-seat race, one-group-per-user, atomic leave-and-join, copy-on-leave, dedupe, dead-end codes, token rotation)
+- [x] Tests for `group-membership`: `supabase/tests/membership_battery.py` (79 checks on staging, incl. a two-thread last-seat race and the HTTP path) + Deno unit tests for the code helpers. Rollback script `0021_membership_down.sql` rehearsed down → up
 - [ ] In-app account deletion with export-before-delete
 
 ### Phase 3

@@ -12,7 +12,8 @@ Three scripts, no dependencies beyond Python 3 and the Supabase CLI:
 |---|---|---|
 | `rls_battery.py 1a\|1b` | staging | Real users see/write exactly their group; strangers see nothing; triggers stamp `group_id`/`created_by`/`updated_by`; stale-write guard; member cap; dispatcher runs |
 | `function_battery.py` | staging | Every edge function's auth gate and group scoping (feeds, ingest, notify, digest) |
-| `stranger_probe.py` | **production-safe** | A fresh account can read/insert/update/delete nothing, can't join a group or grant itself Plus; anon gets nothing; function gates hold. Creates and deletes its own user |
+| `stranger_probe.py` | **production-safe** | A fresh account is provisioned into its own personal group and sees *only* that: no items, no other groups/profiles/schedules; blanket UPDATE/DELETE touch only its own row; it can't join, move its membership, mint invites or grant itself Plus; anon gets nothing; `membership_*` RPCs aren't callable by users. Creates and deletes its own user and group |
+| `membership_battery.py [--function]` | staging | 0021 + `group-membership`: provisioning (group, schedule, name, colour), invite lifecycle (ok/expired/revoked/unknown/own, multi-use), 2-free/4-Plus cap incl. the joiner's own Plus, join moving saves with URL dedupe and notes merge, leave with/without copy, feed-token rotation, auto-names and pinning, last-seat race (two threads), client lock-out, "Former member" tombstone; `--function` repeats the flows over HTTP with real JWTs. Creates six throwaway accounts and cleans up |
 | `parse_gate.ts` | **production-safe** (reads only; spends model calls) | Replays a sample of the library's URLs through the *local* extractor with a given home and diffs the cards against what's stored. Run before any prompt change: ship when the diff is noise. `--home "Lisbon\|Portugal\|Europe/Lisbon" --url …` spot-checks another home |
 
 `parse_gate.ts` ran on 8 Sep for the home-string prompts (`deno run -A
@@ -75,6 +76,13 @@ supabase projects delete <staging-ref> --yes
 supabase link --project-ref gvewzvcvmeztqyfwkgwa --yes
 rm /tmp/stg_creds.json
 ```
+
+`membership_battery.py` ran on 8 Sep for 0021 on a fresh staging copy: 79
+checks green (one expectation fixed on the way — the card *does* list the
+still-valid first code), down → up → green again, then `--function` green
+against the deployed function. The 1b RLS battery's cap test needed one line
+after 0021: a freshly inserted auth user now owns a personal membership, so
+it is deleted before the direct `group_members` insert.
 
 ## Cutover order
 

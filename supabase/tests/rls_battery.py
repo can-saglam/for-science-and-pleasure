@@ -194,6 +194,9 @@ if PHASE == "1b":
           insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
           values (uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'cap' || i || '@example.com', '', now(), now(), now(), '{{}}', '{{}}');
           begin
+            -- From 0021 a new auth user is provisioned into a personal group;
+            -- one group per user means that row goes before the cap insert.
+            delete from public.group_members where user_id = uid;
             insert into public.group_members (group_id, user_id) values (g, uid);
             raise notice 'inserted member %', i;
           exception when check_violation then
@@ -204,6 +207,9 @@ if PHASE == "1b":
       select count(*) as n from public.group_members where group_id = '{gid}';""")
     check("1b: 4-member cap enforced (2 existing + 2 more, 3rd refused)", isinstance(rows, list) and rows and rows[0]["n"] == 4, f"{rows}")
     sql(f"delete from public.group_members where user_id in (select id from auth.users where email like 'cap%@example.com'); delete from auth.users where email like 'cap%@example.com';")
+    # 0021 leaves the cap users' empty personal groups and profile tombstones behind.
+    sql("delete from public.groups g where not exists (select 1 from public.group_members m where m.group_id = g.id) and not exists (select 1 from public.items i where i.group_id = g.id) and g.id <> (select id from public.groups order by created_at limit 1)")
+    sql("delete from public.profiles p where not exists (select 1 from auth.users u where u.id = p.user_id)")
     rows = sql(f"select count(*) as n from public.group_members where group_id = '{gid}'")
     check("1b: cap test cleaned up", rows and rows[0]["n"] == 2, f"{rows}")
 
