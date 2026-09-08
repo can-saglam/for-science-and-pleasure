@@ -40,7 +40,7 @@ struct ContentView: View {
                 LibraryView(kind: Item.Kind.event)
                     .toolbarVisibility(.hidden, for: .tabBar)
             }
-            Tab("The Fuel", systemImage: "fork.knife", value: 1) {
+            Tab("The Spots", systemImage: "mappin.and.ellipse", value: 1) {
                 LibraryView(kind: Item.Kind.place)
                     .toolbarVisibility(.hidden, for: .tabBar)
             }
@@ -298,7 +298,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 HStack(spacing: 2) {
                     navButton("The Plan", icon: "building.columns", value: 0)
-                    navButton("The Fuel", icon: "fork.knife", value: 1)
+                    navButton("The Spots", icon: "mappin.and.ellipse", value: 1)
                 }
                 .padding(4)
                 .glassEffect(.regular, in: .capsule)

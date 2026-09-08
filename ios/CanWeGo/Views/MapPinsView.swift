@@ -293,9 +293,9 @@ struct MapPinsView: View {
                     .fill(item.accentColor)
                 Circle()
                     .strokeBorder(.white, lineWidth: 3)
-                // Same icons as the bottom toggle: columns = event,
-                // fork = place.
-                Image(systemName: item.isPlace ? "fork.knife" : "building.columns")
+                // What the save *is* — cutlery for a restaurant, a palette
+                // for a gallery, a leaf for a park — not which tab it's on.
+                Image(systemName: item.glyph)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
             }

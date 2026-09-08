@@ -49,6 +49,7 @@ interface Stored {
   area: string | null;
   address: string | null;
   price: string | null;
+  category: string | null;
   starts_on: string | null;
   ends_on: string | null;
   url: string;
@@ -67,11 +68,11 @@ let sample: Stored[];
 if (args.url.length > 0) {
   sample = args.url.map((u, i) => ({
     id: `arg-${i}`, title: "", kind: "", venue: null, area: null, address: null,
-    price: null, starts_on: null, ends_on: null, url: u, lat: null, lng: null,
+    price: null, category: null, starts_on: null, ends_on: null, url: u, lat: null, lng: null,
   }));
 } else {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/items?select=id,title,kind,venue,area,address,price,starts_on,ends_on,url,lat,lng&deleted_at=is.null&url=not.is.null`,
+    `${SUPABASE_URL}/rest/v1/items?select=id,title,kind,venue,area,address,price,category,starts_on,ends_on,url,lat,lng&deleted_at=is.null&url=not.is.null`,
     { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
   );
   const all = (await res.json()) as Stored[];
@@ -142,7 +143,7 @@ for (const r of rows.sort((a, b) => a.stored.title.localeCompare(b.stored.title)
   const c = r.card, s = r.stored;
   if (!s.title) {
     // Spot-check mode: just print the card.
-    console.log(`   → ${c.kind} · ${c.title} · ${c.venue ?? "—"} · ${c.area ?? "—"} · ${c.address ?? "—"}`);
+    console.log(`   → ${c.kind}/${c.category ?? "—"} · ${c.title} · ${c.venue ?? "—"} · ${c.area ?? "—"} · ${c.address ?? "—"}`);
     console.log(`     ${c.starts_on ?? "—"} → ${c.ends_on ?? "—"} · ${c.price ?? "—"} · ${c.lat?.toFixed(4) ?? "—"},${c.lng?.toFixed(4) ?? "—"} (${(r.ms / 1000).toFixed(0)}s)`);
     continue;
   }
@@ -152,11 +153,12 @@ for (const r of rows.sort((a, b) => a.stored.title.localeCompare(b.stored.title)
   const venueOk = !s.venue || !c.venue || norm(c.venue) === norm(s.venue) || norm(c.venue).includes(norm(s.venue)) || norm(s.venue).includes(norm(c.venue));
   const areaOk = !s.area || !c.area || norm(c.area) === norm(s.area);
   const priceOk = !s.price || !c.price || norm(c.price) === norm(s.price);
+  const categoryOk = !s.category || !c.category || c.category === s.category;
   const dist = km(s, c.lat, c.lng);
   const coordsOk = dist === null || dist < 0.75;
 
   const hardIssues = [!titleOk && "title", !kindOk && "kind", !datesOk && "dates", dist !== null && dist >= 5 && "coords>5km"].filter(Boolean);
-  const softIssues = [!venueOk && "venue", !areaOk && "area", !priceOk && "price", !coordsOk && dist !== null && dist < 5 && "coords"].filter(Boolean);
+  const softIssues = [!venueOk && "venue", !areaOk && "area", !priceOk && "price", !categoryOk && "category", !coordsOk && dist !== null && dist < 5 && "coords"].filter(Boolean);
   if (hardIssues.length) hard++;
   else if (softIssues.length) soft++;
   else clean++;
@@ -167,11 +169,12 @@ for (const r of rows.sort((a, b) => a.stored.title.localeCompare(b.stored.title)
   console.log(`   ${flag(venueOk)} venue   ${s.venue ?? "—"}${venueOk ? "" : `  →  ${c.venue ?? "—"}`}`);
   console.log(`   ${flag(areaOk)} area    ${s.area ?? "—"}${areaOk ? "" : `  →  ${c.area ?? "—"}`}`);
   console.log(`   ${flag(priceOk)} price   ${s.price ?? "—"}${priceOk ? "" : `  →  ${c.price ?? "—"}`}`);
+  console.log(`   ${flag(categoryOk)} categ.  ${s.category ?? "—"}${categoryOk ? "" : `  →  ${c.category ?? "—"}`}`);
   console.log(`   ${flag(coordsOk)} coords  ${dist === null ? (s.lat == null ? "(none stored)" : c.lat == null ? "(none parsed)" : "") : `${(dist * 1000).toFixed(0)} m apart`}`);
   console.log(`      address ${c.address ?? "—"} · ${(r.ms / 1000).toFixed(0)}s`);
 }
 
 if (rows.some((r) => r.stored.title)) {
-  console.log(`\n${clean} clean · ${soft} soft (venue/area/price wording, coords <5 km) · ${hard} hard (title/kind/dates/coords ≥5 km) · ${failed} failed`);
+  console.log(`\n${clean} clean · ${soft} soft (venue/area/price/category wording, coords <5 km) · ${hard} hard (title/kind/dates/coords ≥5 km) · ${failed} failed`);
   console.log(hard === 0 ? "GATE: pass — differences are noise" : "GATE: look at the hard rows before shipping");
 }

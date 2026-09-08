@@ -557,7 +557,7 @@ struct LibraryView: View {
                 ContentUnavailableView {
                     Label(
                         base.isEmpty ? emptyTitle : "Nothing matches",
-                        systemImage: kind == Item.Kind.place ? "fork.knife" : "building.columns"
+                        systemImage: kind == Item.Kind.place ? "mappin.and.ellipse" : "building.columns"
                     )
                 } description: {
                     Text(
@@ -661,7 +661,7 @@ struct LibraryView: View {
     /// One concrete way to get the first save in, tuned to the tab.
     private var emptyPrompt: String {
         kind == Item.Kind.place
-            ? "Share a restaurant, bar or shop from Safari, Google Maps or Instagram — it lands here for both of you."
+            ? "Share a restaurant, a gallery or a park from Safari, Google Maps or Instagram — it lands here for both of you."
             : "Share a gig from DICE, an exhibition from a gallery's page, or paste any link — it lands here for both of you."
     }
 
@@ -784,7 +784,7 @@ private struct ChipRow: View {
             HStack(spacing: 8) {
                 if categories.count > 1 {
                     ForEach(categories, id: \.self) { c in
-                        chip(c.capitalized, isOn: category == c) {
+                        chip(Item.categoryLabel(c), isOn: category == c) {
                             category = category == c ? nil : c
                         }
                     }

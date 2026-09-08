@@ -543,6 +543,10 @@ Post-flip hardening, 7 Sep evening (all green):
 - [x] Batteries + runbook committed under `supabase/tests/` — every future RLS/drop/NOT NULL migration gets the same up/down/up rehearsal
 - [x] One APNs token per device — `0019`/`0020`: `register_apns_token(token, device_id, build, platform)` replaces the device's row and sweeps the account's legacy device-less rows (phones only; simulators never sweep a phone's token). The 56 simulator leftovers go the first time Can's phone runs 43
 
+Found on 8 Sep, from the "missing events" report: ~70 one-shot password sessions on Can's account since 7 Aug, all from Apple's `139.178.128.0/17`, each launching a random old TestFlight build and never refreshing again — Apple's automated build runs, signed in with the real credentials that sat in TestFlight's "Sign-in required". 25 item changes landed within minutes of those logins (Carnival done at 7:13am, Donald Locke, GLUE Book Fair and Lawrence Abu Hamdan deleted, Festival of Print done a month early). Credentials removed from ASC, password rotated, sessions revoked, six definite items restored. The rule that falls out: **no real account is ever named in App Store Connect** — see the App Review kit.
+
+Places vocabulary, 8 Sep: a gallery homepage saved as a place was filed as `exhibition` between the restaurants. Categories are now two lists keyed by kind (`_shared/categories.ts`: places get gallery/museum/park/shop/venue) with a normaliser behind the model; map pins and headers pick their glyph by category, not tab; the tab is **The Spots** with a map pin — "The Fuel" and the cutlery had quietly promised Places = food.
+
 Found by the rehearsal, fixed before production: tokens registered between 1a and 1b had no `user_id` (NOT NULL would have failed — 0017 now backfills); the 1a mirror trigger's unfiltered UPDATE was rejected by safeupdate, so changing the digest time in build 40 never worked (1b removes the singleton); `gen_random_bytes` needs the `extensions.` prefix; `is_member()` had to go after its own table.
 
 ### Phase 2

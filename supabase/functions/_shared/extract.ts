@@ -1,4 +1,5 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
+import { EVENT_CATEGORIES, normaliseCategory, PLACE_CATEGORIES } from "./categories.ts";
 import {
   colorFromImageBytes,
   colorFromImageUrl,
@@ -75,7 +76,9 @@ const cardSchema = (home: Home) => ({
     category: {
       type: ["string", "null"],
       description:
-        "One of: exhibition, gig, theatre, film, market, festival, restaurant, drink, cafe, talk, workshop, outdoors, other",
+        `For an event, one of: ${EVENT_CATEGORIES.join(", ")}. ` +
+        `For a place, one of: ${PLACE_CATEGORIES.join(", ")}. ` +
+        "A gallery, sculpture park or museum saved as a place is 'gallery' or 'museum', never 'exhibition' — that word is for a dated show.",
     },
     price: { type: ["string", "null"], description: priceExamples(home) },
     booking_url: { type: ["string", "null"] },
@@ -355,6 +358,7 @@ export async function extractCard(
     throw new Error("No structured output returned");
   }
   const card = JSON.parse(textBlock.text) as ParsedCard;
+  card.category = normaliseCategory(card.kind, card.category);
 
   // The pin in a Maps URL is exact — trust it over geocoding the name.
   let coords: { lat: number; lng: number } | null =

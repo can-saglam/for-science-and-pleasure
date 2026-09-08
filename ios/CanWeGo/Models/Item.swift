@@ -151,6 +151,42 @@ extension Item {
     var isPlace: Bool { kind == Kind.place }
     var isDone: Bool { status == Status.done }
 
+    /// The SF Symbol that stands for this save on the map and in list
+    /// headers. Chosen by what the thing *is*, not which tab it lives on —
+    /// a sculpture park saved as a place gets a palette, not a fork, so the
+    /// Places tab reads as "everywhere we want to go", not "where we eat".
+    var glyph: String {
+        Self.glyph(kind: kind, category: category)
+    }
+
+    /// Chip text for a category: the stored word, capitalised, with the one
+    /// accent the parser's ASCII vocabulary can't carry.
+    static func categoryLabel(_ category: String) -> String {
+        switch category.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "cafe": return "Café"
+        default: return category.capitalized
+        }
+    }
+
+    static func glyph(kind: String, category: String?) -> String {
+        switch category?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "restaurant": return "fork.knife"
+        case "cafe": return "cup.and.saucer"
+        case "drink": return "wineglass"
+        case "gallery", "exhibition": return "paintpalette"
+        case "museum": return "building.columns"
+        case "park", "outdoors": return "leaf"
+        case "shop", "market": return "bag"
+        case "gig": return "music.note"
+        case "theatre": return "theatermasks"
+        case "film": return "film"
+        case "talk": return "bubble.left.and.bubble.right"
+        case "workshop": return "hammer"
+        case "festival": return "sparkles"
+        default: return kind == Kind.place ? "mappin" : "ticket"
+        }
+    }
+
     /// One-day events "happen"; ranges "open" and "close".
     var isOneDay: Bool {
         guard let s = startsOn, let e = endsOn else { return false }
