@@ -132,9 +132,12 @@ struct GroupSection: View {
                         .font(.headline)
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
-                    Text(headline(card))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // Home only — the member rows are the headcount.
+                    if let home = card.homeLocality, !home.isEmpty {
+                        Text(home)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Image(systemName: "pencil")
@@ -144,7 +147,7 @@ struct GroupSection: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(card.name), \(headline(card))")
+        .accessibilityLabel("\(card.name), \(card.members.count) of \(card.capacity)")
         .accessibilityHint("Renames the group")
 
         ForEach(card.members) { member in
@@ -238,13 +241,6 @@ struct GroupSection: View {
     }
 
     // MARK: - Copy
-
-    /// "2 of 4 · London" — headcount against the seats this tier allows.
-    private func headline(_ card: GroupCard) -> String {
-        var parts = ["\(card.members.count) of \(card.capacity)"]
-        if let home = card.homeLocality, !home.isEmpty { parts.append(home) }
-        return parts.joined(separator: " · ")
-    }
 
     private var footer: some View {
         Group {
