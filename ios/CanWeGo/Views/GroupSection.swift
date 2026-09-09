@@ -32,8 +32,6 @@ struct SettingsRow: View {
 final class GroupUI {
     var renaming = false
     var draftGroupName = ""
-    var namingSelf = false
-    var draftMyName = ""
     var invite: GroupStore.InviteResult?
     var inviting = false
     var confirmLeave = false
@@ -153,43 +151,40 @@ struct GroupSection: View {
             memberRow(member)
         }
 
+        // One call to action while there's room. A live code is reused
+        // (codes are multi-use and last a week); otherwise a fresh one is
+        // minted. The code itself lives in the sheet, not on the row.
         if !card.isFull {
+            let pending = card.invites.first
             Button {
-                Task { await ui.makeInvite() }
+                Haptics.tap()
+                if let pending {
+                    ui.invite = .init(code: pending.formatted, expiresAt: pending.expiresAt, message: nil)
+                } else {
+                    Task { await ui.makeInvite() }
+                }
             } label: {
                 HStack {
-                    SettingsRow(title: "Invite someone", icon: "person.badge.plus")
-                        .fontWeight(card.members.count == 1 ? .semibold : .regular)
+                    SettingsRow(title: "Invite people", icon: "person.badge.plus")
+                        .fontWeight(.semibold)
                     Spacer()
                     if ui.inviting { ProgressView() }
                 }
             }
             .disabled(ui.inviting)
-        }
-
-        ForEach(card.invites) { pending in
-            Button {
-                Haptics.tap()
-                ui.invite = .init(code: pending.formatted, expiresAt: pending.expiresAt, message: nil)
-            } label: {
-                LabeledContent {
-                    Text(expiry(pending.expiresAt))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } label: {
-                    SettingsRow(title: "Code \(pending.formatted)", icon: "ticket.fill")
-                }
-            }
-            .accessibilityLabel("Invite code \(pending.formatted), \(expiry(pending.expiresAt))")
-            .accessibilityHint("Shows the code to share")
+            .accessibilityHint(pending == nil ? "Creates an invite code to share" : "Shows your invite code")
             .swipeActions(edge: .trailing) {
-                Button("Cancel invite", role: .destructive) {
-                    Task { await ui.run { try await group.revoke(pending.code) } }
+                if let pending {
+                    Button("Cancel invite", role: .destructive) {
+                        Task { await ui.run { try await group.revoke(pending.code) } }
+                    }
                 }
             }
             .contextMenu {
-                Button("Cancel invite", systemImage: "xmark.circle", role: .destructive) {
-                    Task { await ui.run { try await group.revoke(pending.code) } }
+                if let pending {
+                    Button("Cancel invite", systemImage: "xmark.circle", role: .destructive) {
+                        Task { await ui.run { try await group.revoke(pending.code) } }
+                    }
                 }
             }
         }
@@ -209,10 +204,11 @@ struct GroupSection: View {
         }
     }
 
-    @ViewBuilder
+    /// Names come from Apple (or the account), so rows only show; nothing
+    /// here is tappable.
     private func memberRow(_ member: GroupCard.Member) -> some View {
         let isMe = member.userId == me
-        let content = HStack(spacing: 12) {
+        return HStack(spacing: 12) {
             Text(member.initial)
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(AppBackground.base)
@@ -236,31 +232,9 @@ struct GroupSection: View {
                     .background(AppBackground.accent.opacity(0.25), in: .capsule)
                     .accessibilityLabel("Has Plus")
             }
-            if isMe {
-                Image(systemName: "pencil")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
         }
-        .contentShape(.rect)
-
-        if isMe {
-            Button {
-                Haptics.tap()
-                ui.draftMyName = member.displayName ?? ""
-                ui.namingSelf = true
-            } label: {
-                content
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(member.name), you\(member.isPlus ? ", has Plus" : "")")
-            .accessibilityHint("Changes your name")
-        } else {
-            // Other people's rows do nothing, so they aren't buttons.
-            content
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(member.name)\(member.isPlus ? ", has Plus" : "")")
-        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(member.name)\(isMe ? ", you" : "")\(member.isPlus ? ", has Plus" : "")")
     }
 
     // MARK: - Copy
@@ -270,17 +244,6 @@ struct GroupSection: View {
         var parts = ["\(card.members.count) of \(card.capacity)"]
         if let home = card.homeLocality, !home.isEmpty { parts.append(home) }
         return parts.joined(separator: " · ")
-    }
-
-    /// "6 days left" — one unit throughout the week, instead of the system's
-    /// "next week" / "in 6 days" flip.
-    private func expiry(_ date: Date) -> String {
-        let days = Calendar.current.dateComponents([.day], from: .now, to: date).day ?? 0
-        switch days {
-        case ..<1: return "expires today"
-        case 1: return "1 day left"
-        default: return "\(days) days left"
-        }
     }
 
     private var footer: some View {
@@ -306,7 +269,6 @@ struct GroupPresentations: ViewModifier {
     @Bindable var ui: GroupUI
     @Environment(\.modelContext) private var context
     @State private var group = GroupStore.shared
-    @State private var members = MembersStore.shared
 
     private var me: UUID? { SupabaseAuth.shared.userId }
     private var card: GroupCard? { group.card }
@@ -321,21 +283,6 @@ struct GroupPresentations: ViewModifier {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Up to 30 characters. Leave it blank and the group goes back to naming itself after its members.")
-            }
-            .alert("Your name", isPresented: $ui.namingSelf) {
-                TextField("Your first name", text: $ui.draftMyName)
-                    .textInputAutocapitalization(.words)
-                Button("Save") {
-                    Task {
-                        await ui.run {
-                            try await members.setDisplayName(ui.draftMyName)
-                            await group.refresh()
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("How you appear on cards and in notifications, as in \u{201c}Added by \(ui.draftMyName.isEmpty ? "you" : ui.draftMyName)\u{201d}. Up to 24 characters.")
             }
             .sheet(item: $ui.invite) { InviteSheet(invite: $0, groupName: card?.name ?? "the group") }
             .confirmationDialog(
@@ -431,6 +378,8 @@ struct InviteSheet: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    // Never squeezed to one line by the spacers around it.
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(24)
@@ -448,7 +397,7 @@ struct InviteSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.fraction(0.55), .large])
         .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
     }

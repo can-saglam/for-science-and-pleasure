@@ -62,7 +62,8 @@ final class MembersStore {
     /// Returns the name now on record, whichever it is.
     @discardableResult
     func claimDisplayName(_ proposed: String) async -> String? {
-        let name = proposed.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Capped like the server's check constraint (24 code points).
+        let name = proposed.trimmingCharacters(in: .whitespacesAndNewlines).cappedScalars(24)
         guard !name.isEmpty, let uid = SupabaseAuth.shared.userId,
               let token = try? await SupabaseAuth.shared.validToken() else { return nil }
         let key = uid.uuidString.lowercased()
@@ -93,36 +94,6 @@ final class MembersStore {
         namesByUser[key] = name
         (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
         return name
-    }
-
-    /// Renames the signed-in user, overwriting whatever was there. Trimmed
-    /// and capped at 24 graphemes to match the server's check constraint.
-    /// Throws with a sentence for the Settings screen.
-    func setDisplayName(_ proposed: String) async throws {
-        let name = proposed.trimmingCharacters(in: .whitespacesAndNewlines).cappedScalars(24)
-        guard !name.isEmpty else { throw MembershipError(message: "A name can't be empty.") }
-        guard let uid = SupabaseAuth.shared.userId else { throw MembershipError(message: "Sign in first.") }
-        let key = uid.uuidString.lowercased()
-        let token = try await SupabaseAuth.shared.validToken()
-
-        var write = URLRequest(url: SupabaseAuth.baseURL.appending(path: "rest/v1/profiles")
-            .appending(queryItems: [.init(name: "on_conflict", value: "user_id")]))
-        write.httpMethod = "POST"
-        write.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
-        write.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        write.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        write.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
-        write.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": key, "display_name": name])
-        let (data, response) = try await URLSession.shared.data(for: write)
-        guard (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else {
-            throw MembershipError(message: SyncProblem(
-                message: "Couldn't save your name.",
-                detail: String(data: data.prefix(200), encoding: .utf8),
-                status: (response as? HTTPURLResponse)?.statusCode ?? 0
-            ).message)
-        }
-        namesByUser[key] = name
-        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
     }
 
     /// RLS scopes the table to the caller's group; a failure just leaves
