@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var tab = ProcessInfo.processInfo.environment["CWG_TAB"].flatMap(Int.init) ?? 0
     @State private var undoBin = UndoBin.shared
     @State private var syncStatus = SyncStatus.shared
+    @State private var group = GroupStore.shared
     // CWG_DIGEST is only set by automated screenshot runs.
     @State private var digestOpen = ProcessInfo.processInfo.environment["CWG_DIGEST"] != nil
     /// An item summoned from outside the lists: a tapped last-chance
@@ -76,6 +77,28 @@ struct ContentView: View {
         } message: {
             Text("One of you deleted it since, so there's nothing left to open. Everything else is where you left it.")
         }
+        // The card says this account is in a different group from the one
+        // the local library was pulled for (someone joined or left from
+        // another device). The sync engine owns the swap; just run it.
+        .onChange(of: group.libraryIsForeign) { _, foreign in
+            if foreign { Task { await SupabaseSync.sync(context: context) } }
+        }
+        // …and it says so, once, after the new library has landed.
+        .alert(
+            "Now showing \u{201c}\(syncStatus.librarySwappedTo ?? "your group")\u{201d}",
+            isPresented: Binding(
+                get: { syncStatus.librarySwappedTo != nil },
+                set: { if !$0 { syncStatus.librarySwappedTo = nil } }
+            )
+        ) {
+            Button("OK") {}
+        } message: {
+            Text("Your saves now come from this group. See who\u{2019}s in it under Settings.")
+        }
+        // The library is about to be replaced — close anything showing an item.
+        .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
+            deepLinked = nil
+        }
         // A last-chance notification tapped while the app is alive.
         .onReceive(NotificationCenter.default.publisher(for: .cwgOpenItem)) { note in
             if let id = note.object as? UUID { openItem(id) }
@@ -121,9 +144,12 @@ struct ContentView: View {
         .animation(.snappy, value: undoBin.done?.id)
         // First sign-in on a fresh install: don't present empty tabs while
         // the shared library is still on its way down — and if that first
-        // pull fails, say so instead of leaving a silent blank app.
+        // pull fails, say so instead of leaving a silent blank app. The same
+        // curtain covers a store that belongs to another account until the
+        // sync engine has replaced it.
         .overlay {
-            if SupabaseAuth.shared.signedIn, !syncStatus.hasSyncedOnce, items.isEmpty {
+            if SupabaseAuth.shared.signedIn, !syncStatus.hasSyncedOnce,
+               items.isEmpty || group.libraryIsForeign {
                 if syncStatus.syncing {
                     VStack(spacing: 16) {
                         ProgressView()
@@ -234,6 +260,7 @@ struct ContentView: View {
                 WidgetStore.sync(items: items)
             }
             Task { await MembersStore.shared.refresh() }
+            Task { await GroupStore.shared.refresh() }
             // Home first: it's the clock every time label below is read on.
             Task { await HomeStore.shared.refresh() }
         }

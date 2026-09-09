@@ -132,6 +132,8 @@ try:
     pv = fn(f"public.membership_preview('{bob}', '{code_ann[:3]}-{code_ann[3:].lower()}')")
     check("preview tolerates dash + case; shows the group", pv.get("status") == "ok" and pv.get("name") == "Ann's saves"
           and pv.get("inviter") == "Ann" and pv.get("capacity") == 2 and len(pv.get("members", [])) == 1, str(pv))
+    check("preview never exposes the group's codes or id (0023)",
+          "invites" not in pv and "group_id" not in pv and all("user_id" not in m for m in pv.get("members", [])), str(pv))
     check("preview: unknown code", fn(f"public.membership_preview('{bob}', 'ZZZZZZ')").get("status") == "unknown")
     check("preview: own code", fn(f"public.membership_preview('{ann}', '{code_ann}')").get("status") == "own")
     check("client cannot read others' invites", req(f"/rest/v1/group_invites?select=code", jwt=login("bob"))[1] == [])
@@ -217,7 +219,11 @@ try:
     inv_ann3 = fn(f"public.membership_invite('{ann}')")["code"]
     check("revoke by outsider does nothing", fn(f"public.membership_revoke('{eve}', '{inv_ann3}')").get("revoked") is False)
     check("revoke by member", fn(f"public.membership_revoke('{ann}', '{inv_ann3}')").get("revoked") is True)
-    check("revoked code", fn(f"public.membership_preview('{eve}', '{inv_ann3}')").get("status") == "revoked")
+    pv_dead = fn(f"public.membership_preview('{eve}', '{inv_ann3}')")
+    check("revoked code", pv_dead.get("status") == "revoked")
+    check("a dead code learns only the inviter's name (0023)", set(pv_dead) <= {"status", "inviter"}, str(pv_dead))
+    check("helpers not callable by clients (0023)",
+          req("/rest/v1/rpc/user_is_plus", "POST", {"uid": ann}, jwt=login("bob"))[0] in (401, 403, 404))
     live = [i["code"] for i in fn(f"public.membership_card('{ann}')").get("invites", [])]
     check("card lists only live invites (the first, still-valid code)", live == [code_ann], str(live))
 

@@ -156,4 +156,11 @@ final class UndoBin {
         expiry?.cancel()
         deleted = nil
     }
+
+    /// Every pending Undo at once — the library it referred to is gone.
+    func clearAll() {
+        clear()
+        doneExpiry?.cancel(); done = nil
+        savedExpiry?.cancel(); saved = nil
+    }
 }

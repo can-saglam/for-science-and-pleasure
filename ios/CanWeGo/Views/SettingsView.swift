@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
+    @State private var groupUI = GroupUI()
     /// Translucent panel rows on the app blue.
     static let rowBackground = Color.white.opacity(0.08)
 
@@ -111,6 +112,8 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+
+                GroupSection(ui: groupUI)
 
                 Section("Appearance") {
                     themeRow
@@ -252,7 +255,8 @@ struct SettingsView: View {
                         }
                         Button(role: .destructive) {
                             Haptics.tap()
-                            SupabaseSync.resetCursor()
+                            // RootGate resets the cursor and group card on
+                            // any sign-out, this one included.
                             SupabaseAuth.shared.signOut()
                         } label: {
                             row("Sign out", icon: "rectangle.portrait.and.arrow.right")
@@ -287,6 +291,8 @@ struct SettingsView: View {
                 }
             }
             .task { await digest.pull() }
+            // The group rows' alerts, invite sheet and leave dialog.
+            .modifier(GroupPresentations(ui: groupUI))
             .sheet(isPresented: $digestPreview) { WeeklyDigestSheet() }
             // CWG_ENRICH is only set by automated test runs.
             .task {
@@ -326,16 +332,7 @@ struct SettingsView: View {
     /// title. Monochrome — every badge wears the current theme's accent,
     /// with the icon glyph in the theme base for contrast.
     private func row(_ title: String, icon: String) -> some View {
-        Label {
-            // No explicit color: lets callers tint the title (e.g. Sign out).
-            Text(title)
-        } icon: {
-            Image(systemName: icon)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppBackground.base)
-                .frame(width: 28, height: 28)
-                .background(AppBackground.accent.gradient, in: .rect(cornerRadius: 7, style: .continuous))
-        }
+        SettingsRow(title: title, icon: icon)
     }
 
     /// The three moods side by side — swatch, name, a ring on the current one.

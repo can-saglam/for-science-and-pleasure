@@ -22,50 +22,208 @@ enum SupabaseSync {
         }
     }
 
+    /// Back to "never synced" — on sign-out, and before a library swap. The
+    /// status the last account left behind goes with it.
     static func resetCursor() {
         defaults.removeObject(forKey: cursorKey)
         SyncStatus.shared.lastSyncedAt = nil
+        SyncStatus.shared.problem = nil
+        SyncStatus.shared.librarySwappedTo = nil
+        SyncStatus.shared.staleBannerDismissedAt = nil
+    }
+
+    // MARK: - Library ownership
+    //
+    // The local store belongs to whichever account and group last pulled
+    // it (`GroupStore.libraryGroupId` / `libraryUserId`). When that no
+    // longer matches the signed-in account — a membership change, or a
+    // different person signing in on this phone — the engine replaces the
+    // library: wipe, full pull, then rebuild everything derived from it
+    // (Spotlight, the widget, the share extension's URL index, local
+    // notifications) so the old group's saves stop surfacing anywhere.
+    // Nothing outside this file ever deletes the store.
+
+    /// Pushes this account's unsynced edits now. Returns false if any are
+    /// still stuck — the caller should not leave a group with edits that
+    /// would be refused once the membership has moved.
+    static func flush(context: ModelContext) async -> Bool {
+        guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return false }
+        while running { try? await Task.sleep(for: .milliseconds(100)) }
+        do {
+            // A cursor at the epoch (signed out and back in) means every
+            // row counts as unsynced; the server ignores what it already has.
+            try await push(context: context, since: lastSyncAt)
+            return rejected.isEmpty
+        } catch {
+            SyncStatus.shared.problem = SyncProblem(error)
+            return false
+        }
+    }
+
+    /// Runs a sync that replaces the library whatever the ownership record
+    /// says (the caller knows the membership just moved), without the
+    /// mid-session notice (it has its own words for what happened).
+    /// Returns whether the new library actually arrived.
+    static func replaceLibrary(context: ModelContext) async -> Bool {
+        while running { try? await Task.sleep(for: .milliseconds(100)) }
+        swapQuietly = true
+        forceSwap = true
+        await sync(context: context)
+        swapQuietly = false
+        forceSwap = false
+        let group = GroupStore.shared
+        return SyncStatus.shared.problem == nil
+            && group.card != nil && group.libraryGroupId == group.card?.groupId
+    }
+
+    private static var swapQuietly = false
+    private static var forceSwap = false
+
+    /// Before a library is wiped, whatever this person changed in it and
+    /// hasn't synced yet gets one push. Rows that were theirs to edit land;
+    /// rows the server refuses (403: a group they've since left) are set
+    /// aside and go with the wipe. Only network trouble stops the swap —
+    /// the wipe waits for a moment when nothing can be lost.
+    private static func salvage(context: ModelContext) async throws {
+        let me = SupabaseAuth.shared.userId
+        let email = SupabaseAuth.shared.email
+        let locals = try context.fetch(FetchDescriptor<Item>())
+        let mine = locals.filter { item in
+            guard !isQuarantined(item) else { return false }
+            if let me, item.createdBy == me || item.updatedBy == me { return true }
+            // Saves made before the app stamped ids, or offline before the
+            // first pull: the email is the only attribution they carry.
+            return item.createdBy == nil && item.addedByEmail != nil && item.addedByEmail == email
+        }
+        guard !mine.isEmpty else { return }
+        do {
+            try await upsert(rows: mine.map(row(from:)))
+        } catch let error as SyncProblem where error.rowRejected {
+            for item in mine {
+                do { try await upsert(rows: [row(from: item)]) } catch let e as SyncProblem where e.rowRejected {
+                    continue
+                }
+            }
+        }
+    }
+
+    private static func hasLocals(context: ModelContext) -> Bool {
+        ((try? context.fetchCount(FetchDescriptor<Item>())) ?? 0) > 0
+    }
+
+    private static func wipeLocals(context: ModelContext) {
+        let locals = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        for item in locals { context.delete(item) }
+        if context.hasChanges { try? context.save() }
+        defaults.removeObject(forKey: rejectedKey)
+        UndoBin.shared.clearAll()
+    }
+
+    /// Everything that mirrors the library, rebuilt from the store.
+    private static func rebuildDerived(context: ModelContext) async {
+        let fresh = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        SavedURLIndex.rebuild(from: fresh.compactMap(\.url))
+        SpotlightIndex.sync(items: fresh)
+        WidgetStore.sync(items: fresh)
+        await LastChanceNotifier.sync(items: fresh)
+        await MembersStore.shared.refresh()
+        await HomeStore.shared.refresh()
+        await DigestScheduleStore.shared.pull()
     }
 
     // MARK: - Triggers
 
-    private static var pending: Task<Void, Never>?
+    private static var debounce: Task<Void, Never>?
     private static var running = false
+    /// A sync was asked for while one was running: run again when it ends,
+    /// so an edit made mid-sync (or a membership change spotted mid-sync)
+    /// is never dropped.
+    private static var rerun = false
 
-    /// Debounced sync — safe to call on every local save.
+    /// Debounced sync — safe to call on every local save. The debounce is
+    /// only the wait; the sync itself runs in its own task, so a later
+    /// save cancelling the wait can never cancel a request in flight.
     static func schedule(context: ModelContext) {
-        pending?.cancel()
-        pending = Task {
+        debounce?.cancel()
+        debounce = Task {
             try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
-            await sync(context: context)
+            Task { await sync(context: context) }
         }
     }
 
     static func sync(context: ModelContext) async {
-        guard SupabaseAuth.shared.signedIn, !running else { return }
+        guard SupabaseAuth.shared.signedIn else { return }
+        if running { rerun = true; return }
         running = true
         SyncStatus.shared.syncing = true
         defer {
             running = false
             SyncStatus.shared.syncing = false
+            if rerun {
+                rerun = false
+                Task { await sync(context: context) }
+            }
         }
         // The kill switch: an old build never gets as far as a push.
         guard await buildIsCurrent() else { return }
         do {
             let cursor = lastSyncAt
+            let fresh = cursor == .distantPast
+            let group = GroupStore.shared
+            // A session's first sync learns the group before anything else;
+            // later syncs rely on the card ContentView refreshes on every
+            // foreground.
+            if fresh { await group.refresh() }
+            // Whose library is this? Another account's, another group's, or
+            // — a store from before ownership was tracked (which may hold
+            // anything, including the iCloud-era duplicates) — nobody's. In
+            // each case it goes before the pull, so nothing of theirs is
+            // shown as ours or pushed as ours.
+            let untracked = group.libraryGroupId == nil && hasLocals(context: context)
+            let foreign = forceSwap || group.libraryIsForeign || untracked
+            if fresh || foreign {
+                // Ownership is only ever recorded against a known group.
+                guard group.card != nil else {
+                    throw SyncProblem(message: "Couldn\u{2019}t load your group. Try again in a moment.")
+                }
+            }
+            if foreign {
+                // This person's own unsynced edits first — then the wipe.
+                try await salvage(context: context)
+                if !fresh {
+                    // Give any open item sheet a moment to close.
+                    NotificationCenter.default.post(name: .cwgLibraryWillSwap, object: nil)
+                    try? await Task.sleep(for: .milliseconds(350))
+                }
+                wipeLocals(context: context)
+                resetCursor()
+            }
+
             var pushError: Error?
-            if cursor == .distantPast {
-                // First sync after sign-in: the server is canonical (it may
-                // be newer than a seeded store), so pull before pushing
-                // whatever only exists locally.
+            if fresh || foreign {
+                // The server is canonical (it may be newer than a seeded
+                // store), so pull before pushing whatever only exists locally.
                 try await pull(context: context)
-                do { try await push(context: context, since: cursor) } catch { pushError = error }
+                // Worth a word only when it's the same person whose group
+                // changed under them; a different account signing in, or a
+                // store nobody had claimed, is simply shown its own library.
+                let sameAccount = group.libraryUserId != nil && group.libraryUserId == SupabaseAuth.shared.userId
+                group.libraryReplaced()
+                if foreign, !untracked, sameAccount, !swapQuietly {
+                    SyncStatus.shared.librarySwappedTo = group.card?.name
+                }
+                // After a wipe nothing local can be ahead of the server.
+                if !foreign {
+                    do { try await push(context: context, since: cursor) } catch { pushError = error }
+                }
             } else {
                 // Push and pull fail independently: one stuck local row must
                 // never block receiving the partner's saves.
                 do { try await push(context: context, since: cursor) } catch { pushError = error }
                 try await pull(context: context)
+                // An empty store nobody had claimed is this account's now.
+                if group.libraryGroupId == nil, group.card != nil { group.libraryReplaced() }
             }
             // Only a fully clean round advances the cursor — a failed push
             // leaves its dirty items behind it, retried on the next sync.
@@ -75,6 +233,7 @@ enum SupabaseSync {
             // (see `upsert`) so it can't hold everything else hostage — but
             // it stays visible in Settings until the item is edited again.
             SyncStatus.shared.problem = quarantineProblem(context: context)
+            if foreign { await rebuildDerived(context: context) }
         } catch {
             // Offline is routine and the next trigger retries — but keep
             // the reason visible instead of failing silently.

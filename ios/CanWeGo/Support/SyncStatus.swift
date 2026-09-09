@@ -46,8 +46,14 @@ final class SyncStatus {
     /// listing later. Server-provided so the switch needs no release.
     var storeURL: URL?
 
-    /// False only before the very first successful pull on this install.
+    /// False until this account's first successful pull on this install —
+    /// again after sign-out, and briefly while a library is being replaced.
     var hasSyncedOnce: Bool { lastSyncedAt != nil }
+
+    /// Set (to the new group's name) when a sync found the account in a
+    /// different group and replaced the library mid-session — someone
+    /// joined or left from another device. ContentView shows it once.
+    var librarySwappedTo: String?
 
     private init() {
         let defaults = UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
@@ -70,9 +76,11 @@ struct SyncProblem: Error, Equatable {
     /// HTTP status when the server itself answered; 0 for network trouble.
     var status = 0
 
-    /// A 400/409/422 means the *payload* was refused — the one class of
-    /// failure that retrying can't fix and that may be one row's fault.
-    var rowRejected: Bool { [400, 409, 422].contains(status) }
+    /// A 400/403/409/422 means the *payload* was refused — the one class of
+    /// failure that retrying can't fix and that may be one row's fault. 403
+    /// is RLS: a row that belongs to a group this account isn't in (left
+    /// behind by a membership change) must not block everything else.
+    var rowRejected: Bool { [400, 403, 409, 422].contains(status) }
 
     /// Translates whatever the engine threw into something a person can act on.
     init(_ error: Error) {

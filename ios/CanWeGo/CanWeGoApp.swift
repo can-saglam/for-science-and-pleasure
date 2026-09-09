@@ -10,18 +10,22 @@ struct CanWeGoApp: App {
     init() {
         // Sets the home clock from the cache before any time label renders.
         _ = HomeStore.shared
+        // The store is local only. Supabase is the sync — one source of
+        // truth, scoped to the signed-in account's group by RLS. This store
+        // used to be mirrored to the user's private iCloud database as well,
+        // and that mirror resurrected an old library into the app after a
+        // reinstall or an account change (another person signing in on the
+        // same phone saw the previous member's saves; deleted rows came
+        // back as duplicates). Same store name, so existing data opens as-is.
         do {
-            let cloud = ModelConfiguration(
-                "CanWeGo",
-                cloudKitDatabase: .private("iCloud.com.cansaglam.CanWeGo")
-            )
-            container = try ModelContainer(for: Item.self, configurations: cloud)
+            let local = ModelConfiguration("CanWeGo", cloudKitDatabase: .none)
+            container = try ModelContainer(for: Item.self, configurations: local)
         } catch {
-            // No iCloud account / entitlement (e.g. plain simulator): keep the
-            // app usable with a local store instead of dying at launch.
+            // A store this build can't open (corrupt file, downgrade): keep
+            // the app usable on a fresh one; the next sync refills it.
             do {
-                let local = ModelConfiguration("CanWeGo-local", cloudKitDatabase: .none)
-                container = try ModelContainer(for: Item.self, configurations: local)
+                let fallback = ModelConfiguration("CanWeGo-local", cloudKitDatabase: .none)
+                container = try ModelContainer(for: Item.self, configurations: fallback)
             } catch {
                 fatalError("Could not create any model container: \(error)")
             }
@@ -43,23 +47,39 @@ private struct RootGate: View {
     @State private var auth = SupabaseAuth.shared
 
     var body: some View {
-        if auth.signedIn || ProcessInfo.processInfo.environment["CWG_SKIP_AUTH"] != nil {
-            ContentView()
-                .task {
-                    PushRegistrar.register()
-                    // Apple lets people revoke an app in Settings; a revoked
-                    // account must not carry on syncing. Local data stays put.
-                    await AppleSignIn.checkCredentialState()
-                }
-                // Re-register on every foreground: uploading the token is
-                // idempotent, and it self-heals a device whose first upload
-                // failed (offline, expired session…).
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { PushRegistrar.register() }
-                }
-        } else {
-            AuthView()
+        Group {
+            if auth.signedIn || ProcessInfo.processInfo.environment["CWG_SKIP_AUTH"] != nil {
+                gated
+            } else {
+                AuthView()
+            }
         }
+        // Every way out — Settings, an expired session, Apple revoking the
+        // app — leaves the sync cursor and the group card as a fresh sign-in
+        // expects. The library itself stays; the engine decides its fate
+        // when the next account's first sync sees who owns it.
+        .onChange(of: auth.signedIn) { _, signedIn in
+            if !signedIn {
+                SupabaseSync.resetCursor()
+                GroupStore.shared.signedOut()
+            }
+        }
+    }
+
+    private var gated: some View {
+        ContentView()
+            .task {
+                PushRegistrar.register()
+                // Apple lets people revoke an app in Settings; a revoked
+                // account must not carry on syncing. Local data stays put.
+                await AppleSignIn.checkCredentialState()
+            }
+            // Re-register on every foreground: uploading the token is
+            // idempotent, and it self-heals a device whose first upload
+            // failed (offline, expired session…).
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { PushRegistrar.register() }
+            }
     }
 }
 

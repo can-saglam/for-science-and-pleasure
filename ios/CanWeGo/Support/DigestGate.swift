@@ -21,4 +21,7 @@ extension Notification.Name {
     static let cwgOpenItem = Notification.Name("cwgOpenItem")
     /// The active tab was tapped again — scroll its list back to the top.
     static let cwgScrollToTop = Notification.Name("cwgScrollToTop")
+    /// The local library is about to be wiped and replaced (membership
+    /// change) — any sheet showing an item should close first.
+    static let cwgLibraryWillSwap = Notification.Name("cwgLibraryWillSwap")
 }

@@ -5,7 +5,8 @@ import SwiftUI
 /// One saved thing — an event with a date window, or a place with none.
 /// Mirrors the web app's `items` table so the two stay conceptually in sync.
 ///
-/// CloudKit rules shape this model: every property has a default, nothing is
+/// Shaped by the CloudKit rules it once had to meet (and there's no reason
+/// to loosen them): every property has a default, nothing is
 /// `@Attribute(.unique)`, and date-only values are stored as "yyyy-MM-dd"
 /// strings (like the web) so timezones can never shift a date.
 @Model

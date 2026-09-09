@@ -15,6 +15,12 @@ enum LastChanceNotifier {
         let events = items.filter {
             $0.isEvent && !$0.isDone && !$0.isMissed && $0.endsOn != nil
         }
+        // Whatever was scheduled for the previous library goes first — a
+        // group left behind must not keep nudging about its events.
+        let stale = await center.pendingNotificationRequests()
+            .map(\.identifier)
+            .filter { $0.hasPrefix(prefix) }
+        center.removePendingNotificationRequests(withIdentifiers: stale)
         // Don't ask for permission until there's actually something to say.
         // (CWG_NO_PROMPTS keeps automated screenshot runs alert-free.)
         guard !events.isEmpty,
@@ -27,11 +33,6 @@ enum LastChanceNotifier {
             settings = await center.notificationSettings()
         }
         guard settings.authorizationStatus == .authorized else { return }
-
-        let stale = await center.pendingNotificationRequests()
-            .map(\.identifier)
-            .filter { $0.hasPrefix(prefix) }
-        center.removePendingNotificationRequests(withIdentifiers: stale)
 
         // Home calendar: the "week before" is a home day, and the digest
         // hour is a home wall-clock hour (digest_schedules.timezone).

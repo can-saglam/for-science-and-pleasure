@@ -140,6 +140,9 @@ struct WeeklyDigestSheet: View {
             }
         }
         .sheet(item: $selected) { ItemDetailView(item: $0) }
+        .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
+            selected = nil
+        }
         .presentationDetents([.medium, .large])
         .preferredColorScheme(.dark)
     }

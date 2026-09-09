@@ -363,6 +363,10 @@ struct LibraryView: View {
                 }
             }
             .sheet(item: $selected) { ItemDetailView(item: $0) }
+            // The library is about to be replaced: the open item won't exist.
+            .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
+                selected = nil
+            }
             // CWG_OPEN / CWG_CHIP are only set by automated screenshot runs;
             // they deep-open an item / preselect a chip and do nothing otherwise.
             .task {
