@@ -4,8 +4,20 @@
 
 // Free OSM geocoder — used only server-side to attach coordinates so the app
 // can do distance-based "nearby" suggestions and Google Maps directions.
+// Nominatim allows one request per second per app; a second query fired
+// straight after a miss (the home-suffixed try, then the bare address) was
+// being refused, which is how a place with a full postcode ended up with no
+// pin. Space the calls out.
+let lastCall = 0;
+async function politely(): Promise<void> {
+  const wait = lastCall + 1_100 - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCall = Date.now();
+}
+
 export async function geocode(query: string): Promise<{ lat: number; lng: number } | null> {
   try {
+    await politely();
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`,
       {

@@ -53,16 +53,35 @@ struct ItemCard: View {
         return area
     }
 
-    /// "1.2 km" for places, when we know where the user is. Quietly absent
-    /// otherwise (no permission, no fix, or absurd distances while abroad).
-    private var distance: String? {
+    /// Metres from the user to a place, when we know both. Nil otherwise
+    /// (no permission, no fix, or absurd distances while abroad).
+    private var meters: Double? {
         guard item.isPlace, !item.isDone, let coord = item.coordinate,
               let here = LocationStore.shared.location
         else { return nil }
-        let meters = here.distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude))
-        guard meters < 100_000 else { return nil }
+        let d = here.distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude))
+        return d < 100_000 ? d : nil
+    }
+
+    /// "1.2 km" for places. Quietly absent when unknown.
+    private var distance: String? {
+        guard let meters else { return nil }
         if meters < 950 { return "\(Int((meters / 50).rounded() * 50)) m" }
         return String(format: "%.1f km", meters / 1000)
+    }
+
+    /// Within a comfortable walk: the one place-side fact worth a badge,
+    /// sitting where an event's countdown would.
+    private var isNearby: Bool {
+        guard !compact, meta == nil, let meters else { return false }
+        return meters < 2_000
+    }
+
+    /// The badge slot: an event's time label, or "Nearby" for a place.
+    private var slotLabel: String? {
+        if meta != nil { return nil }
+        if isNearby { return "Nearby" }
+        return item.timeLabel
     }
 
     /// Quiet nudge for undated events — the one gap that actually hides an
@@ -102,11 +121,9 @@ struct ItemCard: View {
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 // With a thumbnail bleeding in from the right, the countdown
                 // moves down beside the subtitle so titles keep their room.
-                if !stackedTimeLabel && meta == nil {
+                if !stackedTimeLabel, let label = slotLabel {
                     Spacer(minLength: 6)
-                    if let label = item.timeLabel {
-                        timeText(label)
-                    }
+                    timeText(label)
                 }
             }
             if !subtitle.isEmpty {
@@ -115,7 +132,7 @@ struct ItemCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
             }
-            if stackedTimeLabel, meta == nil, let label = item.timeLabel {
+            if stackedTimeLabel, let label = slotLabel {
                 timeText(label)
                     .padding(.top, 1)
             }
@@ -153,25 +170,27 @@ struct ItemCard: View {
     private var accessibilitySummary: String {
         var parts = [item.title]
         if !subtitle.isEmpty { parts.append(subtitle) }
-        if meta == nil, let label = item.timeLabel { parts.append(label) }
+        if let label = slotLabel { parts.append(label) }
         if item.isDone { parts.append("We did go") }
         parts.append(contentsOf: hints)
         return parts.joined(separator: ". ")
     }
 
     /// Urgent labels wear a quiet rose badge — folded toward the card color
-    /// so it belongs to the theme, instead of a raw system red.
+    /// so it belongs to the theme, instead of a raw system red. "Nearby"
+    /// takes the same shape in a calm green.
     @ViewBuilder
     private func timeText(_ label: String) -> some View {
-        if item.timeLabelIsUrgent {
+        if isNearby || item.timeLabelIsUrgent {
+            let tint: Color = isNearby ? .green : .red
             Text(label)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(Color.red.mix(with: .white, by: 0.65))
+                .foregroundStyle(tint.mix(with: .white, by: 0.65))
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(
-                    Color.red.mix(with: cardBackground, by: 0.55),
+                    tint.mix(with: cardBackground, by: 0.55),
                     in: .capsule
                 )
         } else {

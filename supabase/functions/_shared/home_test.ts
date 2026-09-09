@@ -3,6 +3,7 @@ import {
   currencySymbol,
   geocodeNearHome,
   geocodeQuery,
+  ukPostcode,
   type Home,
   homeFromRow,
   homeLabel,
@@ -129,4 +130,30 @@ Deno.test("homeFromRow: null row → London; partial row fills from London", () 
     home_lng: null,
   });
   assertEquals(noCoords.lat, null);
+});
+
+Deno.test("ukPostcode: finds and normalises, ignores look-alikes", () => {
+  assertEquals(ukPostcode("Goodwood, West Sussex PO18 0PX"), "PO18 0PX");
+  assertEquals(ukPostcode("Milton Court, Silk St, London EC2Y 9BH"), "EC2Y 9BH");
+  assertEquals(ukPostcode("180 Strand, wc2r1ea"), "WC2R 1EA");
+  assertEquals(ukPostcode("12 Rue de Rivoli, 75001 Paris"), null);
+  assertEquals(ukPostcode("20 Deptford Broadway"), null);
+});
+
+Deno.test("geocodeNearHome: falls back to the postcode when both queries miss", async () => {
+  const calls: string[] = [];
+  const goodwood = { lat: 50.87, lng: -0.74 };
+  const geocoder = (q: string) => {
+    calls.push(q);
+    return Promise.resolve(q === "PO18 0PX, United Kingdom" ? goodwood : null);
+  };
+  assertEquals(await geocodeNearHome(geocoder, "Goodwood, West Sussex PO18 0PX", LONDON), goodwood);
+  assertEquals(calls, [
+    "Goodwood, West Sussex PO18 0PX, London, United Kingdom",
+    "Goodwood, West Sussex PO18 0PX",
+    "PO18 0PX, United Kingdom",
+  ]);
+  calls.length = 0;
+  assertEquals(await geocodeNearHome(geocoder, "Somewhere vague", LONDON), null);
+  assertEquals(calls.length, 2, "no postcode → no third call");
 });

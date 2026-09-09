@@ -108,7 +108,18 @@ export async function geocodeNearHome(
   const query = geocodeQuery(address, home);
   const hit = await geocode(query);
   if (hit || query === address) return hit;
-  return await geocode(address);
+  const bare = await geocode(address);
+  if (bare) return bare;
+  // Last resort: a postcode alone. Geocoders know every UK postcode even
+  // when they've never heard of the estate or venue in front of it.
+  const postcode = ukPostcode(address);
+  return postcode ? await geocode(`${postcode}, ${home.country}`) : null;
+}
+
+/** The UK postcode in an address, normalised to "PO18 0PX" form; null if none. */
+export function ukPostcode(address: string): string | null {
+  const m = address.toUpperCase().match(/\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b/);
+  return m ? `${m[1]} ${m[2]}` : null;
 }
 
 interface GroupHomeRow {
