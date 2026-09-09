@@ -34,6 +34,8 @@ final class GroupUI {
     var draftGroupName = ""
     var invite: GroupStore.InviteResult?
     var inviting = false
+    /// The group is full for its tier; the invite row opens the upsell.
+    var showPlus = false
     var confirmLeave = false
     var leaving = false
     var left: (result: GroupStore.LeaveResult, landed: Bool)?
@@ -154,14 +156,17 @@ struct GroupSection: View {
             memberRow(member)
         }
 
-        // One call to action while there's room. A live code is reused
-        // (codes are multi-use and last a week); otherwise a fresh one is
-        // minted. The code itself lives in the sheet, not on the row.
-        if !card.isFull {
+        // One call to action, always present until the group is at four.
+        // With room: a live code is reused (codes are multi-use and last a
+        // week) or a fresh one minted; the code itself lives in the sheet.
+        // Full for the free tier: the same row is the way to Plus.
+        if !card.isFull || card.needsPlusToGrow {
             let pending = card.invites.first
             Button {
                 Haptics.tap()
-                if let pending {
+                if card.needsPlusToGrow {
+                    ui.showPlus = true
+                } else if let pending {
                     ui.invite = .init(code: pending.formatted, expiresAt: pending.expiresAt, message: nil)
                 } else {
                     Task { await ui.makeInvite() }
@@ -171,20 +176,27 @@ struct GroupSection: View {
                     SettingsRow(title: "Invite people", icon: "person.badge.plus")
                         .fontWeight(.semibold)
                     Spacer()
-                    if ui.inviting { ProgressView() }
+                    if ui.inviting {
+                        ProgressView()
+                    } else if card.needsPlusToGrow {
+                        Text("Plus")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .disabled(ui.inviting)
-            .accessibilityHint(pending == nil ? "Creates an invite code to share" : "Shows your invite code")
+            .accessibilityHint(card.needsPlusToGrow ? "Opens Plus, which adds two more seats"
+                : pending == nil ? "Creates an invite code to share" : "Shows your invite code")
             .swipeActions(edge: .trailing) {
-                if let pending {
+                if let pending, !card.needsPlusToGrow {
                     Button("Cancel invite", role: .destructive) {
                         Task { await ui.run { try await group.revoke(pending.code) } }
                     }
                 }
             }
             .contextMenu {
-                if let pending {
+                if let pending, !card.needsPlusToGrow {
                     Button("Cancel invite", systemImage: "xmark.circle", role: .destructive) {
                         Task { await ui.run { try await group.revoke(pending.code) } }
                     }
@@ -248,9 +260,7 @@ struct GroupSection: View {
                 Text(note).foregroundStyle(.orange)
             } else if let card = group.card, card.members.count == 1 {
                 Text("Invite someone and you\u{2019}ll share one library — everyone sees and edits everything.")
-            } else if let card = group.card, card.needsPlusToGrow {
-                Text("Everyone here sees and edits the same library. Free groups have two seats — Plus, coming soon, opens two more.")
-            } else if let card = group.card, card.isFull {
+            } else if let card = group.card, card.isFull, !card.needsPlusToGrow {
                 Text("Everyone here sees and edits the same library. Four is the most a group can hold.")
             } else {
                 Text("Everyone here sees and edits the same library. Anyone can invite or rename the group; nobody can remove anyone but themselves.")
@@ -281,6 +291,7 @@ struct GroupPresentations: ViewModifier {
                 Text("Up to 30 characters. Leave it blank and the group goes back to naming itself after its members.")
             }
             .sheet(item: $ui.invite) { InviteSheet(invite: $0, groupName: card?.name ?? "the group") }
+            .sheet(isPresented: $ui.showPlus) { PlusSheet() }
             .confirmationDialog(
                 "Keep a copy of the group\u{2019}s saves?",
                 isPresented: $ui.confirmLeave,
@@ -382,6 +393,62 @@ struct InviteSheet: View {
             .appBackground(AppBackground.sheet)
             .navigationTitle(groupName)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Haptics.tap()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+            }
+        }
+        .presentationDetents([.fraction(0.55), .large])
+        .presentationDragIndicator(.visible)
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// Where "Invite people" leads when a free group is full. Stands in for the
+/// paywall until Plus ships (Phase 3); same shape, so the swap is one view.
+struct PlusSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer(minLength: 0)
+                Image(systemName: "person.3.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(AppBackground.accent)
+                VStack(spacing: 8) {
+                    Text("Room for two more")
+                        .font(.title2.weight(.bold))
+                    Text("Free groups have two seats. Plus opens two more — four people, one library, everyone adding and planning together.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button {
+                    Haptics.tap()
+                    dismiss()
+                } label: {
+                    Text("Coming soon")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                Text("Plus isn\u{2019}t available just yet — it arrives with an upcoming release.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .appBackground(AppBackground.sheet)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
