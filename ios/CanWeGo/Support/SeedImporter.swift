@@ -38,15 +38,22 @@ enum SeedImporter {
               let data = try? Data(contentsOf: url)
         else { return }
 
-        // Only seed a genuinely empty store (fresh install, pre-sync).
-        let existing = (try? context.fetchCount(FetchDescriptor<Item>())) ?? 0
-        guard existing == 0 else { return }
+        // Only seed a genuinely empty store (fresh install, pre-sync). A
+        // failed count is not an empty store — fail closed rather than pour
+        // seeds over a library we couldn't see.
+        var descriptor = FetchDescriptor<Item>()
+        descriptor.propertiesToFetch = [\.id]
+        guard let existing = try? context.fetch(descriptor), existing.isEmpty else { return }
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let seeds = try? decoder.decode([SeedItem].self, from: data) else { return }
 
-        for seed in seeds {
+        // Seeds carry the same UUIDs as the synced rows, and `id` is not a
+        // unique attribute (CloudKit forbids it), so never insert one twice.
+        var seen = Set(existing.map(\.id))
+        for seed in seeds where !seen.contains(seed.id) {
+            seen.insert(seed.id)
             let item = Item()
             item.id = seed.id
             item.kind = seed.kind
