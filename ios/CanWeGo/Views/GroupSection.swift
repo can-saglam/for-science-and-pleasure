@@ -30,8 +30,6 @@ struct SettingsRow: View {
 @Observable
 @MainActor
 final class GroupUI {
-    var renaming = false
-    var draftGroupName = ""
     var invite: GroupStore.InviteResult?
     var inviting = false
     /// The group is full for its tier; the invite row opens the upsell.
@@ -83,9 +81,10 @@ final class GroupUI {
 }
 
 /// "My group" at the top of Settings: who shares this library, room for
-/// more, pending invites, and the two things you can change (the group's
-/// name and your own). Every action goes through `GroupStore`, which asks
-/// the `group-membership` function and shows whatever it answers.
+/// more, and the way out. The group has no name of its own — it's called
+/// after its members, everywhere it's mentioned — so the rows *are* the
+/// group. Every action goes through `GroupStore`, which asks the
+/// `group-membership` function and shows whatever it answers.
 struct GroupSection: View {
     @Bindable var ui: GroupUI
     @State private var group = GroupStore.shared
@@ -122,38 +121,16 @@ struct GroupSection: View {
 
     @ViewBuilder
     private func rows(_ card: GroupCard) -> some View {
-        // The group itself: name, headcount, home. Tap to rename.
-        Button {
-            Haptics.tap()
-            ui.draftGroupName = card.namePinned ? card.name : ""
-            ui.renaming = true
-        } label: {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(card.name)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                    // Home only — the member rows are the headcount.
-                    if let home = card.homeLocality, !home.isEmpty {
-                        Text(home)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                Image(systemName: "pencil")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(card.name), \(card.members.count) of \(card.capacity)")
-        .accessibilityHint("Renames the group")
-
         ForEach(card.members) { member in
             memberRow(member)
+        }
+
+        if let home = card.homeLocality, !home.isEmpty {
+            LabeledContent {
+                Text(home)
+            } label: {
+                SettingsRow(title: "Home", icon: "house.fill")
+            }
         }
 
         // One call to action, always present until the group is at four.
@@ -263,7 +240,7 @@ struct GroupSection: View {
             } else if let card = group.card, card.isFull, !card.needsPlusToGrow {
                 Text("Everyone here sees and edits the same library. Four is the most a group can hold.")
             } else {
-                Text("Everyone here sees and edits the same library. Anyone can invite or rename the group; nobody can remove anyone but themselves.")
+                Text("Everyone here sees and edits the same library. Anyone can invite; nobody can remove anyone but themselves.")
             }
         }
     }
@@ -282,14 +259,6 @@ struct GroupPresentations: ViewModifier {
     func body(content: Content) -> some View {
         content
             .task { await group.refresh() }
-            .alert("Group name", isPresented: $ui.renaming) {
-                TextField(card?.namePinned == false ? (card?.name ?? "") : "Can & Joyce", text: $ui.draftGroupName)
-                    .textInputAutocapitalization(.words)
-                Button("Save") { Task { await ui.run { try await group.rename(ui.draftGroupName) } } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Up to 30 characters. Leave it blank and the group goes back to naming itself after its members.")
-            }
             .sheet(item: $ui.invite) { InviteSheet(invite: $0, groupName: card?.name ?? "the group") }
             .sheet(isPresented: $ui.showPlus) { PlusSheet() }
             .confirmationDialog(

@@ -147,13 +147,6 @@ final class GroupStore {
         if !r.revoked { throw MembershipError(message: "That invite had already ended.") }
     }
 
-    /// Empty name returns the group to naming itself.
-    func rename(_ name: String) async throws {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines).cappedScalars(30)
-        let fresh = try await call(["action": "rename", "name": clean], as: GroupCard.self)
-        store(fresh)
-    }
-
     struct LeaveResult: Decodable {
         let left: Bool
         let copied: Int
