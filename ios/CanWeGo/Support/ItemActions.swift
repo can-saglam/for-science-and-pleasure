@@ -6,6 +6,7 @@ import SwiftData
 extension Item {
     func markDone() {
         status = Item.Status.done
+        clearReminder()
         updatedAt = .now
         try? modelContext?.save()
     }
@@ -26,7 +27,8 @@ extension Item {
     /// the save names no place (an event with only a title).
     var placeQuery: String? {
         guard let place = venue ?? (kind == Item.Kind.place ? title : nil) else { return nil }
-        return ([place, area].compactMap(\.self) + ["London"]).joined(separator: ", ")
+        let city = HomeStore.cached()?.locality ?? "London"
+        return ([place, area].compactMap(\.self) + [city]).joined(separator: ", ")
     }
 
     /// Wherever the user chose to get directions (Settings → Directions).

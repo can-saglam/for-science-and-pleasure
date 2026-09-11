@@ -32,6 +32,18 @@ struct ShareCard: View {
                             startPoint: .top, endPoint: .bottom
                         )
                     )
+                if AppBackground.theme.isLight {
+                    // Ink on paper needs the photo to be gone where the
+                    // type starts, so cream adds a paper veil over the fade.
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.36),
+                            .init(color: AppBackground.base.opacity(0.85), location: 0.6),
+                            .init(color: AppBackground.base.opacity(0.85), location: 1),
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                }
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -39,24 +51,24 @@ struct ShareCard: View {
                     Text(category.uppercased())
                         .font(.caption.weight(.semibold))
                         .tracking(1.2)
-                        .foregroundStyle(item.accentColor.mix(with: .white, by: 0.55))
+                        .foregroundStyle(item.accentColor.mix(with: typeColor, by: 0.55))
                 }
                 Text(item.title)
                     .font(.post(40, relativeTo: .largeTitle))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(typeColor)
                     .lineLimit(3)
                     .minimumScaleFactor(0.7)
                     .fixedSize(horizontal: false, vertical: true)
                 if !whereLine.isEmpty {
                     Text(whereLine)
                         .font(.title3)
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(typeColor.opacity(0.75))
                         .lineLimit(2)
                 }
                 if let when = item.timeLabel {
                     Text(when)
                         .font(.headline)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(typeColor.opacity(0.6))
                 }
                 HStack {
                     Spacer()
@@ -79,6 +91,12 @@ struct ShareCard: View {
             ],
             startPoint: .top, endPoint: .bottom
         )
+    }
+
+    /// Dark themes print white on the photo's fade-out; cream prints in ink,
+    /// since the fade lands on light paper where white would vanish.
+    private var typeColor: Color {
+        image != nil && !AppBackground.theme.isLight ? .white : AppBackground.ink
     }
 
     private var whereLine: String {

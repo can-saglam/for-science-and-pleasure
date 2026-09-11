@@ -20,6 +20,7 @@ struct LibraryView: View {
     let kind: String
 
     @Environment(\.modelContext) private var context
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
     @State private var query = ""
     @State private var category: String?
@@ -293,7 +294,12 @@ struct LibraryView: View {
                     .allowsHitTesting(!mode.showMap)
                     .accessibilityHidden(mode.showMap)
                 if mode.showMap {
-                    MapPinsView(items: mapItems) { selected = $0 }
+                    MapPinsView(
+                        items: mapItems,
+                        hiddenUpcoming: kind == Item.Kind.event
+                            ? visible.filter { $0.timeBucket == .upcoming }.count
+                            : 0
+                    ) { selected = $0 }
                         .transition(.opacity)
                 }
             }
@@ -392,7 +398,7 @@ struct LibraryView: View {
     private func headerIcon(_ name: String) -> some View {
         Image(systemName: name)
             .fontWeight(.semibold)
-            .foregroundStyle(.white.opacity(0.72))
+            .foregroundStyle(AppBackground.ink.opacity(0.72))
     }
 
     /// The glass search row that drops in under the header when the
@@ -465,7 +471,7 @@ struct LibraryView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(staleTitle)
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(AppBackground.warning)
                         Text(problem?.message ?? "You're online, but the server hasn't answered since.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -473,7 +479,7 @@ struct LibraryView: View {
                     }
                 } icon: {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(AppBackground.warning)
                 }
                 Spacer(minLength: 0)
                 Button {
@@ -505,14 +511,12 @@ struct LibraryView: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
-            .tint(.white.opacity(0.92))
-            .foregroundStyle(AppBackground.base)
+            .prominentGlass()
             .disabled(syncStatus.syncing)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 
@@ -557,11 +561,20 @@ struct LibraryView: View {
                 placeList
             }
 
+            if visible.isEmpty && !been.isEmpty && query.isEmpty && category == nil && area == nil {
+                Text("Nothing coming up")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .cardListRow()
+            }
+
             if visible.isEmpty && been.isEmpty && missed.isEmpty {
                 ContentUnavailableView {
                     Label(
                         base.isEmpty ? emptyTitle : "Nothing matches",
-                        systemImage: kind == Item.Kind.place ? "mappin.and.ellipse" : "building.columns"
+                        systemImage: emptyGlyph
                     )
                 } description: {
                     Text(
@@ -630,8 +643,8 @@ struct LibraryView: View {
         }
         // Snug under the header — the chip row's own insets are enough air.
         .contentMargins(.top, 0, for: .scrollContent)
-        // Room at the end so the last card clears the floating bottom bar.
-        .contentMargins(.bottom, 90, for: .scrollContent)
+        // A little extra so the last card clears the floating tab bar.
+        .contentMargins(.bottom, 24, for: .scrollContent)
         .appBackground(kind == Item.Kind.place ? AppBackground.places : AppBackground.library)
     }
 
@@ -659,12 +672,38 @@ struct LibraryView: View {
     // MARK: - Empty states
 
     private var emptyTitle: String {
-        kind == Item.Kind.place ? "No places yet" : "No events yet"
+        if let category {
+            return "No \(Item.categoryLabel(category).lowercased()) yet"
+        }
+        return kind == Item.Kind.place ? "No places yet" : "No events yet"
     }
 
-    /// One concrete way to get the first save in, tuned to the tab.
+    private var emptyGlyph: String {
+        if let category {
+            return Item.glyph(kind: kind, category: category)
+        }
+        if kind == Item.Kind.place { return "building.columns" }
+        let day = Calendar.current.component(.day, from: Date())
+        return (1...31).contains(day) ? "\(day).calendar" : "calendar"
+    }
+
+    /// One concrete way to get the first save in, tuned to the tab or chip.
     private var emptyPrompt: String {
-        kind == Item.Kind.place
+        if let category {
+            switch category.lowercased() {
+            case "gig": return "Share a DICE or Ticketmaster link and it lands here."
+            case "restaurant": return "Share a restaurant from Google Maps or Instagram."
+            case "exhibition", "gallery": return "Share a show from a gallery\u{2019}s page."
+            case "film": return "Share a screening and it lands here."
+            case "theatre": return "Share a play or a listing page."
+            case "cafe": return "Share a café from Maps or Instagram."
+            case "park", "outdoors": return "Share a park or a walk from Maps."
+            case "museum": return "Share a museum from its site or Maps."
+            case "festival": return "Share a festival lineup or ticket page."
+            default: return "Share a link and it lands here for both of you."
+            }
+        }
+        return kind == Item.Kind.place
             ? "Share a restaurant, a gallery or a park from Safari, Google Maps or Instagram — it lands here for both of you."
             : "Share a gig from DICE, an exhibition from a gallery's page, or paste any link — it lands here for both of you."
     }
@@ -676,11 +715,21 @@ struct LibraryView: View {
     private var journal: some View {
         if kind == Item.Kind.event {
             if !query.isEmpty {
-                if !archiveAll.isEmpty {
-                    SectionHeader(title: "We Did Go", count: archiveAll.count)
+                if !been.isEmpty {
+                    SectionHeader(title: "We Did Go", count: been.count)
                         .frame(minHeight: 44)
                         .cardListRow()
-                    ForEach(archiveAll) { item in
+                    ForEach(been) { item in
+                        ItemCardRow(item: item, compact: true) {
+                            selected = item
+                        }
+                    }
+                }
+                if !missed.isEmpty {
+                    SectionHeader(title: "Missed", count: missed.count)
+                        .frame(minHeight: 44)
+                        .cardListRow()
+                    ForEach(missed) { item in
                         ItemCardRow(item: item, compact: true) {
                             selected = item
                         }
@@ -708,7 +757,11 @@ struct LibraryView: View {
         if !archiveAll.isEmpty {
             Button {
                 Haptics.tap()
-                withAnimation(.snappy) { archiveOpen.toggle() }
+                if reduceMotion {
+                    archiveOpen.toggle()
+                } else {
+                    withAnimation(.snappy) { archiveOpen.toggle() }
+                }
             } label: {
                 HStack(spacing: 6) {
                     Text("Archive")
@@ -718,6 +771,7 @@ struct LibraryView: View {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .rotationEffect(.degrees(archiveOpen ? 90 : 0))
+                        .animation(reduceMotion ? nil : .snappy, value: archiveOpen)
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -726,6 +780,9 @@ struct LibraryView: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Archive, \(archiveAll.count)")
+            .accessibilityHint(archiveOpen ? "Collapse" : "Expand")
+            .accessibilityAddTraits(.isButton)
             .frame(minHeight: 44)
             .cardListRow()
 
@@ -795,7 +852,7 @@ private struct ChipRow: View {
                 }
                 if categories.count > 1 && areas.count > 1 {
                     Rectangle()
-                        .fill(.white.opacity(0.25))
+                        .fill(AppBackground.ink.opacity(0.25))
                         .frame(width: 1, height: 16)
                 }
                 if areas.count > 1 {
@@ -847,11 +904,11 @@ private struct ChipRow: View {
         .accessibilityHint(isOn ? "Clears this filter" : "Filters the list")
         // Explicit colors: the system styles both resolve near-white here,
         // leaving white text on white glass.
-        .foregroundStyle(isOn ? AppBackground.base : .white)
+        .foregroundStyle(isOn ? AppBackground.base : AppBackground.ink)
         // Not .interactive(): touch-tracking glass deforms under the finger,
         // which reads as wobble when a swipe drags across the row.
         .glassEffect(
-            isOn ? .regular.tint(.white.opacity(0.92)) : .regular,
+            isOn ? .regular.tint(AppBackground.ink.opacity(0.92)) : .regular,
             in: .capsule
         )
     }

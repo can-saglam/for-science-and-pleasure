@@ -29,6 +29,7 @@ struct ItemForm: View {
             section("When") {
                 OptionalDateRow(label: "Opens", icon: "calendar", value: $item.startsOn)
                 OptionalDateRow(label: "Closes", icon: "calendar.badge.checkmark", value: $item.endsOn)
+                RemindRow(item: item)
             }
 
             section("Extras") {
@@ -41,7 +42,7 @@ struct ItemForm: View {
                         .lineLimit(2...5)
                 }
                 .padding(12)
-                .background(.white.opacity(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+                .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -63,7 +64,7 @@ struct ItemForm: View {
             TextField(label, text: text)
         }
         .padding(12)
-        .background(.white.opacity(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
     }
 
     private func optional(_ source: Binding<String?>) -> Binding<String> {
@@ -79,7 +80,7 @@ struct ItemForm: View {
 private func fieldIcon(_ name: String) -> some View {
     Image(systemName: name)
         .font(.subheadline)
-        .foregroundStyle(.white.opacity(0.35))
+        .foregroundStyle(AppBackground.ink.opacity(0.35))
         .frame(width: 22)
 }
 
@@ -114,6 +115,7 @@ private struct OptionalDateRow: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear date")
             } else {
                 Button {
                     Haptics.tap()
@@ -129,6 +131,6 @@ private struct OptionalDateRow: View {
         // Same filled row as the text fields, so nothing floats loose.
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
-        .background(.white.opacity(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
     }
 }

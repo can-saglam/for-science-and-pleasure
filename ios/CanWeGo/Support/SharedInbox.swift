@@ -18,12 +18,18 @@ enum SharedInbox {
         var price: String?
         var startsOn: String?
         var endsOn: String?
+        var reminderOffsetDays: Int?
+        var reminderAnchor: String?
+        var remindAt: String?
         var url: String?
         var notes: String?
         var lat: Double?
         var lng: Double?
         var colorHex: String?
         var imageUrl: String?
+        var status: String?
+        /// Share-sheet "Save anyway" after a duplicate warning.
+        var allowDuplicate: Bool?
         var savedAt: Date = .now
     }
 
@@ -79,12 +85,16 @@ extension Item {
         price = pending.price
         startsOn = pending.startsOn
         endsOn = pending.endsOn
+        reminderOffsetDays = pending.reminderOffsetDays
+        reminderAnchor = pending.reminderAnchor
+        remindAt = pending.remindAt
         url = pending.url
         notes = pending.notes
         lat = pending.lat
         lng = pending.lng
         colorHex = pending.colorHex
         imageUrl = pending.imageUrl
+        if let status = pending.status { self.status = status }
         createdAt = pending.savedAt
         updatedAt = pending.savedAt
     }

@@ -1,10 +1,12 @@
 import MapKit
 import SwiftUI
+import UIKit
 
 /// Native map of everything with a pin — each one wearing its item's color.
 /// Zoomed out, nearby pins merge into counted bubbles; tapping one dives in.
 struct MapPinsView: View {
     let items: [Item]
+    var hiddenUpcoming = 0
     let onSelect: (Item) -> Void
 
     // An explicit region, never .automatic: the automatic camera re-frames
@@ -12,6 +14,9 @@ struct MapPinsView: View {
     // zoom — together they feed back into an infinite re-render loop.
     @State private var camera: MapCameraPosition = .automatic
     @State private var span: MKCoordinateSpan?
+    @State private var locations = LocationStore.shared
+    @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Lets the locate-me control live outside the default top-right stack.
     @Namespace private var mapScope
 
@@ -161,12 +166,19 @@ struct MapPinsView: View {
                         Button {
                             zoom(into: cluster)
                         } label: {
+                            // A dark bubble with a white count in every
+                            // theme — the theme base where that's dark,
+                            // black on cream — ringed in white so it stays
+                            // legible over the map like the single pins.
                             ZStack {
                                 Circle()
-                                    .fill(.white.opacity(0.94))
+                                    .fill(AppBackground.theme.isLight ? Color.black : AppBackground.base)
+                                Circle()
+                                    .strokeBorder(.white.opacity(0.92), lineWidth: 2)
                                 Text("\(cluster.members.count)")
                                     .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(AppBackground.base)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.white)
                             }
                             .frame(width: 34, height: 34)
                             .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
@@ -209,63 +221,68 @@ struct MapPinsView: View {
                 .allowsHitTesting(false)
                 .ignoresSafeArea()
         }
-        // Mirror of the header's soft blur: the map fades into the tab bar
-        // instead of ending against it with a hard edge.
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: .black, location: 0.5),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(height: 170)
-                .allowsHitTesting(false)
-                .ignoresSafeArea(edges: .bottom)
-        }
         .overlay(alignment: .bottomLeading) {
             let missing = items.count - pinned.count
-            if missing > 0 {
-                Text("\(missing) without a location")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
-                    .padding(12)
+            if hiddenUpcoming > 0 || missing > 0 || locations.denied {
+                VStack(alignment: .leading, spacing: 6) {
+                    if hiddenUpcoming > 0 {
+                        Text("\(hiddenUpcoming) coming up, not on the map")
+                    }
+                    if missing > 0 {
+                        Text("\(missing) without a location")
+                    }
+                    if locations.denied {
+                        Text("Location is off")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .glassEffect(.regular, in: .capsule)
+                .padding(12)
             }
         }
         // Locate-me docks directly above the add button, at its exact size —
-        // the bar reports the add button's real frame, so the two stay
-        // aligned whatever the pill's text metrics are. Our own button, not
+        // the bar reads the system circle's real frame, so the two stay
+        // aligned on every device. Our own button, not
         // MapUserLocationButton: the system one draws its own dark backing
         // at its own size, which read as a double button inside the glass.
         .overlay {
             GeometryReader { geo in
-                let plus = PlusButtonFrame.shared.rect
+                let plus = PlusButtonFrame.shared.best
                 if plus != .zero {
                     let local = geo.frame(in: .global)
                     Button {
                         Haptics.tap()
-                        LocationStore.shared.refresh()
-                        withAnimation(.snappy) {
-                            camera = .userLocation(fallback: camera)
+                        if locations.denied {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                openURL(url)
+                            }
+                        } else {
+                            locations.refresh()
+                            if reduceMotion {
+                                camera = .userLocation(fallback: camera)
+                            } else {
+                                withAnimation(.snappy) {
+                                    camera = .userLocation(fallback: camera)
+                                }
+                            }
                         }
                     } label: {
                         Image(systemName: "location")
                             .font(.body.weight(.semibold))
-                            .foregroundStyle(AppBackground.accent)
+                            // Same ink as the tab bar's own glyphs.
+                            .foregroundStyle(AppBackground.ink)
                             .frame(width: plus.width, height: plus.height)
                             .contentShape(.circle)
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular, in: .circle)
+                    // Interactive Liquid Glass: bends the map behind it and
+                    // answers touch like the tab bar's Add circle.
+                    .glassEffect(.regular.interactive(), in: .circle)
                     .accessibilityLabel("Show my location")
+                    .accessibilityHint(locations.denied ? "Location is off. Opens Settings." : "")
                     .position(
                         x: plus.midX - local.minX,
                         y: plus.minY - 12 - plus.height / 2 - local.minY

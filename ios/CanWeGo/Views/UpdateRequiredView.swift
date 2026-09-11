@@ -10,7 +10,7 @@ struct UpdateRequiredView: View {
 
     var body: some View {
         ZStack {
-            AppBackground.base.ignoresSafeArea()
+            ThemeFill(color: AppBackground.base)
 
             VStack(spacing: 0) {
                 Spacer()
@@ -20,17 +20,17 @@ struct UpdateRequiredView: View {
 
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 44, weight: .light))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(AppBackground.ink.opacity(0.85))
                     .padding(.bottom, 20)
 
                 Text("Time for an update")
                     .font(.post(26, relativeTo: .title))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppBackground.ink)
                     .padding(.bottom, 10)
 
                 Text("This version of Can We Go? can't keep your list in step any more. Update to carry on where you left off — nothing you've saved is lost.")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(AppBackground.ink.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 36)
 
@@ -46,18 +46,17 @@ struct UpdateRequiredView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AppBackground.accent)
+                .prominentGlass()
                 .padding(.horizontal, 28)
                 .padding(.bottom, 10)
 
                 Text("Build \(SupabaseSync.buildNumber)")
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(AppBackground.ink.opacity(0.35))
                     .padding(.bottom, 8)
             }
         }
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .interactiveDismissDisabled()
     }
 }

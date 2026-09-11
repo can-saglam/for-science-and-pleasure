@@ -1,5 +1,5 @@
-// Digest scheduling arithmetic, kept free of I/O so it can be unit-tested.
-// Used by send-digest; mirrors the SQL in dispatch_weekly_digest().
+// Home-clock arithmetic, kept free of I/O so it can be unit-tested.
+// Used by send-reminders (10:00 home hour) and the Shortcut digest pull.
 
 export interface Schedule {
   group_id: string;
@@ -47,14 +47,21 @@ export function localDate(clock: LocalClock): string {
 }
 
 /**
- * Inside the send window: the right weekday, and between the scheduled
+ * Inside a scheduled window: the right weekday, and between the scheduled
  * minute and 59 minutes after it (the dispatcher pings every 15 minutes,
- * so one of its pings always lands in the hour; digest_runs dedups).
+ * so one of its pings always lands in the hour).
  */
 export function isDue(sched: Pick<Schedule, "day_of_week" | "hour" | "minute">, clock: LocalClock): boolean {
   if (ISO_DOW[clock.weekday] !== sched.day_of_week) return false;
   const now = Number(clock.hour) * 60 + Number(clock.minute);
   const start = sched.hour * 60 + sched.minute;
+  return now >= start && now <= start + 59;
+}
+
+/** Fixed 10:00–10:59 home hour — when shared reminders fire. */
+export function isMorningHour(clock: LocalClock, hour = 10): boolean {
+  const now = Number(clock.hour) * 60 + Number(clock.minute);
+  const start = hour * 60;
   return now >= start && now <= start + 59;
 }
 

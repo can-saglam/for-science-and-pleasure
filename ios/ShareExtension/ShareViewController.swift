@@ -6,10 +6,10 @@ final class ShareViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
-        // The extension inherits the device's appearance; our UI lives on
-        // deep blue, so materials and .secondary text must resolve dark or
-        // the whole sheet goes illegible in light mode.
-        overrideUserInterfaceStyle = .dark
+        // Follow the app theme, not the device: cream is light, everything
+        // else stays dark so glass and secondary text stay readable.
+        let style: UIUserInterfaceStyle = ThemeStore.shared.current.isLight ? .light : .dark
+        overrideUserInterfaceStyle = style
 
         let host = UIHostingController(
             rootView: ShareView(
@@ -24,7 +24,7 @@ final class ShareViewController: UIViewController {
                 }
             )
         )
-        host.overrideUserInterfaceStyle = .dark
+        host.overrideUserInterfaceStyle = style
         addChild(host)
         view.addSubview(host.view)
         host.view.frame = view.bounds

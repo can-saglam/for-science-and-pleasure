@@ -67,10 +67,45 @@ enum Snapshot {
 
 // MARK: - Timeline
 
+struct ThemeSnapshot {
+    var name: String
+    var isLight: Bool
+    var paper: Color
+    var ink: Color
+
+    static func load() -> ThemeSnapshot {
+        let url = Snapshot.directory?.appending(path: "theme.json")
+        let data = url.flatMap { try? Data(contentsOf: $0) }
+        let decoded = data.flatMap { try? JSONDecoder().decode(Payload.self, from: $0) }
+        return named(decoded?.theme ?? "midnight")
+    }
+
+    private struct Payload: Codable {
+        var theme: String
+        var isLight: Bool?
+    }
+
+    private static func named(_ name: String) -> ThemeSnapshot {
+        switch name {
+        case "cream":
+            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#F8F0CA") ?? .white, ink: .black)
+        case "forest":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#323316") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
+        case "wine":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#440015") ?? .black, ink: .white)
+        case "ink":
+            ThemeSnapshot(name: name, isLight: false, paper: .black, ink: .white)
+        default:
+            ThemeSnapshot(name: "midnight", isLight: false, paper: Color.fromHex("#0A107A") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
+        }
+    }
+}
+
 struct SaveEntry: TimelineEntry {
     let date: Date
     let item: SnapshotItem?
     let image: UIImage?
+    let theme: ThemeSnapshot
 }
 
 struct Provider: TimelineProvider {
@@ -85,7 +120,8 @@ struct Provider: TimelineProvider {
                 colorHex: "#8f4a3d",
                 hasImage: false
             ),
-            image: nil
+            image: nil,
+            theme: ThemeSnapshot.load()
         )
     }
 
@@ -112,7 +148,8 @@ struct Provider: TimelineProvider {
 
     private func entry(at date: Date, in context: Context) -> SaveEntry {
         let all = Snapshot.load()
-        guard !all.isEmpty else { return SaveEntry(date: date, item: nil, image: nil) }
+        let theme = ThemeSnapshot.load()
+        guard !all.isEmpty else { return SaveEntry(date: date, item: nil, image: nil, theme: theme) }
         // Seeded by the hour so every size of the widget shows the same
         // pick, scrambled so consecutive hours jump around the list.
         let hour = Int(date.timeIntervalSince1970 / 3600)
@@ -122,7 +159,7 @@ struct Provider: TimelineProvider {
         // and current iPhones are 3x displays.
         let side = max(context.displaySize.width, context.displaySize.height) * 3
         let image = item.hasImage ? Snapshot.image(for: item.id, maxSide: side) : nil
-        return SaveEntry(date: date, item: item, image: image)
+        return SaveEntry(date: date, item: item, image: image, theme: theme)
     }
 }
 
@@ -161,15 +198,17 @@ struct RandomSaveView: View {
                     .scaledToFill()
             )
             .overlay(scrim)
-        } else {
+        } else if entry.item != nil {
             LinearGradient(
                 colors: [
-                    accent.mix(with: .black, by: 0.55),
-                    accent.mix(with: .black, by: 0.8),
+                    accent.mix(with: entry.theme.paper, by: entry.theme.isLight ? 0.72 : 0.45),
+                    accent.mix(with: entry.theme.paper, by: entry.theme.isLight ? 0.88 : 0.7),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
+        } else {
+            entry.theme.paper
         }
     }
 
@@ -204,36 +243,42 @@ struct RandomSaveView: View {
                 Text(label.uppercased())
                     .font(.system(size: family == .systemSmall ? 9 : 10, weight: .bold))
                     .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(typeColor.opacity(0.85))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .padding(.bottom, 4)
             }
             Text(item.title)
                 .font(family == .systemSmall ? .subheadline.bold() : .title3.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(typeColor)
                 .lineLimit(family == .systemLarge ? 3 : 2)
                 .minimumScaleFactor(0.9)
             if family != .systemSmall, let subtitle = item.subtitle {
                 Text(subtitle)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(typeColor.opacity(0.75))
                     .lineLimit(1)
                     .padding(.top, 3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+        .shadow(color: .black.opacity(entry.image == nil ? 0 : 0.35), radius: 3, y: 1)
+    }
+
+    /// Photo sits on a dark scrim, so type stays white. Empty and no-photo
+    /// follow the app theme — cream paper gets black ink.
+    private var typeColor: Color {
+        entry.image != nil ? .white : entry.theme.ink
     }
 
     private var empty: some View {
         VStack(spacing: 6) {
             Image(systemName: "sparkles")
                 .font(.title3)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(entry.theme.ink.opacity(0.8))
             Text("Save something to see it here")
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(entry.theme.ink.opacity(0.75))
                 .multilineTextAlignment(.center)
         }
     }

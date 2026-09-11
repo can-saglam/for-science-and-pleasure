@@ -103,9 +103,32 @@ final class GroupStore {
         libraryUserId = SupabaseAuth.shared.userId
     }
 
+    /// Alphabet without 0/O/1/I — the same set the server mints from.
+    nonisolated static let codeAlphabet = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+
     nonisolated static func formatCode(_ code: String) -> String {
         let c = code.uppercased()
         return c.count == 6 ? "\(c.prefix(3))-\(c.suffix(3))" : c
+    }
+
+    /// "kv7-p2m", " KV7 P2M ", a whole share message → "KV7P2M". Nil when
+    /// nothing in the string can be a code, so the join screen can say so
+    /// without a round-trip. Looks for a standalone 6-character token so
+    /// "Can We Go" itself doesn't look like a code.
+    nonisolated static func normaliseCode(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let compact = trimmed.uppercased().filter { $0 != "-" && !$0.isWhitespace }
+        if compact.count == 6, compact.allSatisfy(codeAlphabet.contains) {
+            return compact
+        }
+        let tokens = trimmed.uppercased().split {
+            $0.isWhitespace || ($0.isPunctuation && $0 != "-")
+        }
+        for token in tokens {
+            let c = token.filter { $0 != "-" }
+            if c.count == 6, c.allSatisfy(codeAlphabet.contains) { return String(c) }
+        }
+        return nil
     }
 
     // MARK: - Actions
@@ -151,6 +174,76 @@ final class GroupStore {
         let left: Bool
         let copied: Int
         let formerGroupName: String?
+    }
+
+    /// What a code leads to, before anyone agrees to join. `status` is the
+    /// outcome (`ok`, `own`, `unknown`, `expired`…); the rest is only
+    /// filled when the code is still usable or the dead-end needs a name.
+    struct JoinPreview: Decodable {
+        var status: String
+        var inviter: String?
+        var name: String?
+        var homeLocality: String?
+        var capacity: Int?
+        var isPlus: Bool?
+        var members: [PreviewMember]?
+
+        struct PreviewMember: Decodable, Identifiable {
+            var displayName: String?
+            var avatarColour: String?
+            var id: String { "\(displayName ?? "")-\(avatarColour ?? "")" }
+            var name: String { displayName?.isEmpty == false ? displayName! : "Someone" }
+            var initial: String { String(name.prefix(1)).uppercased() }
+        }
+
+        var canJoin: Bool { status == "ok" }
+        var askForPlus: Bool { status == "plus_required" }
+
+        func message() -> String {
+            let who = inviter.map { "ask \($0) for a new one" } ?? "ask for a new one"
+            switch status {
+            case "ok":
+                return "You\u{2019}ll share one library — everyone sees and edits everything."
+            case "own":
+                return "That\u{2019}s your own group\u{2019}s code."
+            case "unknown":
+                return "That code doesn\u{2019}t match any invite."
+            case "expired":
+                return "This invite has expired — \(who)."
+            case "revoked":
+                return "This invite was cancelled — \(who)."
+            case "full":
+                return "This group already has four people, the most a group can hold."
+            case "plus_required":
+                return "Free groups have two seats. Plus, coming soon, opens two more."
+            default:
+                return "Something went wrong. Please try again."
+            }
+        }
+    }
+
+    func preview(code: String) async throws -> JoinPreview {
+        try await call(["action": "preview", "code": code], as: JoinPreview.self)
+    }
+
+    struct JoinResult: Decodable {
+        let joined: Bool
+        let moved: Int
+    }
+
+    /// Moves (or copies) this account into the code's group. The caller
+    /// swaps the local library afterwards.
+    func join(code: String, keepCopy: Bool) async throws -> JoinResult {
+        let data: Data
+        do {
+            data = try await raw(["action": "join", "code": code, "keep_copy": keepCopy])
+        } catch {
+            await refresh()
+            throw error
+        }
+        let result = try Self.decoder.decode(JoinResult.self, from: data)
+        if let fresh = try? Self.decoder.decode(GroupCard.self, from: data) { store(fresh) }
+        return result
     }
 
     /// Leaves for a fresh personal group; the card becomes that group's.
@@ -272,7 +365,18 @@ enum AvatarColour {
         case "rose": return Color(red: 0.96, green: 0.55, blue: 0.72)
         case "teal": return Color(red: 0.30, green: 0.75, blue: 0.75)
         case "plum": return Color(red: 0.70, green: 0.42, blue: 0.75)
-        default: return Color.white.opacity(0.35)
+        default: return AppBackground.ink.opacity(0.35)
+        }
+    }
+
+    /// The initial printed on the swatch. Mint, amber, sky, rose and lilac
+    /// are light enough that white type falls under 2:1, so they take
+    /// black; the deeper swatches keep white.
+    static func initial(_ name: String?) -> Color {
+        switch name {
+        case "mint", "amber", "sky", "rose", "lilac": return .black.opacity(0.8)
+        case "coral", "teal", "plum": return .white
+        default: return AppBackground.base
         }
     }
 }

@@ -1,6 +1,7 @@
 import MapKit
 import SwiftData
 import SwiftUI
+import UIKit
 
 /// Detail sheet — a soft wash of the item's color at the top, quiet
 /// metadata, the map, and a pair of equal actions. A pencil in the toolbar
@@ -18,6 +19,8 @@ struct ItemDetailView: View {
     @State private var scratch: Item?
     @State private var calendarState: CalendarState = .idle
     @State private var detent: PresentationDetent = .medium
+    @State private var fetching = false
+    @State private var fetchNote: String?
 
     private enum CalendarState {
         case idle, added, failed
@@ -84,8 +87,11 @@ struct ItemDetailView: View {
                             header
                         }
                         if editing, let scratch {
-                            ItemForm(item: scratch)
-                                .transition(.opacity)
+                            VStack(alignment: .leading, spacing: 22) {
+                                ItemForm(item: scratch)
+                                refetchRow
+                            }
+                            .transition(.opacity)
                         } else {
                             readingContent
                         }
@@ -108,7 +114,7 @@ struct ItemDetailView: View {
                     .ignoresSafeArea()
                 }
             }
-            .background(AppBackground.sheet.ignoresSafeArea())
+            .background { ThemeFill(color: AppBackground.sheet) }
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -158,18 +164,42 @@ struct ItemDetailView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
         // Cards open as a half-height drawer first; drag up for the rest.
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
+        .presentationBackground(AppBackground.sheet)
         // The edit form needs the room, so entering edit expands the sheet.
         .onChange(of: editing) { _, isEditing in
             if isEditing { detent = .large }
+            else { fetchNote = nil }
         }
         // Swiping the sheet away mid-edit discards, same as Cancel —
         // edits only ever land through an explicit Done.
+        // A mid-hold swipe still commits We Did Go — they already tapped.
+        .onDisappear { commitDoneIfNeeded() }
+    }
+
+    /// Same button, new label, then the drawer leaves. `markDone` waits
+    /// so Remind and the library don't reshuffle under the success state.
+    private func confirmWent() {
+        guard !done else { return }
+        Haptics.success()
+        withAnimation(.easeInOut(duration: 0.2)) { done = true }
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            commitDoneIfNeeded()
+            dismiss()
+        }
+    }
+
+    private func commitDoneIfNeeded() {
+        guard done, !item.isDone else { return }
+        item.markDone()
+        UndoBin.shared.stashDone(item)
     }
 
     /// A detached twin holding just the fields the form edits.
@@ -183,7 +213,17 @@ struct ItemDetailView: View {
         copy.price = item.price
         copy.startsOn = item.startsOn
         copy.endsOn = item.endsOn
+        copy.reminderOffsetDays = item.reminderOffsetDays
+        copy.reminderAnchor = item.reminderAnchor
+        copy.remindAt = item.remindAt
         copy.notes = item.notes
+        copy.summary = item.summary
+        copy.address = item.address
+        copy.url = item.url
+        copy.imageUrl = item.imageUrl
+        copy.colorHex = item.colorHex
+        copy.lat = item.lat
+        copy.lng = item.lng
         return copy
     }
 
@@ -199,10 +239,118 @@ struct ItemDetailView: View {
         item.price = scratch.price
         item.startsOn = scratch.startsOn
         item.endsOn = scratch.endsOn
+        item.reminderOffsetDays = scratch.reminderOffsetDays
+        item.reminderAnchor = scratch.reminderAnchor
+        item.remindAt = scratch.remindAt
         item.notes = scratch.notes
+        item.summary = scratch.summary
+        item.address = scratch.address
+        item.url = scratch.url
+        item.imageUrl = scratch.imageUrl
+        item.colorHex = scratch.colorHex
+        item.lat = scratch.lat
+        item.lng = scratch.lng
+        item.reconcileReminder()
         item.updatedAt = .now
         try? context.save()
         self.scratch = nil
+    }
+
+    /// Looks the save up again and writes whatever came back onto the
+    /// scratch form — notes stay put, and nothing is saved until Done.
+    private var refetchRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                Haptics.tap()
+                Task { await fetchAgain() }
+            } label: {
+                HStack {
+                    Label("Fetch data again", systemImage: "arrow.clockwise")
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .trailing) {
+                    if fetching {
+                        // The button is `.large`; a default ProgressView
+                        // inherits that and stretches the capsule.
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .disabled(fetching)
+            .accessibilityHint("Looks the link up again and fills the fields above")
+
+            if let fetchNote {
+                Text(fetchNote)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Looks the original link up again and fills the fields above. Your notes stay put — nothing saves until Done.")
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func fetchAgain() async {
+        guard let scratch else { return }
+        fetching = true
+        fetchNote = nil
+        defer { fetching = false }
+        var parts: [String] = []
+        if !scratch.title.isEmpty { parts.append(scratch.title) }
+        if let url = item.url, !url.isEmpty {
+            parts.append(url)
+        } else if let area = scratch.area ?? item.area, !area.isEmpty {
+            parts.append(area)
+        }
+        let text = parts.joined(separator: "\n")
+        guard !text.isEmpty else {
+            fetchNote = "Need a title or a link to look this up."
+            return
+        }
+        do {
+            let card = try await ParseClient.parse(text: text, imageJPEG: nil)
+            apply(card, to: scratch)
+            Haptics.success()
+            fetchNote = "Updated from the latest page — check the fields, then tap Done."
+        } catch {
+            fetchNote = SyncProblem(error).message
+        }
+    }
+
+    /// Non-empty parse results overwrite the matching field; empty ones
+    /// leave what's already there. Notes are never touched.
+    private func apply(_ card: ParseClient.Card, to scratch: Item) {
+        if !card.title.isEmpty { scratch.title = card.title }
+        if card.kind == Item.Kind.event || card.kind == Item.Kind.place {
+            scratch.kind = card.kind
+        }
+        func fill(_ path: ReferenceWritableKeyPath<Item, String?>, _ value: String?) {
+            guard let value, !value.isEmpty else { return }
+            scratch[keyPath: path] = value
+        }
+        fill(\.category, card.category)
+        fill(\.venue, card.venue)
+        fill(\.area, card.area)
+        fill(\.address, card.address)
+        fill(\.price, card.price)
+        fill(\.summary, card.summary)
+        fill(\.url, card.url)
+        fill(\.imageUrl, card.image_url)
+        fill(\.colorHex, card.color)
+        fill(\.startsOn, card.starts_on)
+        fill(\.endsOn, card.ends_on)
+        scratch.reconcileReminder()
+        if let lat = card.lat, let lng = card.lng {
+            scratch.lat = lat
+            scratch.lng = lng
+        }
     }
 
     // MARK: - Header
@@ -225,8 +373,14 @@ struct ItemDetailView: View {
             .overlay {
                 LinearGradient(
                     stops: [
-                        // Darkened top keeps the floating controls legible.
-                        .init(color: .black.opacity(0.35), location: 0),
+                        // A veil at the top keeps the floating controls
+                        // legible — dark under light glyphs, light under
+                        // cream's black ones.
+                        .init(
+                            color: AppBackground.theme.isLight
+                                ? .white.opacity(0.35) : .black.opacity(0.35),
+                            location: 0
+                        ),
                         .init(color: .clear, location: 0.32),
                         .init(color: AppBackground.sheet.opacity(0.7), location: 0.78),
                         .init(color: AppBackground.sheet, location: 1),
@@ -259,7 +413,7 @@ struct ItemDetailView: View {
             HStack(spacing: 8) {
                 if let label = item.timeLabel {
                     Text(label)
-                        .foregroundStyle(item.timeLabelIsUrgent ? .red : Color.secondary)
+                        .foregroundStyle(item.timeLabelIsUrgent ? AppBackground.destructive : Color.secondary)
                 }
                 if item.timeLabel != nil && item.category != nil {
                     Text("·").foregroundStyle(.tertiary)
@@ -293,6 +447,8 @@ struct ItemDetailView: View {
             metaRow("pencil", editedBy)
         }
 
+        RemindRow(item: item, persist: true)
+
         if let lat = item.lat, let lng = item.lng {
             let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
             Map(initialPosition: .region(.init(
@@ -315,7 +471,7 @@ struct ItemDetailView: View {
             .clipShape(.rect(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                    .strokeBorder(AppBackground.ink.opacity(0.10), lineWidth: 1)
             )
             .contentShape(.rect(cornerRadius: 18, style: .continuous))
             .onTapGesture {
@@ -324,6 +480,11 @@ struct ItemDetailView: View {
                     openURL(maps)
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(item.directionsURL == nil
+                ? (item.venue ?? item.title)
+                : "Open in \(TransportApp.current.name)")
+            .accessibilityAddTraits(item.directionsURL == nil ? [] : .isButton)
         }
 
         if let notes = item.notes, !notes.isEmpty {
@@ -332,7 +493,7 @@ struct ItemDetailView: View {
                 .lineSpacing(2)
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.06), in: .rect(cornerRadius: 14, style: .continuous))
+                .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 14, style: .continuous))
         }
 
         // Actions: an equal pair up top, the calendar as a quiet
@@ -343,30 +504,38 @@ struct ItemDetailView: View {
                     Link(destination: url) {
                         Label("Open link", systemImage: "safari")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AppBackground.base)
+                            .foregroundStyle(AppBackground.onProminent)
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(.white)
+                    .prominentGlass()
                 }
 
-                // `done` keeps the row on screen for the 0.6 s the label
-                // reads "Done"; without it markDone() would pull the button
-                // out from under the crossfade.
-                if !item.isDone || done {
+                if item.isDone && !done {
                     Button {
-                        item.markDone()
-                        UndoBin.shared.stashDone(item)
-                        Haptics.success()
-                        withAnimation(.easeInOut(duration: 0.25)) { done = true }
-                        // The label's crossfade to "Done" is the whole
-                        // acknowledgement here; the library's toast (with
-                        // Undo) takes over once the sheet is down.
-                        Task {
-                            try? await Task.sleep(for: .seconds(0.6))
-                            dismiss()
-                        }
+                        Haptics.tap()
+                        item.putBack()
                     } label: {
+                        Label("Put back", systemImage: "arrow.uturn.backward")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+
+                    Button(role: .destructive) {
+                        Haptics.tap()
+                        UndoBin.shared.stash(item.snapshot)
+                        SupabaseSync.setDeleted(item.id, true)
+                        context.delete(item)
+                        try? context.save()
+                        dismiss()
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                } else if !item.isDone || done {
+                    Button(action: confirmWent) {
                         // For something that's already over, the plain label
                         // reads odd — soften it to an after-the-fact note.
                         Label(
@@ -374,12 +543,11 @@ struct ItemDetailView: View {
                             systemImage: "checkmark"
                         )
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppBackground.base)
+                        .foregroundStyle(AppBackground.onProminent)
                         .frame(maxWidth: .infinity)
                         .contentTransition(.opacity)
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(.white)
+                    .prominentGlass()
                     .allowsHitTesting(!done)
                 }
             }
@@ -409,9 +577,15 @@ struct ItemDetailView: View {
             }
 
             if calendarState == .failed {
-                Text("Couldn't add. Allow calendar access in Settings.")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+                if let settings = URL(string: UIApplication.openSettingsURLString) {
+                    Link("Couldn't add. Allow calendar access in Settings.", destination: settings)
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.destructive)
+                } else {
+                    Text("Couldn't add. Allow calendar access in Settings.")
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.destructive)
+                }
             }
         }
         .controlSize(.large)
@@ -425,7 +599,7 @@ struct ItemDetailView: View {
                 Text(text).foregroundStyle(.secondary)
             } icon: {
                 Image(systemName: symbol)
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(AppBackground.ink.opacity(0.45))
                     .frame(width: 20)
             }
             .font(.subheadline)

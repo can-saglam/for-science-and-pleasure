@@ -8,7 +8,7 @@ struct ItemCard: View {
     let item: Item
     /// Journal-density variant for We Did Go.
     var compact = false
-    /// Context-specific meta line (the digest's "Closes Fri 29 Aug · venue")
+    /// Context-specific meta line ("Closes Fri 29 Aug · venue")
     /// — replaces both the subtitle and the countdown label.
     var meta: String? = nil
 
@@ -85,7 +85,7 @@ struct ItemCard: View {
     }
 
     /// Quiet nudge for undated events — the one gap that actually hides an
-    /// item from the calendar and digest. A missing pin is often deliberate
+    /// item from the calendar. A missing pin is often deliberate
     /// (festivals across town), so it gets no badge.
     private var hints: [String] {
         guard !item.isDone, !compact, meta == nil else { return [] }
@@ -139,7 +139,7 @@ struct ItemCard: View {
             if !hints.isEmpty {
                 Text(hints.joined(separator: " · "))
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppBackground.warning)
             }
         }
         .padding(.horizontal, compact ? 14 : 16)
@@ -172,6 +172,7 @@ struct ItemCard: View {
         if !subtitle.isEmpty { parts.append(subtitle) }
         if let label = slotLabel { parts.append(label) }
         if item.isDone { parts.append("We did go") }
+        else if item.isMissed { parts.append("Missed") }
         parts.append(contentsOf: hints)
         return parts.joined(separator: ". ")
     }
@@ -179,18 +180,28 @@ struct ItemCard: View {
     /// Urgent labels wear a quiet rose badge — folded toward the card color
     /// so it belongs to the theme, instead of a raw system red. "Nearby"
     /// takes the same shape in a calm green.
+    private var badgeFold: Double {
+        switch AppBackground.theme {
+        case .wine, .forest: return 0.4
+        default: return 0.55
+        }
+    }
+
     @ViewBuilder
     private func timeText(_ label: String) -> some View {
         if isNearby || item.timeLabelIsUrgent {
             let tint: Color = isNearby ? .green : .red
             Text(label)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(tint.mix(with: .white, by: 0.65))
+                .foregroundStyle(tint.mix(with: AppBackground.theme.ink, by: 0.65))
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(
-                    tint.mix(with: cardBackground, by: 0.55),
+                    // Wine and forest cards are already red- and
+                    // green-tinted, so the badge keeps more of its own
+                    // colour there to stay distinct from the card.
+                    tint.mix(with: cardBackground, by: badgeFold),
                     in: .capsule
                 )
         } else {
@@ -220,11 +231,11 @@ struct ItemCard: View {
     private var cardBackground: Color {
         AppBackground.base
             .mix(with: item.accentColor, by: AppBackground.theme.cardAccentMix)
-            .mix(with: .white, by: AppBackground.theme.cardWhiteLift)
+            .mix(with: AppBackground.theme.cardLiftColor, by: AppBackground.theme.cardLiftAmount)
     }
 
     private var cardBorder: Color {
-        item.accentColor.mix(with: .white, by: 0.4).opacity(0.30)
+        item.accentColor.mix(with: AppBackground.theme.ink, by: 0.35).opacity(0.30)
     }
 }
 
@@ -273,8 +284,8 @@ private struct MeltImage: View {
                 LinearGradient(
                     stops: [
                         .init(color: cardBackground, location: 0),
-                        .init(color: cardBackground.mix(with: .white, by: 0.5), location: 0.45),
-                        .init(color: .white, location: 0.95),
+                        .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: 0.45),
+                        .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: 0.95),
                     ],
                     startPoint: .leading,
                     endPoint: .trailing
@@ -319,11 +330,13 @@ private struct MeltImage: View {
 /// Things-style tactility: cards settle slightly under the finger,
 /// with a soft haptic tick on touch-down.
 struct PressableCardStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .scaleEffect((!reduceMotion && configuration.isPressed) ? 0.975 : 1)
             .opacity(configuration.isPressed ? 0.92 : 1)
-            .animation(.spring(duration: 0.28), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .spring(duration: 0.28), value: configuration.isPressed)
     }
 }
 
@@ -363,7 +376,7 @@ struct ItemCardRow: View {
         // The swipe gestures, spoken: VoiceOver's rotor gets the same three
         // actions a sighted thumb has.
         .accessibilityHint("Opens the details")
-        .accessibilityAction(named: item.isDone ? "Put back in the library" : "We did go") {
+        .accessibilityAction(named: item.isDone ? "Put back" : "We did go") {
             if item.isDone {
                 item.putBack()
             } else {
@@ -410,7 +423,7 @@ struct ItemCardRow: View {
                     Haptics.tap()
                     item.putBack()
                 } label: {
-                    Label("Put back in the library", systemImage: "arrow.uturn.backward")
+                    Label("Put back", systemImage: "arrow.uturn.backward")
                 }
             } else {
                 Button {
@@ -428,7 +441,7 @@ struct ItemCardRow: View {
             }
             if let url = item.url.flatMap(URL.init(string:)) {
                 Link(destination: url) {
-                    Label("Open source", systemImage: "arrow.up.right")
+                    Label("Open link", systemImage: "arrow.up.right")
                 }
             }
             Button {

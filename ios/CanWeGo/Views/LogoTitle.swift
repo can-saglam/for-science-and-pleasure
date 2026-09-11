@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The handwritten wordmark. The source art is black, so it's rendered as
-/// a template and tinted white — legible on every theme's dark base.
+/// a template and tinted in the theme ink — cream on midnight and forest,
+/// black on cream, white on ink and wine.
 struct LogoTitle: View {
     var height: CGFloat = 28
 
@@ -13,7 +14,7 @@ struct LogoTitle: View {
             // Both dimensions pinned: a bare toolbar slot proposes almost
             // no width, and scaledToFit would shrink the mark to a speck.
             .frame(width: height * 4.83, height: height)
-            .foregroundStyle(.white)
+            .foregroundStyle(AppBackground.ink)
             .accessibilityLabel("Can We Go?")
     }
 }

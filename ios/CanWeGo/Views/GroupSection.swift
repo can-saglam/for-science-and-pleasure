@@ -15,18 +15,17 @@ struct SettingsRow: View {
         } icon: {
             Image(systemName: icon)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppBackground.base)
+                .foregroundStyle(AppBackground.badgeGlyph)
                 .frame(width: 28, height: 28)
-                .background(AppBackground.accent.gradient, in: .rect(cornerRadius: 7, style: .continuous))
+                .background(AppBackground.badge.gradient, in: .rect(cornerRadius: 7, style: .continuous))
         }
     }
 }
 
 /// What the "My group" rows can open — alerts, the invite sheet, the leave
-/// dialog — and the actions behind them. Lives outside the rows so the
-/// presenters can hang off the Settings list itself: a List row is lazy and
-/// may be off screen (or a Section, which would present once per row), and
-/// a presenter that isn't in the hierarchy shows nothing.
+/// confirm — and the actions behind them. Sheets and the "you've left"
+/// alert hang off the Settings list (always in the hierarchy). The leave
+/// dialog itself lives on the Leave row so iOS 26 anchors the popover there.
 @Observable
 @MainActor
 final class GroupUI {
@@ -34,6 +33,7 @@ final class GroupUI {
     var inviting = false
     /// The group is full for its tier; the invite row opens the upsell.
     var showPlus = false
+    var showJoin = false
     var confirmLeave = false
     var leaving = false
     var left: (result: GroupStore.LeaveResult, landed: Bool)?
@@ -88,6 +88,7 @@ final class GroupUI {
 struct GroupSection: View {
     @Bindable var ui: GroupUI
     @State private var group = GroupStore.shared
+    @Environment(\.modelContext) private var context
 
     private var me: UUID? { SupabaseAuth.shared.userId }
 
@@ -129,7 +130,7 @@ struct GroupSection: View {
             LabeledContent {
                 Text(home)
             } label: {
-                SettingsRow(title: "Home", icon: "house.fill")
+                SettingsRow(title: "City", icon: "building.2.fill")
             }
         }
 
@@ -181,6 +182,14 @@ struct GroupSection: View {
             }
         }
 
+        Button {
+            Haptics.tap()
+            ui.showJoin = true
+        } label: {
+            SettingsRow(title: "Join a group", icon: "number")
+        }
+        .accessibilityHint("Enter an invite code")
+
         if card.members.count > 1 {
             Button(role: .destructive) {
                 Haptics.tap()
@@ -188,12 +197,38 @@ struct GroupSection: View {
             } label: {
                 HStack {
                     SettingsRow(title: "Leave group", icon: "person.2.slash.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(AppBackground.destructive)
                     Spacer()
                     if ui.leaving { ProgressView() }
                 }
             }
+            // On the button, not the list — iOS 26 parks a list-level
+            // confirmation dialog at the top of the section.
+            .confirmationDialog(
+                "Keep a copy of the group\u{2019}s saves?",
+                isPresented: $ui.confirmLeave,
+                titleVisibility: .visible
+            ) {
+                Button("Leave and keep a copy", role: .destructive) {
+                    Task { await ui.leave(keepCopy: true, context: context) }
+                }
+                Button("Leave with an empty library", role: .destructive) {
+                    Task { await ui.leave(keepCopy: false, context: context) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(leaveMessage(for: card))
+            }
         }
+    }
+
+    private func leaveMessage(for card: GroupCard) -> String {
+        var lines = ["You\u{2019}ll leave \(card.name) and get a library of your own. The group keeps everything either way."]
+        if let mine = card.member(me), mine.isPlus,
+           !card.members.contains(where: { $0.isPlus && $0.userId != me }) {
+            lines.append("You\u{2019}re the only one with Plus — the group loses it when you go.")
+        }
+        return lines.joined(separator: "\n\n")
     }
 
     /// Names come from Apple (or the account), so rows only show; nothing
@@ -203,7 +238,9 @@ struct GroupSection: View {
         return HStack(spacing: 12) {
             Text(member.initial)
                 .font(.footnote.weight(.bold))
-                .foregroundStyle(AppBackground.base)
+                // Per-swatch ink, the same as Join: white on the deep
+                // swatches, black on the light ones.
+                .foregroundStyle(AvatarColour.initial(member.avatarColour))
                 .frame(width: 28, height: 28)
                 .background(AvatarColour.color(member.avatarColour), in: .circle)
                 .accessibilityHidden(true)
@@ -234,7 +271,7 @@ struct GroupSection: View {
     private var footer: some View {
         Group {
             if let note = ui.note {
-                Text(note).foregroundStyle(.orange)
+                Text(note).foregroundStyle(AppBackground.warning)
             } else if let card = group.card, card.members.count == 1 {
                 Text("Invite someone and you\u{2019}ll share one library — everyone sees and edits everything.")
             } else if let card = group.card, card.isFull, !card.needsPlusToGrow {
@@ -246,14 +283,12 @@ struct GroupSection: View {
     }
 }
 
-/// The alerts, sheet and dialog the group rows open. Applied to the
-/// Settings list, which is always in the hierarchy while Settings is up.
+/// Sheets and the "you've left" alert. Applied to the Settings list,
+/// which is always in the hierarchy while Settings is up.
 struct GroupPresentations: ViewModifier {
     @Bindable var ui: GroupUI
-    @Environment(\.modelContext) private var context
     @State private var group = GroupStore.shared
 
-    private var me: UUID? { SupabaseAuth.shared.userId }
     private var card: GroupCard? { group.card }
 
     func body(content: Content) -> some View {
@@ -261,19 +296,7 @@ struct GroupPresentations: ViewModifier {
             .task { await group.refresh() }
             .sheet(item: $ui.invite) { InviteSheet(invite: $0, groupName: card?.name ?? "the group") }
             .sheet(isPresented: $ui.showPlus) { PlusSheet() }
-            .confirmationDialog(
-                "Keep a copy of the group\u{2019}s saves?",
-                isPresented: $ui.confirmLeave,
-                titleVisibility: .visible
-            ) {
-                // Both leave — that's the part that can't be undone — so both
-                // wear the same weight; neither deletes anything from the group.
-                Button("Leave and keep a copy", role: .destructive) { Task { await ui.leave(keepCopy: true, context: context) } }
-                Button("Leave with an empty library", role: .destructive) { Task { await ui.leave(keepCopy: false, context: context) } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(leaveMessage)
-            }
+            .sheet(isPresented: $ui.showJoin) { JoinSheet() }
             .alert(
                 "You\u{2019}ve left \(ui.left?.result.formerGroupName ?? "the group")",
                 isPresented: Binding(get: { ui.left != nil }, set: { if !$0 { ui.left = nil } })
@@ -282,16 +305,6 @@ struct GroupPresentations: ViewModifier {
             } message: {
                 Text(leftMessage)
             }
-    }
-
-    private var leaveMessage: String {
-        guard let card else { return "" }
-        var lines = ["You\u{2019}ll leave \(card.name) and get a library of your own. The group keeps everything either way."]
-        if let mine = card.member(me), mine.isPlus,
-           !card.members.contains(where: { $0.isPlus && $0.userId != me }) {
-            lines.append("You\u{2019}re the only one with Plus — the group loses it when you go.")
-        }
-        return lines.joined(separator: "\n\n")
     }
 
     private var leftMessage: String {
@@ -336,7 +349,7 @@ struct InviteSheet: View {
                         Label("Share invite", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .prominentGlass()
                     .controlSize(.large)
                     Button {
                         UIPasteboard.general.string = invite.code
@@ -347,7 +360,7 @@ struct InviteSheet: View {
                             .frame(maxWidth: .infinity)
                             .contentTransition(.symbolEffect(.replace))
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .controlSize(.large)
                 }
                 Text("Anyone with this code can join until it expires, or until you cancel it in Settings. They\u{2019}ll bring their own saves with them and see everything in \(groupName).")
@@ -370,12 +383,13 @@ struct InviteSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
         .presentationDetents([.fraction(0.55), .large])
         .presentationDragIndicator(.visible)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
     }
 }
 
@@ -407,7 +421,7 @@ struct PlusSheet: View {
                     Text("Coming soon")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .prominentGlass()
                 .controlSize(.large)
                 Text("Plus isn\u{2019}t available just yet — it arrives with an upcoming release.")
                     .font(.footnote)
@@ -426,11 +440,12 @@ struct PlusSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
         .presentationDetents([.fraction(0.55), .large])
         .presentationDragIndicator(.visible)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
     }
 }

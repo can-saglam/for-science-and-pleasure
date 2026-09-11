@@ -78,7 +78,10 @@ private struct RootGate: View {
             // idempotent, and it self-heals a device whose first upload
             // failed (offline, expired session…).
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { PushRegistrar.register() }
+                if phase == .active {
+                    PushRegistrar.register()
+                    ThemeStore.shared.applyInterfaceStyle()
+                }
             }
     }
 }
@@ -94,6 +97,7 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         guard SupabaseAuth.shared.signedIn else { return }
         guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
         Task {
+            await clearRetiredLocalNotifications()
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
@@ -103,6 +107,21 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
                 UIApplication.shared.registerForRemoteNotifications()
             }
         }
+    }
+
+    /// Last-chance used to schedule one local notification per dated event.
+    /// Those requests survive until we cancel them; do it once after the kill.
+    private static func clearRetiredLocalNotifications() async {
+        let defaults = UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
+        let key = "clearedRetiredLocals"
+        guard !defaults.bool(forKey: key) else { return }
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        let ids = pending.map(\.identifier).filter { $0.hasPrefix("lastchance-") }
+        if !ids.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
+        defaults.set(true, forKey: key)
     }
 
     func application(
@@ -118,13 +137,8 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
-        if userInfo["digest"] != nil {
-            await MainActor.run {
-                DigestGate.pending = true
-                NotificationCenter.default.post(name: .cwgOpenDigest, object: nil)
-            }
-        } else if let id = (userInfo["itemID"] as? String).flatMap(UUID.init) {
-            // A last-chance nudge: open the event it's about.
+        if let id = (userInfo["itemID"] as? String).flatMap(UUID.init) {
+            // A reminder (or Spotlight) tap: open the save it's about.
             await MainActor.run {
                 ItemGate.pending = id
                 NotificationCenter.default.post(name: .cwgOpenItem, object: id)

@@ -43,5 +43,4 @@ bottom), item detail, and a one-off import from the web app's Supabase data.
   are dropped as JSON into the App Group container; the app sweeps them
   into SwiftData (and CloudKit) next time it comes to the foreground —
   extensions can't safely write to the synced store themselves.
-- **Not yet here** (later phases): CKShare household sharing, widgets,
-  digest local notification.
+- **Not yet here** (later phases): CKShare household sharing.

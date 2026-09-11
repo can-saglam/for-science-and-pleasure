@@ -23,106 +23,119 @@ struct AuthView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            VStack(spacing: 18) {
-                LogoTitle(height: 46)
-                Text(auth.sessionExpired
-                     ? "Your session expired — sign in again to keep syncing. Everything you saved is still here."
-                     : "Sign in to your shared library.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.bottom, 36)
-
-            SignInWithAppleButton(.signIn) { request in
-                nonce = AppleSignIn.makeNonce()
-                request.requestedScopes = [.fullName, .email]
-                request.nonce = AppleSignIn.sha256(nonce)
-            } onCompletion: { result in
-                Task { await finishApple(result) }
-            }
-            .signInWithAppleButtonStyle(.white)
-            .frame(height: 50)
-            .clipShape(.rect(cornerRadius: 14, style: .continuous))
-            .disabled(busy)
-            .accessibilityHint("Uses your Apple Account")
-
-            if !showEmail {
-                Button {
-                    withAnimation(.snappy) { showEmail = true }
-                } label: {
-                    Text("Sign in with email instead")
-                        .font(.footnote.weight(.medium))
+        ScrollView {
+            VStack(spacing: 0) {
+                VStack(spacing: 18) {
+                    LogoTitle(height: 46)
+                    Text(auth.sessionExpired
+                         ? "Your session expired — sign in again to keep syncing. Everything you saved is still here."
+                         : "Sign in to your shared library.")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 18)
-            }
+                .padding(.bottom, 36)
+                .padding(.top, 72)
 
-            if showEmail {
-                VStack(spacing: 12) {
-                    field("Email") {
-                        TextField("you@example.com", text: $email)
-                            .textContentType(.username)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($focused, equals: .email)
-                            .submitLabel(.next)
-                            .onSubmit { focused = .password }
-                    }
-                    field("Password") {
-                        SecureField("••••••••", text: $password)
-                            .textContentType(.password)
-                            .focused($focused, equals: .password)
-                            .submitLabel(.go)
-                            .onSubmit { if canSubmit { Task { await signIn() } } }
-                    }
+                SignInWithAppleButton(.signIn) { request in
+                    nonce = AppleSignIn.makeNonce()
+                    request.requestedScopes = [.fullName, .email]
+                    request.nonce = AppleSignIn.sha256(nonce)
+                } onCompletion: { result in
+                    Task { await finishApple(result) }
                 }
-                .padding(.top, 22)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+                .signInWithAppleButtonStyle(AppBackground.theme.isLight ? .black : .white)
+                .frame(height: 50)
+                .clipShape(.rect(cornerRadius: 14, style: .continuous))
+                .disabled(busy)
+                .accessibilityHint("Uses your Apple Account")
 
-            if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .padding(.top, 14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+                if !showEmail {
+                    Button {
+                        withAnimation(.snappy) { showEmail = true }
+                    } label: {
+                        Text("Sign in with email instead")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 18)
+                } else {
+                    Button {
+                        focused = nil
+                        withAnimation(.snappy) {
+                            showEmail = false
+                            errorMessage = nil
+                        }
+                    } label: {
+                        Text("Use Apple instead")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 18)
+                }
 
-            if showEmail {
-                Button {
-                    Haptics.tap()
-                    Task { await signIn() }
-                } label: {
-                    Group {
-                        if busy {
-                            ProgressView().tint(AppBackground.base)
-                        } else {
-                            Text("Sign in")
+                if showEmail {
+                    VStack(spacing: 12) {
+                        field("Email") {
+                            TextField("you@example.com", text: $email)
+                                .textContentType(.username)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($focused, equals: .email)
+                                .submitLabel(.next)
+                                .onSubmit { focused = .password }
+                        }
+                        field("Password") {
+                            SecureField("••••••••", text: $password)
+                                .textContentType(.password)
+                                .focused($focused, equals: .password)
+                                .submitLabel(.go)
+                                .onSubmit { if canSubmit { Task { await signIn() } } }
                         }
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppBackground.base)
-                    .frame(maxWidth: .infinity)
+                    .padding(.top, 22)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .buttonStyle(.glassProminent)
-                .tint(.white)
-                .controlSize(.large)
-                .disabled(!canSubmit)
-                .padding(.top, 22)
-            }
 
-            Spacer()
-            Spacer()
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.warning)
+                        .padding(.top, 14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if showEmail {
+                    Button {
+                        Haptics.tap()
+                        Task { await signIn() }
+                    } label: {
+                        Group {
+                            if busy {
+                                ProgressView().tint(AppBackground.onProminent)
+                            } else {
+                                Text("Sign in")
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .prominentGlass()
+                    .controlSize(.large)
+                    .disabled(!canSubmit)
+                    .padding(.top, 22)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 48)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 28)
-        .background(AppBackground.base.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .scrollDismissesKeyboard(.interactively)
+        .background { ThemeFill(color: AppBackground.base) }
+        .appColorScheme()
     }
 
     private func field(_ label: String, @ViewBuilder content: () -> some View) -> some View {
@@ -132,10 +145,10 @@ struct AuthView: View {
                 .foregroundStyle(.secondary)
             content()
                 .padding(14)
-                .background(.white.opacity(0.08), in: .rect(cornerRadius: 14, style: .continuous))
+                .background(AppBackground.wash(0.08), in: .rect(cornerRadius: 14, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                        .strokeBorder(AppBackground.wash(0.12), lineWidth: 1)
                 )
         }
     }

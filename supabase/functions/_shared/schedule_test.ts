@@ -1,4 +1,4 @@
-import { isDue, localClock, localDate, weekMonday } from "./schedule.ts";
+import { isDue, isMorningHour, localClock, localDate, weekMonday } from "./schedule.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -47,6 +47,17 @@ Deno.test("isDue: Thursday 10:00 schedule fires only inside 10:00–10:59 Thursd
   assert(!isDue(sched, clock("Thu", "09", "59")), "not yet");
   assert(!isDue(sched, clock("Wed", "10", "00")), "wrong day");
   assert(!isDue(sched, clock("Fri", "10", "00")), "wrong day (after)");
+});
+
+Deno.test("isMorningHour: 10:00–10:59 any weekday", () => {
+  const clock = (hour: string, minute: string) => ({
+    weekday: "Mon", hour, minute, year: "2026", month: "12", day: "15",
+  });
+  assert(isMorningHour(clock("10", "00")), "exact minute");
+  assert(isMorningHour(clock("10", "15")), "dispatcher ping");
+  assert(isMorningHour(clock("10", "59")), "last minute");
+  assert(!isMorningHour(clock("11", "00")), "window closed");
+  assert(!isMorningHour(clock("09", "59")), "not yet");
 });
 
 Deno.test("isDue: a schedule near midnight does not spill into the next day", () => {

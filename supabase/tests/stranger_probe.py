@@ -40,10 +40,10 @@ try:
     s, b = http("/rest/v1/groups?select=id", jwt=jwt); check("stranger reads only own group", s == 200 and [r["id"] for r in b] == [own_gid], f"{s} {b}")
     s, b = http("/rest/v1/group_members?select=user_id", jwt=jwt); check("stranger reads only own membership", s == 200 and [r["user_id"] for r in b] == [uid], f"{s} {b}")
     s, b = http("/rest/v1/profiles?select=user_id", jwt=jwt); check("stranger reads only own profile", s == 200 and [r["user_id"] for r in b] == [uid], f"{s} {b}")
-    s, b = http("/rest/v1/digest_schedules?select=group_id", jwt=jwt); check("stranger reads only own schedule", s == 200 and [r["group_id"] for r in b] == [own_gid], f"{s} {b}")
     for t in ["entitlements", "apns_tokens", "group_invites"]:
         s, b = http(f"/rest/v1/{t}?select=*", jwt=jwt); check(f"stranger reads 0 rows from {t}", s == 200 and b == [], f"{s} {b}")
-    for t in ["items", "groups", "group_members", "profiles", "entitlements", "digest_schedules", "apns_tokens", "app_config", "digest_runs", "group_invites"]:
+    s, b = http("/rest/v1/reminder_runs?select=item_id", jwt=jwt); check("stranger reads 0 reminder_runs (no policy)", s in (200, 401, 403) and (b == [] or s in (401, 403)), f"{s} {b}")
+    for t in ["items", "groups", "group_members", "profiles", "entitlements", "apns_tokens", "app_config", "reminder_runs", "group_invites"]:
         s, b = http(f"/rest/v1/{t}?select=*", jwt=None); check(f"anon gets nothing from {t}", s in (401, 403) or b == [], f"{s} {b}")
     s, b = http("/rest/v1/rpc/group_for_email", "POST", {"p_email": email}, jwt=jwt); check("group_for_email() not callable by users", s in (401, 403, 404), f"{s} {b}")
     for rpc, body in (("membership_invite", {"p_user": uid}), ("membership_join", {"p_user": uid, "p_code": "ABCDEF", "p_keep_copy": False}), ("membership_card", {"p_user": uid})):

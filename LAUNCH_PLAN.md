@@ -29,7 +29,7 @@ limits, and payments around it.
 erDiagram
     groups ||--o{ group_members : has
     groups ||--o{ items : owns
-    groups ||--|| digest_schedules : has
+    groups ||--o{ reminder_runs : fires
     group_members }o--|| auth_users : is
     auth_users ||--|| profiles : has
     auth_users ||--o| entitlements : holds
@@ -566,6 +566,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [x] `group-membership` edge function (build-independent; deployed 8 Sep) over security-definer SQL in 0021: cap 2 free / 4 Plus (the joiner's own Plus counts), one group per user, `for update` on both groups in id order for the last seat, `cwg.membership` transaction flag lets the items guard step aside for moves; bulk writes are plain SQL so no pushes fire. Invites: `group_invites` (6 chars, no 0/O/1/I, 7 days, multi-use, revocable); groups auto-name ("Can's saves" / "Can & Joyce" / "Can, Joyce & Sam") until renamed; avatar colours from a fixed palette, first unused in the group; every new auth user is provisioned a personal group + profile + digest schedule by trigger
 - [ ] Pushes carry threadIdentifier per group
 - [x] Tests for `group-membership`: `supabase/tests/membership_battery.py` (79 checks on staging, incl. a two-thread last-seat race and the HTTP path) + Deno unit tests for the code helpers. Rollback script `0021_membership_down.sql` rehearsed down → up
+- [x] Per-event Remind (`0024_item_reminders.sql`): `items.reminder_offset_days` / `reminder_anchor` / `remind_at`, `reminder_runs` send-state, `send-reminders` + `dispatch_reminders` at 10:00 home time. Weekly digest push, `digest_schedules` / `digest_runs`, and local last-chance notifications removed. Shortcut `digest` pull kept.
 - [ ] In-app account deletion with export-before-delete
 
 ### Phase 3

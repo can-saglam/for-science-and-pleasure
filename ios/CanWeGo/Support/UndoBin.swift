@@ -15,6 +15,9 @@ struct ItemSnapshot {
     var imageUrl: String?
     var startsOn: String?
     var endsOn: String?
+    var reminderOffsetDays: Int?
+    var reminderAnchor: String?
+    var remindAt: String?
     var price: String?
     var category: String?
     var notes: String?
@@ -32,7 +35,9 @@ extension Item {
         ItemSnapshot(
             id: id, kind: kind, title: title, summary: summary, venue: venue,
             area: area, address: address, url: url, imageUrl: imageUrl,
-            startsOn: startsOn, endsOn: endsOn, price: price,
+            startsOn: startsOn, endsOn: endsOn,
+            reminderOffsetDays: reminderOffsetDays, reminderAnchor: reminderAnchor,
+            remindAt: remindAt, price: price,
             category: category, notes: notes, status: status,
             colorHex: colorHex, lat: lat, lng: lng,
             addedByEmail: addedByEmail, createdAt: createdAt, updatedAt: updatedAt
@@ -52,6 +57,9 @@ extension Item {
         imageUrl = s.imageUrl
         startsOn = s.startsOn
         endsOn = s.endsOn
+        reminderOffsetDays = s.reminderOffsetDays
+        reminderAnchor = s.reminderAnchor
+        remindAt = s.remindAt
         price = s.price
         category = s.category
         notes = s.notes

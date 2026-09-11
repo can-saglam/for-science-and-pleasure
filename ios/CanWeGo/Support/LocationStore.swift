@@ -9,8 +9,14 @@ final class LocationStore: NSObject, CLLocationManagerDelegate {
 
     private let manager = CLLocationManager()
     private(set) var location: CLLocation?
+    private(set) var authorization: CLAuthorizationStatus
+
+    var denied: Bool {
+        authorization == .denied || authorization == .restricted
+    }
 
     override private init() {
+        authorization = manager.authorizationStatus
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
@@ -30,6 +36,7 @@ final class LocationStore: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorization = manager.authorizationStatus
         if manager.authorizationStatus == .authorizedWhenInUse
             || manager.authorizationStatus == .authorizedAlways {
             manager.requestLocation()

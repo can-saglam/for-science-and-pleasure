@@ -19,15 +19,15 @@ struct ItemImage: View {
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                            .strokeBorder(AppBackground.ink.opacity(0.10), lineWidth: 1)
                     )
             case .failure:
                 EmptyView()
             default:
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white.opacity(0.05))
+                    .fill(AppBackground.wash(0.05))
                     .frame(height: height)
-                    .overlay(ProgressView().tint(.white.opacity(0.5)))
+                    .overlay(ProgressView().tint(AppBackground.ink.opacity(0.5)))
             }
         }
     }

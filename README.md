@@ -22,9 +22,9 @@ writes are now also guarded server-side (`0013_stale_write_guard.sql`).
   week, plus what's simply on.
 - **We Did Go** — the journal of done items and *Missed* events, grouped by
   month.
-- **Weekend digest** — a push notification previewing the weekend (default
-  Thursday morning), plus last-chance nudges for events entering their final
-  week.
+- **Remind** — one opt-in reminder per dated save, shared with the group.
+  Fires at 10:00 in the home city (a week / 3 days / 1 day / morning of
+  start or close) and opens the card.
 - **Widget** — home-screen widget rotating through saved events, hourly.
 - **Live sync** — changes appear on both phones via Supabase; duplicate URLs
   are deduped on capture.
@@ -39,7 +39,8 @@ writes are now also guarded server-side (`0013_stale_write_guard.sql`).
 - Edge functions include `parse` (authenticated, used by the app), `ingest`
   (secret-header endpoint for shares), `locate` (proposes venue/area/
   coordinates for saves missing them, applied only after in-app
-  confirmation), and `send-digest` / `digest` (scheduled digest delivery).
+  confirmation), `send-reminders` (shared per-event Remind at 10:00 home
+  time), and `digest` (Shortcut pull of a weekend summary).
   Claude and push credentials are stored as Supabase secrets.
 
 ## Development

@@ -39,8 +39,8 @@ enum SupabaseSync {
     // longer matches the signed-in account — a membership change, or a
     // different person signing in on this phone — the engine replaces the
     // library: wipe, full pull, then rebuild everything derived from it
-    // (Spotlight, the widget, the share extension's URL index, local
-    // notifications) so the old group's saves stop surfacing anywhere.
+    // (Spotlight, the widget, the share extension's URL index) so the
+    // old group's saves stop surfacing anywhere.
     // Nothing outside this file ever deletes the store.
 
     /// Pushes this account's unsynced edits now. Returns false if any are
@@ -122,13 +122,11 @@ enum SupabaseSync {
     /// Everything that mirrors the library, rebuilt from the store.
     private static func rebuildDerived(context: ModelContext) async {
         let fresh = (try? context.fetch(FetchDescriptor<Item>())) ?? []
-        SavedURLIndex.rebuild(from: fresh.compactMap(\.url))
+        SavedURLIndex.rebuild(from: fresh)
         SpotlightIndex.sync(items: fresh)
         WidgetStore.sync(items: fresh)
-        await LastChanceNotifier.sync(items: fresh)
         await MembersStore.shared.refresh()
         await HomeStore.shared.refresh()
-        await DigestScheduleStore.shared.pull()
     }
 
     // MARK: - Triggers
@@ -328,6 +326,9 @@ enum SupabaseSync {
         var image_url: String?
         var starts_on: String?
         var ends_on: String?
+        var reminder_offset_days: Int?
+        var reminder_anchor: String?
+        var remind_at: String?
         var notes: String?
         var color: String?
         var lat: Double?
@@ -362,6 +363,9 @@ enum SupabaseSync {
             try c.encode(image_url, forKey: .image_url)
             try c.encode(starts_on, forKey: .starts_on)
             try c.encode(ends_on, forKey: .ends_on)
+            try c.encode(reminder_offset_days, forKey: .reminder_offset_days)
+            try c.encode(reminder_anchor, forKey: .reminder_anchor)
+            try c.encode(remind_at, forKey: .remind_at)
             try c.encode(notes, forKey: .notes)
             try c.encode(color, forKey: .color)
             try c.encode(lat, forKey: .lat)
@@ -512,6 +516,9 @@ enum SupabaseSync {
             image_url: item.imageUrl,
             starts_on: item.startsOn,
             ends_on: item.endsOn,
+            reminder_offset_days: item.reminderOffsetDays,
+            reminder_anchor: item.reminderAnchor,
+            remind_at: item.remindAt,
             notes: item.notes,
             color: item.colorHex,
             lat: item.lat,
@@ -590,6 +597,9 @@ enum SupabaseSync {
         item.imageUrl = row.image_url
         item.startsOn = row.starts_on
         item.endsOn = row.ends_on
+        item.reminderOffsetDays = row.reminder_offset_days
+        item.reminderAnchor = row.reminder_anchor
+        item.remindAt = row.remind_at
         item.notes = row.notes
         item.colorHex = row.color
         item.lat = row.lat

@@ -32,6 +32,7 @@ struct CaptureView: View {
     /// Half height for the one-field input stage; the card preview gets the
     /// full sheet.
     @State private var detent: PresentationDetent = .medium
+    @State private var confirmDiscard = false
 
     private var canParse: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
@@ -63,6 +64,7 @@ struct CaptureView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
                 }
             }
             .background(alignment: .top) {
@@ -76,10 +78,11 @@ struct CaptureView: View {
                     .ignoresSafeArea()
                 }
             }
-            .background(AppBackground.sheet.ignoresSafeArea())
+            .background { ThemeFill(color: AppBackground.sheet) }
         }
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
+        .presentationBackground(AppBackground.sheet)
         .sensoryFeedback(.success, trigger: saved) { _, new in new }
         .onChange(of: draft != nil) { _, hasDraft in
             withAnimation(.snappy) { detent = hasDraft ? .large : .medium }
@@ -149,13 +152,10 @@ struct CaptureView: View {
 
             HStack(spacing: 8) {
                 if busy {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                        ParsingPhrases()
-                    }
-                    .padding(.leading, 6)
+                    // The send button is already spinning; the copy alone
+                    // says what's happening.
+                    ParsingPhrases()
+                        .padding(.leading, 6)
                 } else {
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         composerIcon("photo")
@@ -185,35 +185,48 @@ struct CaptureView: View {
                         if busy {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(.white)
+                                .tint(AppBackground.onProminent)
                         } else {
                             Image(systemName: "arrow.up")
                                 .font(.body.weight(.semibold))
                         }
                     }
                     .frame(width: 34, height: 34)
+                    // Lit (white pill, dark glyph) whenever there's something
+                    // to send — including while it's being sent, so the
+                    // spinner stays dark-on-white in every theme.
                     .foregroundStyle(
-                        canParse && !busy
-                            ? AnyShapeStyle(AppBackground.base)
-                            : AnyShapeStyle(.white.opacity(0.55))
+                        canParse
+                            ? AnyShapeStyle(AppBackground.onProminent)
+                            : AnyShapeStyle(AppBackground.ink.opacity(0.45))
                     )
                     .background(
-                        Circle().fill(.white.opacity(canParse && !busy ? 0.92 : 0.16))
+                        Circle().fill(canParse
+                            ? Color.white.opacity(0.92)
+                            : AppBackground.wash(0.16))
+                    )
+                    // On cream the lit white disc sits on a near-white
+                    // field; a hairline gives it an edge.
+                    .overlay(
+                        Circle().strokeBorder(
+                            AppBackground.ink.opacity(
+                                canParse && AppBackground.theme.isLight ? 0.22 : 0),
+                            lineWidth: 1)
                     )
                     .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
                 .disabled(busy || !canParse)
-                .accessibilityLabel("Add")
+                .accessibilityLabel("Add something")
             }
             .padding(10)
             .animation(.snappy, value: busy)
         }
-        .background(.white.opacity(0.08), in: .rect(cornerRadius: 24, style: .continuous))
+        .background(AppBackground.wash(0.08), in: .rect(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(
-                    .white.opacity(inputFocused ? 0.22 : 0.10),
+                    AppBackground.ink.opacity(inputFocused ? 0.22 : 0.10),
                     lineWidth: 1
                 )
         )
@@ -230,7 +243,7 @@ struct CaptureView: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppBackground.warning)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if canParse {
                     Button("Try again") {
@@ -243,7 +256,7 @@ struct CaptureView: View {
                 }
             }
             .padding(12)
-            .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+            .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
 
         if let existing {
@@ -278,9 +291,9 @@ struct CaptureView: View {
     private func composerIcon(_ name: String) -> some View {
         Image(systemName: name)
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(.white.opacity(0.85))
+            .foregroundStyle(AppBackground.ink.opacity(0.85))
             .frame(width: 34, height: 34)
-            .background(.white.opacity(0.10), in: .circle)
+            .background(AppBackground.wash(0.10), in: .circle)
             .contentShape(.circle)
     }
 
@@ -294,7 +307,7 @@ struct CaptureView: View {
             .clipShape(.rect(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+                    .strokeBorder(AppBackground.ink.opacity(0.2), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
                 Button {
@@ -310,6 +323,7 @@ struct CaptureView: View {
                         .background(.black.opacity(0.55), in: .circle)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove photo")
                 .offset(x: 6, y: -6)
             }
             // Keep the × tappable where it pokes past the picture's corner.
@@ -336,6 +350,8 @@ struct CaptureView: View {
             // The card already wears its thumbnail — a hero image above it
             // just showed the same picture twice.
             ItemCard(item: draft)
+
+            RemindRow(item: draft)
         }
 
         if editing {
@@ -376,7 +392,7 @@ struct CaptureView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+            .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
 
         VStack(spacing: 10) {
@@ -390,11 +406,7 @@ struct CaptureView: View {
                     .frame(maxWidth: .infinity)
                     .contentTransition(.opacity)
             }
-            .buttonStyle(.glassProminent)
-            // Neutral white, not the item's extracted accent: murky source
-            // colors (olive posters…) made the main CTA read as disabled.
-            .tint(.white.opacity(0.92))
-            .foregroundStyle(AppBackground.base)
+            .prominentGlass()
             .controlSize(.large)
             .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
             // Not `.disabled`: that would grey the button out under "Saved".
@@ -417,17 +429,29 @@ struct CaptureView: View {
 
                     Button(role: .destructive) {
                         Haptics.tap()
-                        withAnimation(.snappy) {
-                            self.draft = nil
-                            editing = false
-                            manual = false
-                        }
+                        confirmDiscard = true
                     } label: {
                         Label("Discard", systemImage: "trash")
                             .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glass)
+                    .confirmationDialog(
+                        "Discard this save?",
+                        isPresented: $confirmDiscard,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Discard", role: .destructive) {
+                            withAnimation(.snappy) {
+                                self.draft = nil
+                                editing = false
+                                manual = false
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("The card goes away. Nothing is saved.")
+                    }
                 }
                 // Match the save button's height so the stack reads as one set.
                 .controlSize(.large)
@@ -476,7 +500,7 @@ struct CaptureView: View {
             } icon: {
                 Image(systemName: "books.vertical")
             }
-            .foregroundStyle(.orange)
+            .foregroundStyle(AppBackground.warning)
 
             HStack(spacing: 10) {
                 Button {
@@ -487,9 +511,7 @@ struct CaptureView: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(.white.opacity(0.92))
-                .foregroundStyle(AppBackground.base)
+                .prominentGlass()
 
                 if let saveAnyway {
                     Button {
@@ -506,7 +528,7 @@ struct CaptureView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
     }
 
     /// Close the composer and bring up the original — the same route a

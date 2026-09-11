@@ -84,7 +84,7 @@ def group_row(gid):
     return b[0] if b else None
 
 def items_in(gid):
-    s, b = svc(f"/rest/v1/items?group_id=eq.{gid}&deleted_at=is.null&select=id,title,url,notes,created_by&order=created_at")
+    s, b = svc(f"/rest/v1/items?group_id=eq.{gid}&deleted_at=is.null&select=id,title,url,notes,created_by,remind_at&order=created_at")
     return b
 
 def add_item(gid, uid, title, url=None, notes=None):
@@ -114,8 +114,8 @@ try:
     dan = make_user("dan", "Dan"); eve = make_user("eve", "Eve"); fay = make_user("fay", "Fay")
     g_ann, g_bob = group_of(ann), group_of(bob)
     check("new user gets a personal group", g_ann is not None and g_bob is not None and g_ann != g_bob)
-    s, b = svc(f"/rest/v1/digest_schedules?group_id=eq.{g_ann}&select=day_of_week,hour,timezone")
-    check("…with a default digest schedule", s == 200 and b and b[0]["day_of_week"] == 4 and b[0]["hour"] == 10, f"{b}")
+    s, b = svc(f"/rest/v1/groups?id=eq.{g_ann}&select=home_timezone")
+    check("…with a home timezone", s == 200 and b and b[0]["home_timezone"] == "Europe/London", f"{b}")
     check("…named after them", group_row(g_ann)["name"] == "Ann's saves", group_row(g_ann)["name"])
     s, b = svc(f"/rest/v1/profiles?user_id=eq.{ann}&select=avatar_colour")
     check("…with an avatar colour", s == 200 and b and b[0]["avatar_colour"] == "coral", f"{b}")
@@ -176,6 +176,11 @@ try:
     check("exactly 4 members", len(b) == 4)
 
     # ------------------------------------------------------------ leave
+    ann_only = next(i for i in items_in(g_ann) if i["title"] == "Ann only")
+    svc(f"/rest/v1/items?id=eq.{ann_only['id']}", "PATCH", {
+        "starts_on": "2026-12-22", "ends_on": "2026-12-22",
+        "reminder_offset_days": 7, "reminder_anchor": "starts_on", "remind_at": "2026-12-15",
+    }, prefer="return=minimal")
     tok_before = group_row(g_ann)["feed_token"]
     l = fn(f"public.membership_leave('{dan}', true)")
     check("dan leaves with a copy", l.get("left") is True and l.get("copied") == 3 and l.get("former_group_name") == "Ann, Bob, Cat & Dan", str(l))
@@ -183,10 +188,12 @@ try:
     check("dan has a fresh personal group named for him", g_dan not in (g_ann, None) and group_row(g_dan)["name"] == "Dan's saves", str(group_row(g_dan)))
     check("copy is a copy: group still has 3, dan has 3", len(items_in(g_ann)) == 3 and len(items_in(g_dan)) == 3)
     check("copies keep original authors", sorted({i["created_by"] for i in items_in(g_dan)}) == sorted({ann, bob}))
+    dan_ann = [i for i in items_in(g_dan) if i["title"] == "Ann only"]
+    check("copy keeps reminder", dan_ann and dan_ann[0].get("remind_at") == "2026-12-15", str(dan_ann))
     check("feed token rotated on leave", group_row(g_ann)["feed_token"] != tok_before)
     check("group renamed after leave", group_row(g_ann)["name"] == "Ann, Bob & Cat", group_row(g_ann)["name"])
-    s, b = svc(f"/rest/v1/digest_schedules?group_id=eq.{g_dan}&select=timezone")
-    check("new group inherits digest schedule", s == 200 and b and b[0]["timezone"] == "Europe/London")
+    s, b = svc(f"/rest/v1/groups?id=eq.{g_dan}&select=home_timezone")
+    check("new group inherits home timezone", s == 200 and b and b[0]["home_timezone"] == "Europe/London")
     l = fn(f"public.membership_leave('{cat}', false)")
     check("cat leaves without a copy", l.get("left") is True and l.get("copied") == 0 and len(items_in(group_of(cat))) == 0, str(l))
     check("group dropped to free: 2 members, capacity 2", fn(f"public.membership_card('{ann}')").get("capacity") == 2)

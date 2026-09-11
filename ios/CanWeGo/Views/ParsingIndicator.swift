@@ -12,7 +12,7 @@ struct ParsingIndicator: View {
                 .trim(from: 0.14, to: 1)
                 .stroke(
                     AngularGradient(
-                        colors: [.white.opacity(0.04), .white.opacity(0.9)],
+                        colors: [AppBackground.ink.opacity(0.04), AppBackground.ink.opacity(0.9)],
                         center: .center
                     ),
                     style: StrokeStyle(lineWidth: 3.5, lineCap: .round)

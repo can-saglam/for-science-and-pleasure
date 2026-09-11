@@ -62,7 +62,7 @@ supabase db push --linked --yes --include-all     # --include-all if later migra
 python3 supabase/tests/rls_battery.py <new-phase>
 
 # 6. Functions, if they changed.
-supabase secrets set INGEST_SECRET=stg-ingest-secret WEEKLY_DIGEST_CRON_SECRET=stg-cron-secret
+supabase secrets set INGEST_SECRET=stg-ingest-secret REMINDERS_CRON_SECRET=stg-cron-secret
 supabase functions deploy <changed functions> --no-verify-jwt
 python3 supabase/tests/function_battery.py
 

@@ -26,6 +26,8 @@ struct ShareView: View {
     /// closes a beat later. The card stays where it is — no separate
     /// success screen.
     @State private var saved = false
+    @State private var confirmDiscard = false
+    @State private var saveAnyway = false
 
     private var isPreview: Bool {
         if case .preview = stage { return true }
@@ -52,6 +54,7 @@ struct ShareView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
                 }
             }
             .background(alignment: .top) {
@@ -65,10 +68,10 @@ struct ShareView: View {
                     .ignoresSafeArea()
                 }
             }
-            .background(AppBackground.sheet.ignoresSafeArea())
+            .background { ThemeFill(color: AppBackground.sheet) }
         }
         .tint(AppBackground.accent)
-        .preferredColorScheme(.dark)
+        .appColorScheme()
         .task { await run() }
     }
 
@@ -93,9 +96,37 @@ struct ShareView: View {
                 .foregroundStyle(.secondary)
 
                 ItemCard(item: draft)
+
+                RemindRow(item: draft)
             } else {
                 ItemForm(item: draft)
                     .transition(.opacity)
+            }
+
+            if !saved, draft.isEvent, draft.timeBucket == .past,
+               let day = (draft.endsOn ?? draft.startsOn).flatMap({ DayString.text($0) }) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(
+                        "This happened on \(day). Add it to We Did Go instead?",
+                        systemImage: "checkmark.seal"
+                    )
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                    Button {
+                        draft.status = Item.Status.done
+                        save(draft)
+                    } label: {
+                        Label("We did go!", systemImage: "checkmark.seal.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
             }
 
             VStack(spacing: 10) {
@@ -107,11 +138,7 @@ struct ShareView: View {
                         .frame(maxWidth: .infinity)
                         .contentTransition(.opacity)
                 }
-                .buttonStyle(.glassProminent)
-                // Neutral white, matching the in-app flow — murky extracted
-                // accents made the main CTA read as disabled.
-                .tint(.white.opacity(0.92))
-                .foregroundStyle(AppBackground.base)
+                .prominentGlass()
                 .controlSize(.large)
                 .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
                 .allowsHitTesting(!saved)
@@ -134,13 +161,21 @@ struct ShareView: View {
                     // from the share itself, so discarding closes the sheet.
                     Button(role: .destructive) {
                         Haptics.tap()
-                        cancel()
+                        confirmDiscard = true
                     } label: {
                         Label("Discard", systemImage: "trash")
                             .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glass)
+                    .confirmationDialog(
+                        "Discard this save?",
+                        isPresented: $confirmDiscard,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Discard", role: .destructive) { cancel() }
+                        Button("Keep editing", role: .cancel) {}
+                    }
                 }
                 .controlSize(.large)
             }
@@ -152,35 +187,58 @@ struct ShareView: View {
                 .frame(maxWidth: .infinity)
 
         case .duplicate:
-            VStack(spacing: 12) {
-                Image(systemName: "books.vertical.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.white)
-                Text("Already in your library")
-                    .font(.headline)
-                Text("One of you saved this link before.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button {
-                    Haptics.tap()
-                    Task { await parse() }
-                } label: {
-                    Text("Save again anyway")
-                        .font(.subheadline.weight(.medium))
+            VStack(alignment: .leading, spacing: 10) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Already in your library")
+                            .font(.footnote.weight(.semibold))
+                        Text("One of you saved this link before.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "books.vertical")
                 }
-                .buttonStyle(.glass)
-                .padding(.top, 8)
+                .foregroundStyle(AppBackground.warning)
+
+                HStack(spacing: 10) {
+                    if let id = SavedURLIndex.id(for: extractedURL),
+                       let url = URL(string: "canwego://item/\(id.uuidString)") {
+                        Button {
+                            Haptics.tap()
+                            extensionContext?.open(url) { _ in complete() }
+                        } label: {
+                            Label("Open it", systemImage: "arrow.up.right")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .prominentGlass()
+                    }
+
+                    Button {
+                        Haptics.tap()
+                        saveAnyway = true
+                        Task { await parse() }
+                    } label: {
+                        Label("Save anyway", systemImage: "plus")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 36)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+            .padding(.vertical, 24)
 
         case .failed(let message, let retryText):
             Label(message, systemImage: "exclamationmark.triangle")
                 .font(.subheadline)
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppBackground.warning)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+                .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
 
             if let retryText {
                 // Parse failed (offline, blocked page…): keep the raw share
@@ -188,14 +246,12 @@ struct ShareView: View {
                 Button {
                     saveRaw(retryText)
                 } label: {
-                    Label(saved ? "Saved" : "Save it anyway", systemImage: saved ? "checkmark" : "tray.and.arrow.down")
+                    Label(saved ? "Saved" : "Save anyway", systemImage: saved ? "checkmark" : "tray.and.arrow.down")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppBackground.base)
                         .frame(maxWidth: .infinity)
                         .contentTransition(.opacity)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(.white)
+                .prominentGlass()
                 .controlSize(.large)
                 .allowsHitTesting(!saved)
             }
@@ -329,11 +385,16 @@ struct ShareView: View {
         pending.price = item.price
         pending.startsOn = item.startsOn
         pending.endsOn = item.endsOn
+        pending.reminderOffsetDays = item.reminderOffsetDays
+        pending.reminderAnchor = item.reminderAnchor
+        pending.remindAt = item.remindAt
         pending.url = item.url
         pending.lat = item.lat
         pending.lng = item.lng
         pending.colorHex = item.colorHex
         pending.imageUrl = item.imageUrl
+        pending.status = item.status
+        pending.allowDuplicate = saveAnyway ? true : nil
         finish(pending)
     }
 

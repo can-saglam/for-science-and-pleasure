@@ -26,6 +26,24 @@ enum WidgetStore {
 
     /// Call on the main actor with live models; the heavy lifting (image
     /// fetch, JPEG encode, disk writes) hops off it.
+    /// The widget's empty state and no-photo wash follow the app theme.
+    struct ThemePayload: Codable {
+        var theme: String
+        var isLight: Bool
+    }
+
+    /// Takes the theme in — never reads `ThemeStore.shared`. Doing that
+    /// from `ThemeStore.init` re-enters `dispatch_once` and traps at launch.
+    static func writeTheme(_ theme: AppTheme) {
+        guard let directory else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let payload = ThemePayload(theme: theme.rawValue, isLight: theme.isLight)
+        if let data = try? JSONEncoder().encode(payload) {
+            try? data.write(to: directory.appending(path: "theme.json"), options: .atomic)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
     static func sync(items: [Item]) {
         // The widget shows things you could still go to.
         let active = items.filter { $0.isEvent && !$0.isDone && !$0.isMissed }
@@ -47,6 +65,7 @@ enum WidgetStore {
             )
         }
 
+        writeTheme(ThemeStore.shared.current)
         Task.detached(priority: .utility) {
             guard let directory else { return }
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -87,7 +106,7 @@ enum WidgetStore {
             }
 
             // Sweep photos of items that left the rotation (done, deleted).
-            let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "version.txt"])
+            let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "version.txt", "theme.json"])
             let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
             for file in files where !keep.contains(file) {
                 try? FileManager.default.removeItem(at: directory.appending(path: file))

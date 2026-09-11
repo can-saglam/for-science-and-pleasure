@@ -1,6 +1,6 @@
-// Manual digest push test: reads the cron secret from Vault, then invokes
-// send-digest with force=true and prints per-push results.
-// Run: deno run -A scripts/trigger-digest-test.ts
+// Manual reminder push test: reads the cron secret from Vault, then invokes
+// send-reminders with force=true and prints per-push results.
+// Run: deno run -A scripts/trigger-reminder-test.ts
 import postgres from "npm:postgres@3.4.5";
 
 const env = new TextDecoder().decode(await Deno.readFile(".supabase.env"));
@@ -18,13 +18,13 @@ const sql = postgres({
 });
 const rows = await sql`
   select decrypted_secret from vault.decrypted_secrets
-  where name = 'weekly_digest_cron_secret'
+  where name = 'reminders_cron_secret'
 `;
 await sql.end();
 const secret = rows[0]?.decrypted_secret;
 if (!secret) throw new Error("cron secret not found in vault");
 
-const res = await fetch(`${get("SUPABASE_URL")}/functions/v1/send-digest`, {
+const res = await fetch(`${get("SUPABASE_URL")}/functions/v1/send-reminders`, {
   method: "POST",
   headers: {
     "x-cron-secret": secret,

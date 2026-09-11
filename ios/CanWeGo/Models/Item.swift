@@ -40,6 +40,15 @@ final class Item {
     /// Who saved it — stamped server-side from the JWT (Phase 1b). Replaces
     /// addedByEmail as the source for "Added by"; the email stays for old rows.
     var createdBy: UUID?
+    /// Days before the anchor to fire a shared reminder: 7, 3, 1, or 0
+    /// (morning of). Nil means no reminder. Always travels with
+    /// `reminderAnchor` and `remindAt`.
+    var reminderOffsetDays: Int?
+    /// `starts_on` or `ends_on` — which date the offset is measured from.
+    var reminderAnchor: String?
+    /// Computed fire day (`yyyy-MM-dd`) on the home calendar. The server
+    /// cron sends at 10:00 that morning.
+    var remindAt: String?
     /// Manual position in the Places list (long-press drag). Local-only —
     /// never synced, so each of you can keep your own order.
     var sortOrder: Double?
@@ -110,6 +119,23 @@ enum DayString {
     static func daysBetween(_ from: String, _ to: String) -> Int? {
         guard let a = date(from), let b = date(to) else { return nil }
         return calendar.dateComponents([.day], from: a, to: b).day
+    }
+
+    /// `day` shifted by `days` on the home calendar.
+    static func addingDays(_ days: Int, to day: String) -> String? {
+        guard let date = date(day),
+              let shifted = calendar.date(byAdding: .day, value: days, to: date)
+        else { return nil }
+        return formatter.string(from: shifted)
+    }
+
+    /// A fire day is still bookable: later than today, or today before 11:00
+    /// home time (the 10:00 send window hasn't closed).
+    static func isMorningOpen(for day: String) -> Bool {
+        let today = Self.today()
+        if day > today { return true }
+        if day < today { return false }
+        return calendar.component(.hour, from: .now) < 11
     }
 
     /// A saved day as text: rendered in the home zone (so a home midnight
@@ -283,6 +309,130 @@ extension Item {
     var timeLabelIsUrgent: Bool {
         if case .lastChance = timeBucket, let d = daysUntilClose, d <= 2 { return true }
         return false
+    }
+}
+
+// MARK: - Shared reminder
+
+struct ReminderChoice: Hashable, Identifiable {
+    var offsetDays: Int
+    var anchor: String
+
+    var id: String { "\(anchor)-\(offsetDays)" }
+
+    var offsetLabel: String {
+        switch offsetDays {
+        case 7: return "1 week before"
+        case 3: return "3 days before"
+        case 1: return "1 day before"
+        case 0: return "Morning of"
+        default: return "\(offsetDays) days before"
+        }
+    }
+
+    var valueLabel: String {
+        let side = anchor == "ends_on" ? "it closes" : "it starts"
+        switch offsetDays {
+        case 7: return "1 week before \(side)"
+        case 3: return "3 days before \(side)"
+        case 1: return "1 day before \(side)"
+        case 0: return "Morning of"
+        default: return offsetLabel
+        }
+    }
+}
+
+extension Item {
+    static let reminderOffsets = [7, 3, 1, 0]
+
+    var hasReminder: Bool { reminderOffsetDays != nil && remindAt != nil }
+
+    /// Both dates exist and they differ — the menu offers start and close.
+    var asksReminderAnchor: Bool {
+        guard let s = startsOn, let e = endsOn else { return false }
+        return s != e
+    }
+
+    private var soleReminderAnchor: String? {
+        if let s = startsOn, let e = endsOn, s == e { return "starts_on" }
+        if startsOn != nil, endsOn == nil { return "starts_on" }
+        if endsOn != nil, startsOn == nil { return "ends_on" }
+        return nil
+    }
+
+    func remindAt(offset: Int, anchor: String) -> String? {
+        let day: String? = switch anchor {
+        case "starts_on": startsOn
+        case "ends_on": endsOn
+        default: nil
+        }
+        guard let day else { return nil }
+        return DayString.addingDays(-offset, to: day)
+    }
+
+    var availableReminderChoices: [ReminderChoice] {
+        let anchors: [String]
+        if asksReminderAnchor {
+            anchors = ["starts_on", "ends_on"]
+        } else if let sole = soleReminderAnchor {
+            anchors = [sole]
+        } else {
+            return []
+        }
+        return anchors.flatMap { anchor in
+            Self.reminderOffsets.compactMap { offset -> ReminderChoice? in
+                guard let fire = remindAt(offset: offset, anchor: anchor),
+                      DayString.isMorningOpen(for: fire)
+                else { return nil }
+                return ReminderChoice(offsetDays: offset, anchor: anchor)
+            }
+        }
+    }
+
+    var canRemind: Bool { !isDone && !availableReminderChoices.isEmpty }
+
+    var reminderValueLabel: String {
+        guard let offset = reminderOffsetDays, let anchor = reminderAnchor else {
+            return "Off"
+        }
+        let choice = ReminderChoice(offsetDays: offset, anchor: anchor)
+        return asksReminderAnchor ? choice.valueLabel : choice.offsetLabel
+    }
+
+    func applyReminder(offset: Int, anchor: String) {
+        guard let fire = remindAt(offset: offset, anchor: anchor),
+              DayString.isMorningOpen(for: fire)
+        else {
+            clearReminder()
+            return
+        }
+        reminderOffsetDays = offset
+        reminderAnchor = anchor
+        remindAt = fire
+    }
+
+    func clearReminder() {
+        reminderOffsetDays = nil
+        reminderAnchor = nil
+        remindAt = nil
+    }
+
+    /// Drop or recompute the reminder after dates change or the item is done.
+    func reconcileReminder() {
+        guard hasReminder else { return }
+        if isDone || availableReminderChoices.isEmpty {
+            clearReminder()
+            return
+        }
+        guard let offset = reminderOffsetDays, let anchor = reminderAnchor else {
+            clearReminder()
+            return
+        }
+        if availableReminderChoices.contains(where: { $0.offsetDays == offset && $0.anchor == anchor }) {
+            applyReminder(offset: offset, anchor: anchor)
+        } else {
+            clearReminder()
+        }
     }
 }
 
