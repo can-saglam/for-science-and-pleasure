@@ -280,6 +280,7 @@ struct GroupSection: View {
                 Text("Everyone here sees and edits the same library. Anyone can invite; nobody can remove anyone but themselves.")
             }
         }
+        .font(.footnote)
     }
 }
 

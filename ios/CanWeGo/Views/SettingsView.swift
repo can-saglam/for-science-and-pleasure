@@ -51,40 +51,37 @@ struct SettingsView: View {
                 GroupSection(ui: groupUI)
 
                 Section("Appearance") {
-                    Menu {
+                    menuRow("Theme", icon: "paintpalette.fill") {
                         Picker(selection: theme) {
                             ForEach(AppTheme.allCases) { option in
                                 Text(option.name).tag(option)
                             }
                         } label: { EmptyView() }
-                    } label: {
-                        menuValue("Theme", icon: "paintpalette.fill", value: themes.current.name)
                     }
-                    .tint(themes.current.ink)
                     .sensoryFeedback(.selection, trigger: themes.current)
                 }
                 .listRowBackground(Self.rowBackground)
 
                 Section {
-                    Menu {
+                    menuRow("Directions in", icon: "map.fill") {
                         Picker(selection: $transportApp) {
                             ForEach(TransportApp.allCases) { app in
                                 Text(app.name).tag(app.rawValue)
                             }
                         } label: { EmptyView() }
-                    } label: {
-                        menuValue(
-                            "Directions in",
-                            icon: "map.fill",
-                            value: TransportApp(rawValue: transportApp)?.name ?? ""
-                        )
                     }
-                    .tint(themes.current.ink)
                     .sensoryFeedback(.selection, trigger: transportApp)
                 } header: {
                     Text("Directions")
                 } footer: {
+                    // Footers here (and in GroupSection) spell out `.footnote`:
+                    // when a menu picker opens or closes, the List re-measures
+                    // the visible footers without its own footer styling —
+                    // body-sized text, an extra line, and everything below
+                    // jumps ~33pt for one frame. With the font explicit both
+                    // passes agree and nothing moves.
                     Text("Opens when you tap a place or ask the way.")
+                        .font(.footnote)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -169,6 +166,7 @@ struct SettingsView: View {
                     Text(auth.signedIn
                         ? "Your shared library syncs with the web app and each other\u{2019}s phones whenever the app is open."
                         : "Sign in to sync your shared library across phones.")
+                        .font(.footnote)
                 }
                 .listRowBackground(Self.rowBackground)
             }
@@ -212,36 +210,46 @@ struct SettingsView: View {
         SettingsRow(title: title, icon: icon)
     }
 
-    /// Trailing value in the theme ink — system `Picker` rows take the
-    /// window tint (often a leftover pink) and ignore `.tint`.
-    private func menuValue(_ title: String, icon: String, value: String) -> some View {
+    /// A Settings-style value row: the title on the left, a menu picker as
+    /// the small trailing value, matching the system Settings app.
+    private func menuRow<P: View>(
+        _ title: String, icon: String, @ViewBuilder picker: () -> P
+    ) -> some View {
         LabeledContent {
-            HStack(spacing: 5) {
-                Text(value)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.semibold))
-            }
-            .foregroundStyle(themes.current.ink.opacity(0.55))
+            picker()
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(themes.current.ink)
         } label: {
             row(title, icon: icon)
         }
+        // The menu button is UIKit-backed and asks the cell for ~34pt via
+        // Auto Layout, over SwiftUI's head; meet it, and trim the row insets
+        // so the row still measures the same ~51pt as its neighbours. Keep
+        // `listRowInsets` the outermost modifier on the row — anything
+        // wrapped around it hides the insets from the List.
+        .frame(height: 34)
+        .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
     }
 
-    /// Writes the store; the window cross-fades in one step. The matching
-    /// home-screen icon waits until this sheet closes — iOS confirms every
-    /// icon change with an alert, and one landing on top of the menu and
-    /// the fade was most of what made switching feel rough.
+    /// Writes the store; the window cross-fades in one step, and the
+    /// home-screen icon follows right away. iOS confirms every icon change
+    /// with its own alert — there is no public way around that, so it
+    /// simply lands here, on the pick, where the user expects it.
     private var theme: Binding<AppTheme> {
         Binding(
             get: { themes.current },
             set: { new in
                 Haptics.selection()
                 themes.select(new)
+                syncAppIcon()
             }
         )
     }
 
-    /// Flip the home-screen icon to the chosen theme, once, on the way out.
+    /// Flip the home-screen icon to the chosen theme. Also runs when the
+    /// sheet closes, as a catch-up if the immediate call was skipped (the
+    /// system refuses icon changes while the app isn't active).
     private func syncAppIcon() {
         #if !APP_EXTENSION
         let wanted = themes.current.iconName
