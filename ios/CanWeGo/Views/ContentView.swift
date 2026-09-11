@@ -14,6 +14,13 @@ final class PlusButtonFrame {
     /// ever comes back empty.
     var fallback: CGRect = .zero
     var best: CGRect { measured != .zero ? measured : fallback }
+
+    /// The bar's Add circle by its known metrics: 62 pt, 21 pt in from the
+    /// trailing edge and the bottom of the screen.
+    static func ghost(in screen: CGRect) -> CGRect {
+        let side: CGFloat = 62, inset: CGFloat = 21
+        return CGRect(x: screen.maxX - inset - side, y: screen.maxY - inset - side, width: side, height: side)
+    }
 }
 
 /// Reports the on-screen frame of the tab bar's Add circle. UIKit draws
@@ -99,6 +106,30 @@ struct ContentView: View {
     /// forward so an overnight leave doesn't leave yesterday on the bar.
     @State private var dayOfMonth = Calendar.current.component(.day, from: Date())
 
+    /// Reads the Add circle off the tab bar, and keeps the by-the-metrics
+    /// fallback in step with the screen: this view's frame plus its safe
+    /// area insets is the full screen, so `maxY` is the screen bottom.
+    private var plusButtonProbe: some View {
+        Color.clear
+            .onGeometryChange(for: CGRect.self) { proxy in
+                let frame = proxy.frame(in: .global)
+                let safe = proxy.safeAreaInsets
+                return CGRect(
+                    x: frame.minX - safe.leading,
+                    y: frame.minY - safe.top,
+                    width: frame.width + safe.leading + safe.trailing,
+                    height: frame.height + safe.top + safe.bottom
+                )
+            } action: { screen in
+                PlusButtonFrame.shared.fallback = PlusButtonFrame.ghost(in: screen)
+            }
+            .background {
+                TabBarAddButtonReader(title: Self.addTitle)
+                    .frame(width: 0, height: 0)
+            }
+            .allowsHitTesting(false)
+    }
+
     var body: some View {
         // The system tab bar is the only place the bubbly light-bend
         // lives — a custom glass pill can slide, it cannot refract.
@@ -127,25 +158,11 @@ struct ContentView: View {
             old != addTab && new != addTab
         }
         // Locate-me docks above Add. The system circle's frame is read
-        // straight off the tab bar; the ghost below is only the fallback,
-        // laid out with the bar's metrics (62 pt circle, 21 pt in from the
-        // trailing edge and the screen bottom).
-        .background {
-            TabBarAddButtonReader(title: Self.addTitle)
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
-        }
-        .overlay(alignment: .bottomTrailing) {
-            Color.clear
-                .frame(width: 62, height: 62)
-                .padding(.trailing, 21)
-                .padding(.bottom, 21)
-                .ignoresSafeArea()
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                    PlusButtonFrame.shared.fallback = $0
-                }
-                .allowsHitTesting(false)
-        }
+        // straight off the tab bar; the fallback is the same circle placed
+        // by the bar's metrics — 62 pt, 21 pt in from the trailing edge and
+        // the screen bottom — off this full-screen view's own frame, so it
+        // lands exactly where the read would.
+        .background { plusButtonProbe }
         .sheet(isPresented: $captureOpen) {
             CaptureView()
         }
