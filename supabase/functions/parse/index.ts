@@ -3,7 +3,12 @@
 // the web app sends a member's JWT, the iOS app sends the ingest secret
 // (the same one already embedded in the share-sheet Shortcut).
 import { internalErrorBody } from "../_shared/auth.ts";
-import { corsHeaders, extractCard, SocialUnreadableError } from "../_shared/extract.ts";
+import {
+  corsHeaders,
+  extractCard,
+  SocialUnreadableError,
+  VagueInputError,
+} from "../_shared/extract.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 import { resolveCaller } from "../_shared/groups.ts";
 import { groupHome, LONDON } from "../_shared/home.ts";
@@ -54,8 +59,9 @@ Deno.serve(async (req) => {
     // A social post nothing could read: a question for the user, not a
     // server error. 422 so the app shows the message as-is (and doesn't
     // retry — see ParseClient.isTransient).
-    if (e instanceof SocialUnreadableError) {
-      return new Response(JSON.stringify({ error: e.message, code: "social_unreadable" }), {
+    if (e instanceof SocialUnreadableError || e instanceof VagueInputError) {
+      const code = e instanceof VagueInputError ? "too_vague" : "social_unreadable";
+      return new Response(JSON.stringify({ error: e.message, code }), {
         status: 422,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

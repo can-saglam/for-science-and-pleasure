@@ -46,11 +46,32 @@ export interface ParsedCard {
   website: string | null;
 }
 
+/// Thrown when the input is a search, not a save — "modern art museums in
+/// London", "good ramen", "gigs this weekend". Nothing is stored; the
+/// caller shows the message and asks for something more specific.
+export class VagueInputError extends Error {
+  constructor() {
+    super(
+      "That reads like a search, not a save. Name one place or event — a venue, a show, a restaurant — or paste a link to it.",
+    );
+    this.name = "VagueInputError";
+  }
+}
+
+/// What the model returns: the card plus its own reading of whether the
+/// input pointed at one real thing. The flag never leaves this module.
+type ModelCard = ParsedCard & { is_specific: boolean };
+
 // The schema carries the home in its examples (area, price, address), so
 // it is built per call rather than once.
 const cardSchema = (home: Home) => ({
   type: "object",
   properties: {
+    is_specific: {
+      type: "boolean",
+      description:
+        "true only if the user's input points at one particular, real, named event or place (a venue, an exhibition, a restaurant, a gig). false when it is a category, a list, or a search-style request — 'modern art museums in London', 'good brunch spots', 'things to do this weekend' — even if web search turned up candidates; never pick one to stand in for a vague request.",
+    },
     kind: {
       type: "string",
       enum: ["event", "place"],
@@ -97,7 +118,7 @@ const cardSchema = (home: Home) => ({
     },
   },
   required: [
-    "kind", "title", "summary", "venue", "area", "address",
+    "is_specific", "kind", "title", "summary", "venue", "area", "address",
     "category", "price", "booking_url", "starts_on", "ends_on", "website",
   ],
   additionalProperties: false,
@@ -183,6 +204,19 @@ async function fetchPage(
   }
 }
 
+/// Does this card point at somewhere real? A source link, an official site,
+/// coordinates or a street address all do. An event may also stand on a
+/// named venue or a date — "Frieze London, October" is a real thing even
+/// when geocoding fails. A place with none of these is a phantom.
+export function isAnchored(
+  card: Pick<ParsedCard, "kind" | "website" | "address" | "venue" | "starts_on">,
+  from: { url: string | null; coords: { lat: number; lng: number } | null },
+): boolean {
+  if (from.url || from.coords) return true;
+  if (card.website || card.address) return true;
+  return card.kind === "event" && Boolean(card.venue || card.starts_on);
+}
+
 export interface ExtractInput {
   text?: string;          // pasted text, forwarded message, or a bare URL
   image_base64?: string;  // screenshot (e.g. of an Instagram post)
@@ -264,6 +298,7 @@ export async function extractCard(
     `The user lives in ${where}: assume that city when the source doesn't say where something is, and read prices, dates and place names with that in mind. But trust the source — if it clearly places the event or venue somewhere else, keep it there (with the city in the address); never move it home.`,
     "Resolve relative or partial dates to absolute YYYY-MM-DD dates (if a month is named without a year, assume the next occurrence from today).",
     "If a field is genuinely unknown, use null — do not guess venues, prices, or dates.",
+    "If the input doesn't name one particular event or place — it's a category, a list, or a search-style request — set is_specific to false and fill the rest as best you can; do not choose a candidate to stand in for it.",
     "Fill 'website' with the official homepage of the event or place (the venue's own site — never an aggregator, social media, Reddit, or a maps link). If you used web search and its results name or link the official site, use that; leave null only when no official site turns up.",
   ];
   if (text) parts.push(`User's saved input:\n${text}`);
@@ -357,7 +392,7 @@ export async function extractCard(
   if (!textBlock || textBlock.type !== "text") {
     throw new Error("No structured output returned");
   }
-  const card = JSON.parse(textBlock.text) as ParsedCard;
+  const { is_specific, ...card } = JSON.parse(textBlock.text) as ModelCard;
   card.category = normaliseCategory(card.kind, card.category);
 
   // The pin in a Maps URL is exact — trust it over geocoding the name.
@@ -376,6 +411,13 @@ export async function extractCard(
       [card.venue ?? card.title, card.area].filter(Boolean).join(", "),
       home,
     );
+  }
+
+  // A card with nothing to stand on is not a save. The model's own verdict
+  // comes first; the structural check catches the times it said "specific"
+  // but still produced a spot with no link, no site, no pin and no address.
+  if (is_specific === false || !isAnchored(card, { url, coords })) {
+    throw new VagueInputError();
   }
 
   // Thumbnail: the saved page's og:image when we have it; otherwise try the

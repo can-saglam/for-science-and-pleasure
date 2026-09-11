@@ -2,7 +2,7 @@
 // authenticated by a shared secret header. Parses the input and inserts the
 // item directly (service role) into the shared library.
 import { internalErrorBody } from "../_shared/auth.ts";
-import { corsHeaders, extractCard } from "../_shared/extract.ts";
+import { corsHeaders, extractCard, VagueInputError } from "../_shared/extract.ts";
 import { admin, groupForEmail } from "../_shared/groups.ts";
 import { groupHome } from "../_shared/home.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
@@ -98,6 +98,14 @@ Deno.serve(async (req) => {
         updated_by: owner.userId,
       };
     } catch (parseErr) {
+      // A search, not a save: nothing to keep. Tell the Shortcut so the
+      // person can try a real name or a link.
+      if (parseErr instanceof VagueInputError) {
+        return new Response(JSON.stringify({ error: parseErr.message, code: "too_vague" }), {
+          status: 422,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       // Parsing failed (e.g. missing API key) — still save the raw dump so
       // nothing is lost; it can be completed manually in the library.
       console.error("parse failed, saving raw:", parseErr);
