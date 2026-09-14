@@ -272,6 +272,7 @@ struct CaptureView: View {
             Haptics.tap()
             let blank = Item()
             blank.kind = Item.Kind.place
+            blank.source = "manual"
             withAnimation(.snappy) {
                 draft = blank
                 editing = true
@@ -575,6 +576,7 @@ struct CaptureView: View {
             item.lng = card.lng
             item.colorHex = card.color
             item.imageUrl = card.image_url
+            item.source = card.source
             withAnimation(.spring(duration: 0.4)) { draft = item }
         } catch {
             // ParseError already speaks to a person; everything else

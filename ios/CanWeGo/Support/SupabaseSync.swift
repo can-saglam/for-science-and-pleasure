@@ -331,6 +331,7 @@ enum SupabaseSync {
         var remind_at: String?
         var notes: String?
         var color: String?
+        var source: String?
         var lat: Double?
         var lng: Double?
         var added_by_email: String?
@@ -368,6 +369,9 @@ enum SupabaseSync {
             try c.encode(remind_at, forKey: .remind_at)
             try c.encode(notes, forKey: .notes)
             try c.encode(color, forKey: .color)
+            // `source` is NOT NULL on the server; rows from before the
+            // field existed are by definition the old default.
+            try c.encode(source ?? "manual", forKey: .source)
             try c.encode(lat, forKey: .lat)
             try c.encode(lng, forKey: .lng)
             try c.encode(added_by_email, forKey: .added_by_email)
@@ -521,6 +525,7 @@ enum SupabaseSync {
             remind_at: item.remindAt,
             notes: item.notes,
             color: item.colorHex,
+            source: item.source,
             lat: item.lat,
             lng: item.lng,
             added_by_email: item.addedByEmail ?? SupabaseAuth.shared.email,
@@ -602,6 +607,7 @@ enum SupabaseSync {
         item.remindAt = row.remind_at
         item.notes = row.notes
         item.colorHex = row.color
+        item.source = row.source
         item.lat = row.lat
         item.lng = row.lng
         item.addedByEmail = row.added_by_email

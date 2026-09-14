@@ -3,8 +3,8 @@ import { EVENT_CATEGORIES, normaliseCategory, PLACE_CATEGORIES } from "./categor
 import {
   colorFromImageBytes,
   colorFromImageUrl,
+  heroImageFromHtml,
   heroImageFromUrl,
-  ogImageFromHtml,
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
 import {
@@ -197,7 +197,10 @@ async function fetchPage(
       .trim();
     return {
       text: [title, metas.join("\n"), body].join("\n\n").slice(0, 30_000),
-      ogImage: ogImageFromHtml(html, url),
+      // og:image first, then JSON-LD and the page's largest picture — the
+      // same ladder the model's suggested website gets. Gallery and
+      // festival sites often skip social meta tags entirely.
+      ogImage: heroImageFromHtml(html, res.url || url),
     };
   } catch {
     return null;
@@ -420,9 +423,10 @@ export async function extractCard(
     throw new VagueInputError();
   }
 
-  // Thumbnail: the saved page's og:image when we have it; otherwise try the
-  // official website the model named — Reddit tips, blocked ticketing pages,
-  // maps pins, and bare typed names all get a real venue photo this way.
+  // Thumbnail: whatever the saved page offered (og:image, JSON-LD, or
+  // its largest content picture). If that's still empty, try the official
+  // website the model named — Reddit tips, blocked ticketing pages, maps
+  // pins, and bare typed names all get a real venue photo this way.
   let imageUrl = page?.ogImage ?? null;
   if (
     !imageUrl && card.website && isFetchable(card.website) &&

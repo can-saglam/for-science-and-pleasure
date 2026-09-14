@@ -27,6 +27,7 @@ enum SharedInbox {
         var lng: Double?
         var colorHex: String?
         var imageUrl: String?
+        var source: String?
         var status: String?
         /// Share-sheet "Save anyway" after a duplicate warning.
         var allowDuplicate: Bool?
@@ -94,6 +95,7 @@ extension Item {
         lng = pending.lng
         colorHex = pending.colorHex
         imageUrl = pending.imageUrl
+        source = pending.source
         if let status = pending.status { self.status = status }
         createdAt = pending.savedAt
         updatedAt = pending.savedAt

@@ -28,6 +28,10 @@ final class Item {
     var status: String = Item.Status.saved
     /// Dominant color pulled from the source page's image, as "#rrggbb".
     var colorHex: String?
+    /// How it came in: `link`, `text` or `image` from the parser, `manual`
+    /// for the hand-typed form, `shortcut` from the Shortcut. Nil on rows
+    /// that predate the field, which the server treats as `manual`.
+    var source: String?
     var lat: Double?
     var lng: Double?
     var addedByEmail: String?

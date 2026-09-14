@@ -101,6 +101,25 @@ enum ImageStore {
     /// Cache-first fetch; disk and network misses resolve off the main
     /// thread, and every image lands in memory already decoded and scaled
     /// to its tier.
+    /// Write bytes we already have (a just-picked cover) so the next fetch
+    /// never goes to the network for this URL.
+    static func put(_ data: Data, for url: URL) {
+        try? data.write(to: file(for: url), options: .atomic)
+        setDead(url, false)
+        if let image = UIImage(data: data) {
+            store(image, key: key(url, .card))
+            store(image, key: key(url, .hero))
+        }
+    }
+
+    /// Drop memory and disk for a URL we're no longer showing.
+    static func evict(_ url: URL) {
+        memory.removeObject(forKey: key(url, .card))
+        memory.removeObject(forKey: key(url, .hero))
+        memory.removeObject(forKey: "\(url.absoluteString)|melt" as NSString)
+        try? FileManager.default.removeItem(at: file(for: url))
+    }
+
     static func fetch(_ url: URL, variant: Variant = .card) async -> UIImage? {
         if let hit = cached(url, variant: variant) { return hit }
         _ = pruneOnce

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// Field-by-field editor for an item — used for parsed drafts in Capture
@@ -19,6 +20,10 @@ struct ItemForm: View {
                 .pickerStyle(.segmented)
 
                 field("Category", icon: "tag", text: optional($item.category))
+            }
+
+            section("Picture") {
+                ThumbnailField(item: item)
             }
 
             section("Where") {
@@ -132,5 +137,120 @@ private struct OptionalDateRow: View {
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
         .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// Add, replace or clear the cover. The picker is the system photo library;
+/// the file lands in Storage and `image_url` so both phones (and the site)
+/// see the same picture, then `ImageStore` keeps a local copy.
+private struct ThumbnailField: View {
+    @Bindable var item: Item
+    @State private var pick: PhotosPickerItem?
+    @State private var uploading = false
+    @State private var note: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                fieldIcon("photo")
+                PhotosPicker(selection: $pick, matching: .images) {
+                    HStack(spacing: 12) {
+                        thumb
+                        Text(item.imageUrl == nil ? "Add a photo" : "Change photo")
+                            .font(.subheadline)
+                            .foregroundStyle(item.imageUrl == nil ? .tertiary : .primary)
+                        Spacer(minLength: 0)
+                        if uploading {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(uploading)
+                .accessibilityLabel(item.imageUrl == nil ? "Add a photo" : "Change photo")
+
+                if item.imageUrl != nil, !uploading {
+                    Button {
+                        Haptics.tap()
+                        Task { await clear() }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove photo")
+                }
+            }
+            .padding(12)
+            .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+
+            if let note {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.warning)
+            }
+        }
+        .onChange(of: pick) { _, item in
+            guard let item else { return }
+            pick = nil
+            Task { await use(item) }
+        }
+    }
+
+    @ViewBuilder
+    private var thumb: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        if let raw = item.imageUrl, let url = URL(string: raw) {
+            CachedImage(url: url, variant: .card) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    AppBackground.wash(0.12)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(shape)
+        } else {
+            shape.fill(AppBackground.wash(0.12))
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Image(systemName: "plus")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+        }
+    }
+
+    private func use(_ pick: PhotosPickerItem) async {
+        guard let data = try? await pick.loadTransferable(type: Data.self),
+              let image = UIImage(data: data),
+              let jpeg = image.compressedForUpload()
+        else {
+            note = "Couldn't read that photo."
+            return
+        }
+        uploading = true
+        note = nil
+        defer { uploading = false }
+        do {
+            let previous = item.imageUrl
+            item.imageUrl = try await ItemImageUpload.publish(jpeg, replacing: previous)
+            if let old = previous, old != item.imageUrl, let url = URL(string: old) {
+                ImageStore.evict(url)
+            }
+        } catch {
+            note = (error as? ItemImageError)?.errorDescription ?? SyncProblem(error).message
+        }
+    }
+
+    private func clear() async {
+        let previous = item.imageUrl
+        item.imageUrl = nil
+        note = nil
+        if let previous {
+            await ItemImageUpload.remove(previous)
+        }
     }
 }

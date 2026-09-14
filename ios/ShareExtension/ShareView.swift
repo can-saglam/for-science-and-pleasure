@@ -297,6 +297,7 @@ struct ShareView: View {
             item.lng = card.lng
             item.colorHex = card.color
             item.imageUrl = card.image_url
+            item.source = card.source
             withAnimation(.snappy) { stage = .preview(item) }
         } catch {
             stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
@@ -393,6 +394,7 @@ struct ShareView: View {
         pending.lng = item.lng
         pending.colorHex = item.colorHex
         pending.imageUrl = item.imageUrl
+        pending.source = item.source
         pending.status = item.status
         pending.allowDuplicate = saveAnyway ? true : nil
         finish(pending)

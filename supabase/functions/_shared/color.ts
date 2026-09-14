@@ -156,24 +156,35 @@ function httpsOnly(url: string): string {
 
 // JSON-LD "image" values come as a string, an array, or an ImageObject.
 // Only an ImageObject's url counts — a WebSite/Organization node's url is
-// just the homepage, not a picture.
-function jsonLdImage(node: unknown): string | null {
-  if (typeof node === "string") return node;
-  if (Array.isArray(node)) {
-    for (const entry of node) {
-      const found = jsonLdImage(entry);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (node && typeof node === "object") {
+// just the homepage, not a picture. Every image found is ranked by the
+// node it hangs off: the thing the page is about (an Event, a Place, an
+// Article) beats generic page nodes, which beat the site's Organization —
+// SEO plugins put the company logo first in the graph, ahead of the
+// festival's own poster.
+const SUBJECT_TYPE_RE =
+  /event|festival|exhibition|place|business|restaurant|cafe|bar|museum|gallery|article|creativework|product|visualartwork/i;
+const BRAND_TYPE_RE = /organization|person|brand/i;
+
+function jsonLdImages(
+  node: unknown,
+  out: { url: string; rank: number }[],
+  rank = 1,
+): void {
+  if (typeof node === "string") {
+    out.push({ url: node, rank });
+  } else if (Array.isArray(node)) {
+    for (const entry of node) jsonLdImages(entry, out, rank);
+  } else if (node && typeof node === "object") {
     const obj = node as Record<string, unknown>;
-    if (typeof obj["@type"] === "string" && /image/i.test(obj["@type"])) {
-      return jsonLdImage(obj.contentUrl ?? obj.url ?? null);
+    const type = typeof obj["@type"] === "string" ? obj["@type"] : "";
+    if (/^imageobject$/i.test(type) || (/image/i.test(type) && (obj.contentUrl || obj.url))) {
+      jsonLdImages(obj.contentUrl ?? obj.url ?? null, out, rank);
+      return;
     }
-    return jsonLdImage(obj.image ?? obj["@graph"] ?? null);
+    const own = SUBJECT_TYPE_RE.test(type) ? 0 : BRAND_TYPE_RE.test(type) ? 2 : rank;
+    jsonLdImages(obj.image ?? null, out, own);
+    jsonLdImages(obj["@graph"] ?? null, out, own);
   }
-  return null;
 }
 
 /// Best photo for a page: og:image, then JSON-LD, then the largest content
@@ -182,29 +193,30 @@ export function heroImageFromHtml(html: string, pageUrl: string): string | null 
   const og = ogImageFromHtml(html, pageUrl);
   if (og) return og;
 
+  const ld: { url: string; rank: number }[] = [];
   for (const block of html.matchAll(
     /<script\b[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi,
   )) {
     try {
-      const image = jsonLdImage(JSON.parse(block[1]));
-      if (image) return httpsOnly(new URL(image, pageUrl).toString());
+      jsonLdImages(JSON.parse(block[1]), ld);
     } catch {
       // malformed block — keep looking
     }
   }
+  // Stable: ties keep document order.
+  for (const { url } of ld.sort((a, b) => a.rank - b.rank)) {
+    try {
+      return httpsOnly(new URL(url, pageUrl).toString());
+    } catch {
+      continue;
+    }
+  }
 
   let best: { src: string; width: number } | null = null;
-  for (const tag of html.matchAll(/<img\b[^>]*>/gi)) {
-    const attrs = tag[0];
-    const src = attrs.match(/src\s*=\s*["']([^"']+)["']/i)?.[1];
-    // Page chrome never makes a good thumbnail.
-    if (!src || /logo|icon|sprite|avatar|badge|\.svg/i.test(src)) continue;
-    const width = Number(
-      attrs.match(/\bwidth\s*=\s*["']?(\d+)/i)?.[1] ??
-        src.match(/[?&]width=(\d+)/i)?.[1] ?? 0,
-    );
-    if (width < 500) continue;
-    if (!best || width > best.width) best = { src, width };
+  for (const tag of html.matchAll(/<(?:img|source)\b[^>]*>/gi)) {
+    const candidate = largestImageCandidate(tag[0]);
+    if (!candidate) continue;
+    if (!best || candidate.width > best.width) best = candidate;
   }
   if (best) {
     try {
@@ -214,6 +226,53 @@ export function heroImageFromHtml(html: string, pageUrl: string): string | null 
     }
   }
   return null;
+}
+
+/// Page chrome never makes a good thumbnail.
+const CHROME_RE = /logo|icon|sprite|avatar|badge|\.svg/i;
+
+/// The biggest picture an <img>/<source> tag offers, with the best width
+/// we can infer for it, or null when it's chrome or plainly small. Sizes
+/// come from wherever a site puts them: a width attribute, a srcset's `w`
+/// descriptors, a `?width=` query, or the WordPress size suffix on the
+/// filename (`-800x530.jpg`, `-scaled.jpg`) — small venue sites rarely
+/// set width= and lazy-load everything through data-src/srcset.
+export function largestImageCandidate(
+  tagAttrs: string,
+): { src: string; width: number } | null {
+  const attr = (name: string) =>
+    tagAttrs.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1];
+
+  let src = attr("src") ?? attr("data-src") ?? attr("data-lazy-src") ?? null;
+  let width = Number(
+    tagAttrs.match(/\bwidth\s*=\s*["']?(\d+)/i)?.[1] ??
+      tagAttrs.match(/\bstyle\s*=\s*["'][^"']*\bwidth\s*:\s*(\d+)px/i)?.[1] ??
+      0,
+  );
+
+  // srcset: take the widest entry; it names the size outright.
+  const srcset = attr("srcset") ?? attr("data-srcset") ?? attr("data-lazy-srcset");
+  if (srcset) {
+    for (const entry of srcset.split(",")) {
+      const [url, descriptor] = entry.trim().split(/\s+/);
+      const w = descriptor?.match(/^(\d+)w$/)?.[1];
+      if (!url || !w) continue;
+      if (Number(w) > width) {
+        width = Number(w);
+        src = url;
+      }
+    }
+  }
+  if (!src || CHROME_RE.test(src)) return null;
+
+  if (!width) {
+    width = Number(
+      src.match(/[?&](?:w|width)=(\d+)/i)?.[1] ??
+        src.match(/-(\d{3,4})x\d{3,4}\.(?:jpe?g|png|webp|avif)/i)?.[1] ??
+        (/-scaled\.(?:jpe?g|png|webp)/i.test(src) ? 1000 : 0),
+    );
+  }
+  return width >= 500 ? { src, width } : null;
 }
 
 /// Fetch a page and pull its best photo — for sites the model named when

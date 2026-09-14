@@ -344,6 +344,7 @@ struct ItemDetailView: View {
         fill(\.url, card.url)
         fill(\.imageUrl, card.image_url)
         fill(\.colorHex, card.color)
+        fill(\.source, card.source)
         fill(\.startsOn, card.starts_on)
         fill(\.endsOn, card.ends_on)
         scratch.reconcileReminder()
