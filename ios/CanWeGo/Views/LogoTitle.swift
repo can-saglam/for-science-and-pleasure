@@ -13,7 +13,7 @@ struct LogoTitle: View {
             .scaledToFit()
             // Both dimensions pinned: a bare toolbar slot proposes almost
             // no width, and scaledToFit would shrink the mark to a speck.
-            .frame(width: height * 4.83, height: height)
+            .frame(width: height * 5.01, height: height)
             .foregroundStyle(AppBackground.ink)
             .accessibilityLabel("Can We Go?")
     }

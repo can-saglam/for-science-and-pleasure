@@ -7,11 +7,21 @@ import SwiftUI
 struct SettingsRow: View {
     let title: String
     let icon: String
+    /// A second, quieter line under the title. The icon stays centred on
+    /// the pair, so a two-line row lines up with its one-line neighbours.
+    var subtitle: String? = nil
 
     var body: some View {
         Label {
-            // No explicit color: lets callers tint the title (e.g. Sign out).
-            Text(title)
+            VStack(alignment: .leading, spacing: 2) {
+                // No explicit color: lets callers tint the title (e.g. Sign out).
+                Text(title)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         } icon: {
             Image(systemName: icon)
                 .font(.footnote.weight(.semibold))
@@ -69,7 +79,7 @@ final class GroupUI {
             // account can still write to the group; afterwards the rows
             // would be refused and lost.
             guard await SupabaseSync.flush(context: context) else {
-                throw MembershipError(message: "Couldn\u{2019}t sync your latest edits — try again once you\u{2019}re back online.")
+                throw MembershipError(message: "Couldn\u{2019}t sync your latest edits. Try again once you\u{2019}re back online.")
             }
             let result = try await group.leave(keepCopy: keepCopy)
             // The local library is the old group's: replace it before the
@@ -101,7 +111,7 @@ struct GroupSection: View {
                     Button {
                         Task { await group.refresh() }
                     } label: {
-                        SettingsRow(title: "Couldn\u{2019}t load your group — tap to retry", icon: "arrow.clockwise")
+                        SettingsRow(title: "Couldn\u{2019}t load your group. Tap to retry", icon: "arrow.clockwise")
                     }
                 } else {
                     LabeledContent { ProgressView() } label: {
@@ -226,7 +236,7 @@ struct GroupSection: View {
         var lines = ["You\u{2019}ll leave \(card.name) and get a library of your own. The group keeps everything either way."]
         if let mine = card.member(me), mine.isPlus,
            !card.members.contains(where: { $0.isPlus && $0.userId != me }) {
-            lines.append("You\u{2019}re the only one with Plus — the group loses it when you go.")
+            lines.append("You\u{2019}re the only one with Plus. The group loses it when you go.")
         }
         return lines.joined(separator: "\n\n")
     }
@@ -273,7 +283,7 @@ struct GroupSection: View {
             if let note = ui.note {
                 Text(note).foregroundStyle(AppBackground.warning)
             } else if let card = group.card, card.members.count == 1 {
-                Text("Invite someone and you\u{2019}ll share one library — everyone sees and edits everything.")
+                Text("Invite someone and you\u{2019}ll share one library. Everyone sees and edits everything.")
             } else if let card = group.card, card.isFull, !card.needsPlusToGrow {
                 Text("Everyone here sees and edits the same library. Four is the most a group can hold.")
             } else {
@@ -374,7 +384,7 @@ struct InviteSheet: View {
             }
             .padding(24)
             .appBackground(AppBackground.sheet)
-            .navigationTitle(groupName)
+            .sheetTitle(groupName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -409,7 +419,7 @@ struct PlusSheet: View {
                 VStack(spacing: 8) {
                     Text("Room for two more")
                         .font(.title2.weight(.bold))
-                    Text("Free groups have two seats. Plus opens two more — four people, one library, everyone adding and planning together.")
+                    Text("Free groups have two seats. Plus opens two more: four people, one library, everyone adding and planning together.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -424,7 +434,7 @@ struct PlusSheet: View {
                 }
                 .prominentGlass()
                 .controlSize(.large)
-                Text("Plus isn\u{2019}t available just yet — it arrives with an upcoming release.")
+                Text("Plus isn\u{2019}t available just yet. It arrives with an upcoming release.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

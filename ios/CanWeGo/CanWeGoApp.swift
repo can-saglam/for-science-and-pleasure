@@ -10,6 +10,7 @@ struct CanWeGoApp: App {
     init() {
         // Sets the home clock from the cache before any time label renders.
         _ = HomeStore.shared
+        ShareTip.configure()
         // The store is local only. Supabase is the sync — one source of
         // truth, scoped to the signed-in account's group by RLS. This store
         // used to be mirrored to the user's private iCloud database as well,
@@ -41,19 +42,18 @@ struct CanWeGoApp: App {
 }
 
 /// Sign-in gate: the shared library needs a member session before anything
-/// else. CWG_SKIP_AUTH keeps automated screenshot runs on local demo data.
+/// else. The front door is onboarding's welcome page with Sign in with
+/// Apple on it; `AuthView` only returns for an expired session.
+/// CWG_SKIP_AUTH keeps automated screenshot runs on local demo data.
 private struct RootGate: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var auth = SupabaseAuth.shared
+    @State private var phase: Phase = .checking
+
+    private enum Phase { case checking, onboard, ready }
 
     var body: some View {
-        Group {
-            if auth.signedIn || ProcessInfo.processInfo.environment["CWG_SKIP_AUTH"] != nil {
-                gated
-            } else {
-                AuthView()
-            }
-        }
+        gated
         // Every way out — Settings, an expired session, Apple revoking the
         // app — leaves the sync cursor and the group card as a fresh sign-in
         // expects. The library itself stays; the engine decides its fate
@@ -62,11 +62,98 @@ private struct RootGate: View {
             if !signedIn {
                 SupabaseSync.resetCursor()
                 GroupStore.shared.signedOut()
+                HomeStore.shared.signedOut()
+                phase = .checking
+            } else {
+                cameFromFrontDoor = true
+                Task { await decideOnboarding() }
             }
+        }
+        .task {
+            if auth.signedIn { await decideOnboarding() }
+        }
+        // An invite link. Parked for whichever screen can use it: the
+        // first-run's code page (a new install), or the Join sheet.
+        .onOpenURL { url in
+            guard let code = JoinGate.code(from: url) else { return }
+            JoinGate.pendingCode = code
+            NotificationCenter.default.post(name: .cwgJoinCode, object: code)
         }
     }
 
+    private var skipAuth: Bool {
+        ProcessInfo.processInfo.environment["CWG_SKIP_AUTH"] != nil
+    }
+
+    /// Screenshot runs of first-run: the same preview Settings offers.
+    /// Closing it drops through to the normal app.
+    @State private var onboardingPreview =
+        ProcessInfo.processInfo.environment["CWG_ONBOARDING_PREVIEW"] != nil
+
+    @ViewBuilder
     private var gated: some View {
+        if onboardingPreview {
+            OnboardingView(onFinished: { onboardingPreview = false }, preview: true)
+        } else if skipAuth {
+            ready
+        } else if !auth.signedIn || phase == .onboard {
+            // One branch for "not signed in yet" (including a lapsed
+            // session, which the welcome page explains) and "signed in,
+            // still onboarding", so the view keeps its identity (and its
+            // page) across the sign-in itself.
+            OnboardingView {
+                phase = .ready
+            }
+        } else if phase == .ready {
+            ready
+        } else {
+            ZStack {
+                ThemeFill(color: AppBackground.base)
+                ProgressView()
+            }
+            .appColorScheme()
+        }
+    }
+
+    /// Founders and a second device already have a name and a home on the
+    /// card — land in the library. A new Apple account has neither yet.
+    /// Straight after a front-door sign-in the onboarding view is already
+    /// on screen, so this never drops to the spinner in between.
+    private func decideOnboarding() async {
+        if OnboardingGate.isComplete {
+            phase = .ready
+            await refreshMembership()
+            if !OnboardingGate.isComplete { phase = .onboard }
+            return
+        }
+        phase = phase == .checking && !cameFromFrontDoor ? .checking : .onboard
+        await refreshMembership()
+        if OnboardingGate.isComplete {
+            phase = .ready
+        } else if GroupStore.shared.card == nil, !cameFromFrontDoor {
+            // Launched offline with a session but no cached card (a fresh
+            // install of an existing account): the server wasn't reached,
+            // so nothing is known. The library, empty until sync, is the
+            // honest place; first-run questions here would be wrong ones.
+            // (From the front door the onboarding view handles this
+            // itself, with a retry.)
+            phase = .ready
+        } else {
+            phase = .onboard
+        }
+    }
+
+    /// True when the sign-in just happened on the welcome page, rather
+    /// than the session being restored at launch.
+    @State private var cameFromFrontDoor = false
+
+    private func refreshMembership() async {
+        await GroupStore.shared.refresh()
+        await MembersStore.shared.refresh()
+        await HomeStore.shared.refresh()
+    }
+
+    private var ready: some View {
         ContentView()
             .task {
                 PushRegistrar.register()
@@ -90,9 +177,15 @@ private struct RootGate: View {
 /// other member's saves can ping it. Lives here (not in Support/) because
 /// UIApplication is off-limits inside the share extension.
 final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    /// Asks for the alert permission once (without it iOS delivers pushes
-    /// silently to nowhere), then registers for a device token. Safe to call
-    /// on every foreground — both steps are idempotent.
+    /// Onboarding's "Not now" — don't pop the system prompt the moment
+    /// they land in the library. Settings (or a reinstall) can still ask.
+    private static let declinedPrimeKey = "declinedNotificationPrime"
+
+    static func declinePrime() {
+        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard)
+            .set(true, forKey: declinedPrimeKey)
+    }
+
     static func register() {
         guard SupabaseAuth.shared.signedIn else { return }
         guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
@@ -101,6 +194,9 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
+                let declined = (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard)
+                    .bool(forKey: declinedPrimeKey)
+                if declined { return }
                 _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             }
             await MainActor.run {

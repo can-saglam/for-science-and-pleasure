@@ -85,13 +85,6 @@ final class SupabaseAuth {
 
     // MARK: - Flows
 
-    func signIn(email: String, password: String) async throws {
-        session = try await Self.token(
-            grant: "password",
-            body: ["email": email, "password": password]
-        )
-    }
-
     /// Sign in with Apple: the identity token Apple hands the app is
     /// exchanged at the same token endpoint (`grant_type=id_token`). Supabase
     /// verifies it against Apple's keys and the bundle id, and — because the

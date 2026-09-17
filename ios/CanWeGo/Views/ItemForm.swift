@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 
 /// Field-by-field editor for an item — used for parsed drafts in Capture
 /// and for editing saved items from the detail sheet. Fields carry quiet
@@ -146,6 +147,7 @@ private struct OptionalDateRow: View {
 private struct ThumbnailField: View {
     @Bindable var item: Item
     @State private var pick: PhotosPickerItem?
+    @State private var cameraOpen = false
     @State private var uploading = false
     @State private var note: String?
 
@@ -169,6 +171,19 @@ private struct ThumbnailField: View {
                 .buttonStyle(.plain)
                 .disabled(uploading)
                 .accessibilityLabel(item.imageUrl == nil ? "Add a photo" : "Change photo")
+
+                if UIImagePickerController.isSourceTypeAvailable(.camera), !uploading {
+                    Button {
+                        Haptics.tap()
+                        cameraOpen = true
+                    } label: {
+                        Image(systemName: "camera")
+                            .font(.subheadline)
+                            .foregroundStyle(AppBackground.ink.opacity(0.45))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Take a photo")
+                }
 
                 if item.imageUrl != nil, !uploading {
                     Button {
@@ -195,6 +210,12 @@ private struct ThumbnailField: View {
             guard let item else { return }
             pick = nil
             Task { await use(item) }
+        }
+        .sheet(isPresented: $cameraOpen) {
+            CameraPicker { image in
+                Task { await use(image) }
+            }
+            .ignoresSafeArea()
         }
     }
 
@@ -225,9 +246,16 @@ private struct ThumbnailField: View {
 
     private func use(_ pick: PhotosPickerItem) async {
         guard let data = try? await pick.loadTransferable(type: Data.self),
-              let image = UIImage(data: data),
-              let jpeg = image.compressedForUpload()
+              let image = UIImage(data: data)
         else {
+            note = "Couldn't read that photo."
+            return
+        }
+        await use(image)
+    }
+
+    private func use(_ image: UIImage) async {
+        guard let jpeg = image.compressedForUpload() else {
             note = "Couldn't read that photo."
             return
         }

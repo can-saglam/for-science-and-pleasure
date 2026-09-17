@@ -255,6 +255,17 @@ enum SupabaseSync {
         rejected[item.id.uuidString] == item.updatedAt
     }
 
+    /// Local edits the server hasn't seen yet: what the next push would
+    /// carry. For Settings, so "synced 2 minutes ago" can also say whether
+    /// anything is still waiting to leave this phone.
+    @MainActor
+    static func pendingCount(context: ModelContext) -> Int {
+        guard SupabaseAuth.shared.signedIn,
+              let locals = try? context.fetch(FetchDescriptor<Item>()) else { return 0 }
+        let cursor = lastSyncAt
+        return locals.filter { $0.updatedAt > cursor && !isQuarantined($0) }.count
+    }
+
     private static func quarantineProblem(context: ModelContext) -> SyncProblem? {
         guard !rejected.isEmpty else { return nil }
         let locals = try? context.fetch(FetchDescriptor<Item>())

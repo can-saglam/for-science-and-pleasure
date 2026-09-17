@@ -7,10 +7,31 @@ struct SettingsView: View {
     static var rowBackground: Color { AppBackground.wash(0.08) }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
     @Query private var items: [Item]
     @State private var auth = SupabaseAuth.shared
     @State private var themes = ThemeStore.shared
+    @State private var syncStatus = SyncStatus.shared
+    /// Local edits not yet on the server, for the sync row.
+    @State private var pending = 0
+
+    /// "Synced 2 minutes ago · 3 waiting to send", or the honest gaps.
+    private var syncSummary: String {
+        var parts: [String] = []
+        if let last = syncStatus.lastSyncedAt {
+            parts.append("Synced \(last.formatted(.relative(presentation: .named)))")
+        } else {
+            parts.append("Not synced yet")
+        }
+        if pending > 0 {
+            parts.append("\(pending) waiting to send")
+        } else if syncStatus.lastSyncedAt != nil {
+            parts.append("Everything's up")
+        }
+        return parts.joined(separator: " · ")
+    }
     @State private var showAuth = false
+    @State private var showOnboardingPreview = false
     @State private var confirmSignOut = false
     /// Which maps app gets the directions taps — same key `TransportApp` reads.
     @AppStorage(TransportApp.key, store: UserDefaults(suiteName: SharedInbox.groupID))
@@ -24,6 +45,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroller in
             List {
                 // The wordmark as the hero — settings opens on the brand,
                 // with the version tucked quietly beneath it.
@@ -104,13 +126,36 @@ struct SettingsView: View {
                             row(auth.usesApple ? "Signed in with Apple" : "Signed in",
                                 icon: auth.usesApple ? "apple.logo" : "person.fill")
                         }
-                        if let synced = SyncStatus.shared.lastSyncedAt {
+                        // Sync, honestly: when it last worked, what's still
+                        // waiting on this phone, whether there's a route out,
+                        // and a way to try now.
+                        Button {
+                            Haptics.tap()
+                            Task {
+                                await SupabaseSync.sync(context: context)
+                                pending = SupabaseSync.pendingCount(context: context)
+                                if SyncStatus.shared.problem == nil { Haptics.success() }
+                            }
+                        } label: {
                             LabeledContent {
-                                Text(synced.formatted(.relative(presentation: .named)))
+                                if syncStatus.syncing {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Text("Sync now")
+                                        .font(.subheadline)
+                                        .foregroundStyle(themes.current.ink)
+                                }
                             } label: {
-                                row("Last synced", icon: "arrow.triangle.2.circlepath")
+                                SettingsRow(
+                                    title: syncStatus.online ? "Sync" : "Sync (offline)",
+                                    icon: "arrow.triangle.2.circlepath",
+                                    subtitle: syncSummary
+                                )
                             }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(syncStatus.syncing)
+                        .accessibilityLabel("Sync now. \(syncSummary)")
                         if let problem = SyncStatus.shared.problem {
                             VStack(alignment: .leading, spacing: 6) {
                                 row("Sync issue", icon: "exclamationmark.triangle.fill")
@@ -151,6 +196,15 @@ struct SettingsView: View {
                         } message: {
                             Text("You can sign back in from this screen. Nothing saved on this phone is deleted.")
                         }
+
+                        #if !APP_EXTENSION
+                        Button {
+                            Haptics.tap()
+                            showOnboardingPreview = true
+                        } label: {
+                            row("Preview first-run", icon: "list.bullet.clipboard")
+                        }
+                        #endif
                     } else {
                         Button {
                             Haptics.tap()
@@ -161,10 +215,10 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Account")
+                    Text("Account").id("account")
                 } footer: {
                     Text(auth.signedIn
-                        ? "Your shared library syncs with the web app and each other\u{2019}s phones whenever the app is open."
+                        ? "Your shared library syncs with the web app and each other\u{2019}s phones whenever the app is open. Preview first-run walks the new-account screens without saving."
                         : "Sign in to sync your shared library across phones.")
                         .font(.footnote)
                 }
@@ -189,10 +243,26 @@ struct SettingsView: View {
                 if ProcessInfo.processInfo.environment["CWG_JOIN"] != nil {
                     groupUI.showJoin = true
                 }
+                // CWG_SCROLL=account: screenshot runs photograph a section
+                // below the fold.
+                if let anchor = ProcessInfo.processInfo.environment["CWG_SCROLL"] {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    scroller.scrollTo(anchor, anchor: .top)
+                }
+                pending = SupabaseSync.pendingCount(context: context)
+            }
+            }
+            .onChange(of: syncStatus.syncing) { _, now in
+                if !now { pending = SupabaseSync.pendingCount(context: context) }
             }
             .fullScreenCover(isPresented: $showAuth) {
                 AuthView()
             }
+            #if !APP_EXTENSION
+            .fullScreenCover(isPresented: $showOnboardingPreview) {
+                OnboardingView(onFinished: { showOnboardingPreview = false }, preview: true)
+            }
+            #endif
             .onChange(of: auth.signedIn) { _, on in
                 if on { showAuth = false }
             }
@@ -251,13 +321,7 @@ struct SettingsView: View {
     /// sheet closes, as a catch-up if the immediate call was skipped (the
     /// system refuses icon changes while the app isn't active).
     private func syncAppIcon() {
-        #if !APP_EXTENSION
-        let wanted = themes.current.iconName
-        guard UIApplication.shared.supportsAlternateIcons,
-              UIApplication.shared.alternateIconName != wanted
-        else { return }
-        UIApplication.shared.setAlternateIconName(wanted)
-        #endif
+        themes.syncAppIcon()
     }
 
     /// Same shape as the web export: grouped, human-readable Markdown.

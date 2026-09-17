@@ -96,6 +96,32 @@ final class MembersStore {
         return name
     }
 
+    /// Writes the signed-in user's display name, overwriting whatever is
+    /// there. Onboarding uses this so a typed name wins over Apple's
+    /// one-time suggestion; `claimDisplayName` stays fill-only.
+    /// Returns nil on success, otherwise a message for the person.
+    func setDisplayName(_ proposed: String) async -> String? {
+        let offline = "Couldn\u{2019}t save your name. Check the connection and try again."
+        let name = proposed.trimmingCharacters(in: .whitespacesAndNewlines).cappedScalars(24)
+        guard !name.isEmpty else { return "Type a name first." }
+        guard let uid = SupabaseAuth.shared.userId,
+              let token = try? await SupabaseAuth.shared.validToken() else { return offline }
+        let key = uid.uuidString.lowercased()
+        var write = URLRequest(url: SupabaseAuth.baseURL.appending(path: "rest/v1/profiles")
+            .appending(queryItems: [.init(name: "on_conflict", value: "user_id")]))
+        write.httpMethod = "POST"
+        write.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
+        write.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        write.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        write.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        write.httpBody = try? JSONSerialization.data(withJSONObject: ["user_id": key, "display_name": name])
+        guard let (_, response) = try? await URLSession.shared.data(for: write),
+              (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return offline }
+        namesByUser[key] = name
+        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
+        return nil
+    }
+
     /// RLS scopes the table to the caller's group; a failure just leaves
     /// the cached (or derived) names in place.
     private func fetch<T: Decodable>(table: String, select: String) async -> [T]? {

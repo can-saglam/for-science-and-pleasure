@@ -47,7 +47,7 @@ enum DuplicateFinder {
         let who = mine ? "You" : (MembersStore.shared.saverName(for: existing) ?? "Someone")
         let when = existing.createdAt.formatted(.relative(presentation: .named))
         var line = "\(who) saved this \(when)."
-        if existing.isDone { line += " It's in We Did Go." }
+        if existing.isDone { line += " It's in \(Voice.didGoSection)." }
         return line
     }
 }

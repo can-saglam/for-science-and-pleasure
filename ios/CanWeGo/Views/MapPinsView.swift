@@ -48,6 +48,10 @@ struct MapPinsView: View {
         )
     }
 
+    /// Same leading inset as `PlusButtonFrame.ghost` uses on the trailing
+    /// side, so the note lines up with the tab bar's left edge.
+    private static let barInset: CGFloat = 21
+
     /// The opening frame is the city, not the region: ~40 km covers Greater
     /// London edge to edge (or any metro), while a sculpture park on the
     /// coast an hour away stays on the map but doesn't drag the first view
@@ -221,26 +225,33 @@ struct MapPinsView: View {
                 .allowsHitTesting(false)
                 .ignoresSafeArea()
         }
-        .overlay(alignment: .bottomLeading) {
-            let missing = items.count - pinned.count
-            if hiddenUpcoming > 0 || missing > 0 || locations.denied {
-                VStack(alignment: .leading, spacing: 6) {
-                    if hiddenUpcoming > 0 {
-                        Text("\(hiddenUpcoming) coming up, not on the map")
+        // The map draws under the tab bar, so a plain bottomLeading
+        // overlay lands behind Events. Sit it 12 pt above the bar (the
+        // same gap locate-me uses above Add) and 21 pt in, matching
+        // the bar's own leading inset.
+        .overlay {
+            GeometryReader { geo in
+                let plus = PlusButtonFrame.shared.best
+                let show = hiddenUpcoming > 0 || locations.denied
+                if show, plus != .zero {
+                    let local = geo.frame(in: .global)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if hiddenUpcoming > 0 {
+                            Text("Showing currently open events")
+                        }
+                        if locations.denied {
+                            Text("Location is off")
+                        }
                     }
-                    if missing > 0 {
-                        Text("\(missing) without a location")
-                    }
-                    if locations.denied {
-                        Text("Location is off")
-                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+                    .padding(.leading, Self.barInset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.bottom, max(local.maxY - plus.minY + 12, 0))
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .glassEffect(.regular, in: .capsule)
-                .padding(12)
             }
         }
         // Locate-me docks directly above the add button, at its exact size —

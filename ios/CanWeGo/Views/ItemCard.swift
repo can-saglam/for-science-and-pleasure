@@ -92,7 +92,23 @@ struct ItemCard: View {
         if item.isEvent && item.startsOn == nil && item.endsOn == nil {
             return ["needs a date"]
         }
+        if let away = awayFromHome { return [away] }
         return []
+    }
+
+    /// A save somewhere else entirely (a trip, a gig abroad): say so, in
+    /// terms of home, so "Happening Friday" is read with the right city in
+    /// mind. Only when a home is set; the London fallback isn't a home.
+    private var awayFromHome: String? {
+        guard HomeStore.shared.isSet,
+              let home = HomeStore.shared.home.coordinate,
+              let coord = item.coordinate
+        else { return nil }
+        let km = CLLocation(latitude: home.latitude, longitude: home.longitude)
+            .distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude)) / 1000
+        guard km >= 150 else { return nil }
+        let rounded = km < 1000 ? Int((km / 10).rounded() * 10) : Int((km / 100).rounded() * 100)
+        return "\(rounded.formatted()) km from \(HomeStore.shared.home.locality)"
     }
 
     private var radius: CGFloat { compact ? 14 : 18 }
@@ -114,7 +130,7 @@ struct ItemCard: View {
         VStack(alignment: .leading, spacing: compact ? 3 : 5) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(item.title)
-                    .font(compact ? .subheadline.weight(.medium) : .body.weight(.semibold))
+                    .font(compact ? .displaySmall(18, relativeTo: .subheadline) : .displaySmall(22, relativeTo: .body))
                     .multilineTextAlignment(.leading)
                     // Big type wraps rather than clips: a truncated title is
                     // a missing title to someone reading at that size.
@@ -171,7 +187,7 @@ struct ItemCard: View {
         var parts = [item.title]
         if !subtitle.isEmpty { parts.append(subtitle) }
         if let label = slotLabel { parts.append(label) }
-        if item.isDone { parts.append("We did go") }
+        if item.isDone { parts.append(Voice.didGo) }
         else if item.isMissed { parts.append("Missed") }
         parts.append(contentsOf: hints)
         return parts.joined(separator: ". ")
@@ -376,7 +392,7 @@ struct ItemCardRow: View {
         // The swipe gestures, spoken: VoiceOver's rotor gets the same three
         // actions a sighted thumb has.
         .accessibilityHint("Opens the details")
-        .accessibilityAction(named: item.isDone ? "Put back" : "We did go") {
+        .accessibilityAction(named: item.isDone ? "Put back" : Voice.didGo) {
             if item.isDone {
                 item.putBack()
             } else {
@@ -404,7 +420,7 @@ struct ItemCardRow: View {
                     item.markDone()
                     UndoBin.shared.stashDone(item)
                 } label: {
-                    Label("We did go!", systemImage: "checkmark")
+                    Label(Voice.didGoBang, systemImage: "checkmark")
                 }
                 .tint(AppBackground.swipeDone)
             }
@@ -431,7 +447,7 @@ struct ItemCardRow: View {
                     item.markDone()
                     UndoBin.shared.stashDone(item)
                 } label: {
-                    Label("We did go!", systemImage: "checkmark")
+                    Label(Voice.didGoBang, systemImage: "checkmark")
                 }
             }
             if let maps = item.directionsURL {

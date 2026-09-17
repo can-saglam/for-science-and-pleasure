@@ -44,7 +44,7 @@ struct ShareView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Mirrors the in-app capture flow's preview title.
-            .navigationTitle(isPreview ? "Looks right?" : "Can We Go?")
+            .sheetTitle(isPreview ? "Looks right?" : "Can We Go?")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -107,7 +107,7 @@ struct ShareView: View {
                let day = (draft.endsOn ?? draft.startsOn).flatMap({ DayString.text($0) }) {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(
-                        "This happened on \(day). Add it to We Did Go instead?",
+                        "This happened on \(day). Add it to \(Voice.didGoSection) instead?",
                         systemImage: "checkmark.seal"
                     )
                     .font(.footnote.weight(.medium))
@@ -117,7 +117,7 @@ struct ShareView: View {
                         draft.status = Item.Status.done
                         save(draft)
                     } label: {
-                        Label("We did go!", systemImage: "checkmark.seal.fill")
+                        Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                     }

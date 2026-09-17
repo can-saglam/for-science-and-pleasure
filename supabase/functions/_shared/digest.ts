@@ -39,7 +39,7 @@ function fmtDay(date: string): string {
 }
 
 function line(prefix: string, item: DigestItem): string {
-  return `${prefix}: ${item.title}${item.venue ? ` — ${item.venue}` : ""}`;
+  return `${prefix}: ${item.title}${item.venue ? ` at ${item.venue}` : ""}`;
 }
 
 /**
@@ -86,7 +86,7 @@ export function buildDigest(
   ];
 
   if (lines.length === 0) {
-    return "A quiet weekend on paper — open the app for what's still on.";
+    return "A quiet weekend on paper. Open the app for what's still on.";
   }
   if (lines.length > 8) {
     return [...lines.slice(0, 7), `+${lines.length - 7} more in the app`].join("\n");

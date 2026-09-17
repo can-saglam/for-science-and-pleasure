@@ -10,9 +10,19 @@ import SwiftData
 enum ThumbnailBackfill {
     /// Pages that yielded nothing (bot walls, no og:image) aren't retried
     /// on every foreground — that was a fresh round of doomed requests each
-    /// time the app woke. A week gives sites a fair second chance.
+    /// time the app woke. Retries back off: an hour after the first miss
+    /// (many pages set their picture minutes after going live, or were
+    /// simply slow), a day after the second, a week from then on.
     private static let attemptsKey = "thumbnailBackfillAttempts"
-    private static let retryAfter: TimeInterval = 7 * 24 * 3600
+    private static let attemptCountsKey = "thumbnailBackfillAttemptCounts"
+
+    private static func retryAfter(misses: Int) -> TimeInterval {
+        switch misses {
+        case ..<2: return 3600
+        case 2: return 24 * 3600
+        default: return 7 * 24 * 3600
+        }
+    }
 
     @MainActor
     static func run(context: ModelContext) async {
@@ -24,9 +34,11 @@ enum ThumbnailBackfill {
 
         let defaults = UserDefaults.standard
         var attempts = defaults.dictionary(forKey: attemptsKey) as? [String: Date] ?? [:]
+        var counts = defaults.dictionary(forKey: attemptCountsKey) as? [String: Int] ?? [:]
         // Entries for items that got an image (or got deleted) fall away.
         let liveURLs = Set(missing.compactMap(\.url))
         attempts = attempts.filter { liveURLs.contains($0.key) }
+        counts = counts.filter { liveURLs.contains($0.key) }
 
         var found: [(id: UUID, image: String)] = []
         for item in missing {
@@ -37,20 +49,24 @@ enum ThumbnailBackfill {
                   url.scheme?.hasPrefix("http") == true,
                   !isMapsLink(url), !SocialPrefetch.isSocial(url)
             else { continue }
-            if let tried = attempts[raw], Date.now.timeIntervalSince(tried) < retryAfter {
+            let misses = counts[raw] ?? 0
+            if let tried = attempts[raw], Date.now.timeIntervalSince(tried) < retryAfter(misses: misses) {
                 continue
             }
             // The page still pointing at the dead picture counts as nothing
-            // found — try again next week, not next foreground.
-            if let image = await ogImage(at: url), image != item.imageUrl {
+            // found — back off, rather than try again next foreground.
+            if let image = await pageImage(at: url), image != item.imageUrl {
                 item.imageUrl = image
                 found.append((item.id, image))
                 attempts.removeValue(forKey: raw)
+                counts.removeValue(forKey: raw)
             } else {
                 attempts[raw] = .now
+                counts[raw] = misses + 1
             }
         }
         defaults.set(attempts, forKey: attemptsKey)
+        defaults.set(counts, forKey: attemptCountsKey)
         guard !found.isEmpty else { return }
         try? context.save()
         // Reach the shared table as a column patch, not a full-row push:
@@ -81,7 +97,11 @@ enum ThumbnailBackfill {
                   options: [.regularExpression, .caseInsensitive]) != nil
     }
 
-    private static func ogImage(at url: URL) async -> String? {
+    /// The page's picture, by the places sites put one: Open Graph and
+    /// Twitter cards first, then schema.org JSON-LD (most ticketing and
+    /// venue pages carry an Event/Place with an `image`), then the old
+    /// `<link rel="image_src">`.
+    private static func pageImage(at url: URL) async -> String? {
         var request = URLRequest(url: url, timeoutInterval: 12)
         // Plenty of venue sites serve bots a stripped page; look like Safari.
         request.setValue(
@@ -97,17 +117,23 @@ enum ThumbnailBackfill {
             ?? String(data: head, encoding: .isoLatin1)
         else { return nil }
 
-        // og:image / twitter:image, tolerant of attribute order.
+        // og:image / twitter:image, tolerant of attribute order; then
+        // JSON-LD `"image": "…"` or `"image": ["…"]` / `{"url": "…"}`;
+        // then the legacy link tag.
         let patterns = [
             #"<meta[^>]+(?:property|name)=["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["'][^>]+content=["']([^"']+)["']"#,
             #"<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["']"#,
+            #""image"\s*:\s*\[?\s*(?:\{[^}]*?"url"\s*:\s*)?"(https?:[^"]+)""#,
+            #"<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']"#,
         ]
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
                   let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
                   let range = Range(match.range(at: 1), in: html)
             else { continue }
-            let raw = String(html[range]).replacingOccurrences(of: "&amp;", with: "&")
+            let raw = String(html[range])
+                .replacingOccurrences(of: "&amp;", with: "&")
+                .replacingOccurrences(of: "\\/", with: "/")
             // Relative paths resolve against the page they came from.
             if let absolute = URL(string: raw, relativeTo: url)?.absoluteString,
                !isMapsBrandedImage(absolute) {

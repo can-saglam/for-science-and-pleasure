@@ -51,10 +51,10 @@ Deno.serve(async (req) => {
   const events: string[] = [];
   for (const i of items ?? []) {
     if (i.kind === "event" && i.ends_on) {
-      events.push(allDay(`close-${i.id}`, i.ends_on, `Last day — ${i.title}`, i.url));
+      events.push(allDay(`close-${i.id}`, i.ends_on, `Last day: ${i.title}`, i.url));
     }
     if (i.kind === "event" && i.starts_on && i.starts_on !== i.ends_on) {
-      events.push(allDay(`open-${i.id}`, i.starts_on, `Opens — ${i.title}`, i.url));
+      events.push(allDay(`open-${i.id}`, i.starts_on, `Opens: ${i.title}`, i.url));
     }
   }
 

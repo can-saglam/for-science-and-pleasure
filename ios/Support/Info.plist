@@ -14,7 +14,7 @@
 		<string>remote-notification</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Shows where you are on the map of your saved places.</string>
+	<string>Finds your home city so dates and the map match this library, and shows you on the map of your saved places.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Snap a poster or flyer to save it straight to your list.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
@@ -22,6 +22,11 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Post-TRIAL-Medium.otf</string>
+		<string>PPNeueGstaad-Bold.otf</string>
+		<string>PPNeueGstaad-CondensedRegular.otf</string>
+		<string>PPNeueGstaad-CondensedBold.otf</string>
+		<string>PPNeueGstaad-CompressedRegular.otf</string>
+		<string>PPNeueGstaad-CompressedBold.otf</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>

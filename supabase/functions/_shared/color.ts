@@ -292,6 +292,64 @@ export async function heroImageFromUrl(pageUrl: string): Promise<string | null> 
   }
 }
 
+/// Last-resort cover for a named venue or festival when the page itself
+/// had no picture. Wikipedia's summary endpoint is free and has decent
+/// coverage for museums, festivals and well-known rooms — not for a
+/// neighbourhood restaurant. Callers must only try a specific name.
+const WIKI_UA = "CanWeGo/1.0 (https://canwego.app; thumbnail fallback)";
+
+export function wikipediaQueries(card: { title?: string | null; venue?: string | null }): string[] {
+  const out: string[] = [];
+  const add = (raw?: string | null) => {
+    const q = (raw ?? "").replace(/\s+/g, " ").trim();
+    if (q.length < 8) return;
+    if (/^(new item|untitled)$/i.test(q)) return;
+    if (!out.some((x) => x.toLowerCase() === q.toLowerCase())) out.push(q);
+  };
+  add(card.venue);
+  add(card.title);
+  return out.slice(0, 2);
+}
+
+/// True when query and Wikipedia title share a real word — stops "Kin"
+/// matching a random disambiguation hit, and a mistyped venue matching
+/// the first search-ish summary.
+export function wikipediaTitlesOverlap(query: string, title: string): boolean {
+  const tokens = (s: string) =>
+    s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 4);
+  const have = new Set(tokens(query));
+  return tokens(title).some((t) => have.has(t));
+}
+
+export function wikipediaThumbnailFromSummary(json: unknown, query: string): string | null {
+  if (!json || typeof json !== "object") return null;
+  const page = json as Record<string, unknown>;
+  if (page.type === "disambiguation") return null;
+  const title = typeof page.title === "string" ? page.title : "";
+  if (!wikipediaTitlesOverlap(query, title)) return null;
+  const original = page.originalimage as { source?: string } | undefined;
+  const thumb = page.thumbnail as { source?: string } | undefined;
+  const src = original?.source ?? thumb?.source;
+  return typeof src === "string" && /^https:\/\//i.test(src) ? src : null;
+}
+
+export async function wikipediaImage(query: string): Promise<string | null> {
+  const path = encodeURIComponent(query.replace(/ /g, "_"));
+  try {
+    const res = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${path}`,
+      {
+        signal: AbortSignal.timeout(8_000),
+        headers: { "User-Agent": WIKI_UA, Accept: "application/json" },
+      },
+    );
+    if (!res.ok) return null;
+    return wikipediaThumbnailFromSummary(await res.json(), query);
+  } catch {
+    return null;
+  }
+}
+
 export async function colorFromPageUrl(pageUrl: string): Promise<string | null> {
   try {
     const res = await fetch(pageUrl, {

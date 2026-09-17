@@ -12,8 +12,13 @@ struct JoinSheet: View {
     @State private var group = GroupStore.shared
     @FocusState private var focused: Bool
 
-    @State private var draft = ""
+    @State private var draft: String
     @State private var preview: GroupStore.JoinPreview?
+
+    /// A code from an invite link arrives typed and looked up.
+    init(initialCode: String? = nil) {
+        _draft = State(initialValue: initialCode.map(Self.formatTyping) ?? "")
+    }
     @State private var lookingUp = false
     @State private var joining = false
     @State private var confirmLeave = false
@@ -50,7 +55,7 @@ struct JoinSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .appBackground(AppBackground.sheet)
-            .navigationTitle("Join a group")
+            .sheetTitle("Join a group")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -68,8 +73,10 @@ struct JoinSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .appColorScheme()
-        .onAppear { focused = true }
-        .task { await refreshClipboardOffer() }
+        .onAppear { focused = code == nil }
+        .task {
+            if code != nil { await lookup() } else { await refreshClipboardOffer() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refreshClipboardOffer() } }
         }
@@ -249,7 +256,7 @@ struct JoinSheet: View {
 
     private func lookup() async {
         guard let code else {
-            note = "Invite codes are six characters — letters and numbers, no I, O, 1 or 0."
+            note = "Invite codes are six characters: letters and numbers, no I, O, 1 or 0."
             return
         }
         lookingUp = true
@@ -271,7 +278,7 @@ struct JoinSheet: View {
         defer { joining = false }
         do {
             guard await SupabaseSync.flush(context: context) else {
-                throw MembershipError(message: "Couldn\u{2019}t sync your latest edits — try again once you\u{2019}re back online.")
+                throw MembershipError(message: "Couldn\u{2019}t sync your latest edits. Try again once you\u{2019}re back online.")
             }
             _ = try await group.join(code: code, keepCopy: keepCopy)
             _ = await SupabaseSync.replaceLibrary(context: context)
@@ -304,7 +311,8 @@ struct JoinSheet: View {
     }
 
     /// Caps at six code characters and drops the hyphen in after three.
-    private static func formatTyping(_ raw: String) -> String {
+    /// Shared with onboarding's inline code field.
+    static func formatTyping(_ raw: String) -> String {
         let chars = raw.uppercased().filter { GroupStore.codeAlphabet.contains($0) }
         let clipped = String(chars.prefix(6))
         if clipped.count > 3 {

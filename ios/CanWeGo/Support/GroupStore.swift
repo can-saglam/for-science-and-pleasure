@@ -203,15 +203,15 @@ final class GroupStore {
             let who = inviter.map { "ask \($0) for a new one" } ?? "ask for a new one"
             switch status {
             case "ok":
-                return "You\u{2019}ll share one library — everyone sees and edits everything."
+                return "You\u{2019}ll share one library. Everyone sees and edits everything."
             case "own":
                 return "That\u{2019}s your own group\u{2019}s code."
             case "unknown":
                 return "That code doesn\u{2019}t match any invite."
             case "expired":
-                return "This invite has expired — \(who)."
+                return "This invite has expired. Please \(who)."
             case "revoked":
-                return "This invite was cancelled — \(who)."
+                return "This invite was cancelled. Please \(who)."
             case "full":
                 return "This group already has four people, the most a group can hold."
             case "plus_required":
@@ -267,6 +267,15 @@ final class GroupStore {
         card = nil
         loaded = false
         Self.defaults.removeObject(forKey: Self.cacheKey)
+    }
+
+    /// Onboarding (and Settings later) just wrote home — keep the card
+    /// in step so the first-run gate sees it without another round-trip.
+    func homeSaved(locality: String, country: String?) {
+        guard var fresh = card else { return }
+        fresh.homeLocality = locality
+        fresh.homeCountry = country
+        store(fresh)
     }
 
     // MARK: - Plumbing
@@ -327,7 +336,7 @@ final class GroupStore {
             // 401: the token was refused. 4xx/5xx otherwise: ours or theirs,
             // never something the person can fix by reading a code.
             throw MembershipError(message: status == 401
-                ? "Your session needs a refresh — sign out and back in."
+                ? "Your session needs a refresh. Sign out and back in."
                 : "Couldn't reach the group service. Please try again.")
         }
         let fields = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -342,11 +351,11 @@ final class GroupStore {
         switch code {
         case "plus_required": return "Free groups have two seats. Plus, coming soon, opens two more."
         case "full": return "This group already has four people, the most a group can hold."
-        case "already_solo": return "You\u{2019}re the only one left in this group — it\u{2019}s already yours, so there\u{2019}s nothing to leave."
+        case "already_solo": return "You\u{2019}re the only one left in this group. It\u{2019}s already yours, so there\u{2019}s nothing to leave."
         case "no_group": return "Couldn\u{2019}t find your group. Try again in a moment."
         case "unknown": return "That code doesn\u{2019}t match any invite."
-        case "expired": return "This invite has expired — ask for a new one."
-        case "revoked": return "This invite was cancelled — ask for a new one."
+        case "expired": return "This invite has expired. Ask for a new one."
+        case "revoked": return "This invite was cancelled. Ask for a new one."
         case "own": return "That\u{2019}s your own group\u{2019}s code."
         default: return "Something went wrong. Please try again."
         }

@@ -39,9 +39,14 @@ export async function sendApnsAlert(
   body: string,
   title = "Can We Go?",
   data: Record<string, unknown> = {},
+  threadId?: string,
 ): Promise<ApnsResult> {
   const payload = JSON.stringify({
-    aps: { alert: { title, body }, sound: "default" },
+    aps: {
+      alert: { title, body },
+      sound: "default",
+      ...(threadId ? { "thread-id": threadId } : {}),
+    },
     ...data,
   });
   const auth = await providerToken();

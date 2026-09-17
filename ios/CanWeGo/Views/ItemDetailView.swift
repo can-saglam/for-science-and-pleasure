@@ -289,7 +289,7 @@ struct ItemDetailView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Looks the original link up again and fills the fields above. Your notes stay put — nothing saves until Done.")
+                Text("Looks the original link up again and fills the fields above. Your notes stay put, and nothing saves until Done.")
                     .font(.footnote)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -318,7 +318,7 @@ struct ItemDetailView: View {
             let card = try await ParseClient.parse(text: text, imageJPEG: nil)
             apply(card, to: scratch)
             Haptics.success()
-            fetchNote = "Updated from the latest page — check the fields, then tap Done."
+            fetchNote = "Updated from the latest page. Check the fields, then tap Done."
         } catch {
             fetchNote = SyncProblem(error).message
         }
@@ -409,7 +409,7 @@ struct ItemDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.title)
-                .font(.title2.weight(.semibold))
+                .font(.display(24, relativeTo: .title2))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 if let label = item.timeLabel {
@@ -540,7 +540,7 @@ struct ItemDetailView: View {
                         // For something that's already over, the plain label
                         // reads odd — soften it to an after-the-fact note.
                         Label(
-                            done ? "Done" : (item.isMissed ? "We did go after all" : "We did go!"),
+                            done ? "Done" : (item.isMissed ? Voice.didGoAfterAll : Voice.didGoBang),
                             systemImage: "checkmark"
                         )
                         .font(.subheadline.weight(.semibold))

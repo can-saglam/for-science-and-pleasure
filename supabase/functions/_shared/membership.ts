@@ -37,5 +37,5 @@ export const TAKES_KEEP_COPY: ReadonlySet<Action> = new Set(["join", "leave"]);
 export function inviteMessage(code: string, inviter: string | null, storeURL: string | null): string {
   const who = inviter ? `Join ${inviter} on Can We Go?` : "Join me on Can We Go?";
   const link = storeURL ? ` ${storeURL}` : "";
-  return `${who} — code ${formatCode(code)}${link}`;
+  return `${who} Your code is ${formatCode(code)}${link}`;
 }

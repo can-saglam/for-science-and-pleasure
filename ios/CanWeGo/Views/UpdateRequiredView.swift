@@ -24,11 +24,11 @@ struct UpdateRequiredView: View {
                     .padding(.bottom, 20)
 
                 Text("Time for an update")
-                    .font(.post(26, relativeTo: .title))
+                    .font(.display(26, relativeTo: .title))
                     .foregroundStyle(AppBackground.ink)
                     .padding(.bottom, 10)
 
-                Text("This version of Can We Go? can't keep your list in step any more. Update to carry on where you left off — nothing you've saved is lost.")
+                Text("This version of Can We Go? can't keep your list in step any more. Update to carry on where you left off. Nothing you've saved is lost.")
                     .font(.subheadline)
                     .foregroundStyle(AppBackground.ink.opacity(0.7))
                     .multilineTextAlignment(.center)

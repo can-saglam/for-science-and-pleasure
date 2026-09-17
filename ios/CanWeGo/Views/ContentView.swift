@@ -102,6 +102,8 @@ struct ContentView: View {
     @State private var deepLinked: Item?
     /// A notification/widget/Spotlight tap on a save that no longer exists.
     @State private var goneItem = false
+    /// An invite code that arrived by link; presents the Join sheet.
+    @State private var joinCode: String?
     /// The Events tab wears today's date; refreshed when the app comes
     /// forward so an overnight leave doesn't leave yesterday on the bar.
     @State private var dayOfMonth = Calendar.current.component(.day, from: Date())
@@ -221,6 +223,21 @@ struct ContentView: View {
             else { return }
             openItem(id)
         }
+        // An invite link while signed in: straight to the Join sheet with
+        // the code filled in (RootGate parks it; a cold start reads it
+        // from there once this view exists).
+        .onReceive(NotificationCenter.default.publisher(for: .cwgJoinCode)) { note in
+            if let code = note.object as? String { joinCode = code }
+        }
+        .task {
+            if let code = JoinGate.pendingCode { joinCode = code }
+        }
+        .sheet(isPresented: Binding(
+            get: { joinCode != nil },
+            set: { if !$0 { joinCode = nil; JoinGate.pendingCode = nil } }
+        )) {
+            JoinSheet(initialCode: joinCode)
+        }
         // Five-second Undo after a save, a swipe-delete or "We did go!".
         .overlay(alignment: .bottom) {
             VStack(spacing: 10) {
@@ -235,7 +252,7 @@ struct ContentView: View {
                     }
                 }
                 if let done = undoBin.done {
-                    undoToast("We did go to \u{201c}\(done.title)\u{201d}!") {
+                    undoToast(Voice.didGoTo(done.title)) {
                         undoBin.undoDone(in: context)
                     }
                 }
@@ -254,7 +271,7 @@ struct ContentView: View {
             if id != nil { announceUndo("Deleted. Undo available.") }
         }
         .onChange(of: undoBin.done?.id) { _, id in
-            if id != nil { announceUndo("We did go. Undo available.") }
+            if id != nil { announceUndo("\(Voice.didGo). Undo available.") }
         }
         // First sign-in on a fresh install: don't present empty tabs while
         // the shared library is still on its way down — and if that first
@@ -317,6 +334,8 @@ struct ContentView: View {
             if !SupabaseAuth.shared.signedIn {
                 SeedImporter.runIfNeeded(context: context)
             }
+            // One "opened" per launch; the share tip waits for the second.
+            await ShareTip.appOpened.donate()
         }
         // Sweep anything the share extension parked in the App Group inbox,
         // then refresh the shared URL index.
@@ -342,7 +361,11 @@ struct ContentView: View {
                 context.insert(item)
                 drained.append(item)
             }
-            if !pending.isEmpty { try? context.save() }
+            if !pending.isEmpty {
+                try? context.save()
+                // They've found the share sheet; no need to point at it.
+                ShareTip.hasShared = true
+            }
             if !drained.isEmpty {
                 // Share-sheet saves ping the other member once they land.
                 Task {

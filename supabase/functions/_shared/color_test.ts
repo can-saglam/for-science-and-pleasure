@@ -1,5 +1,10 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { heroImageFromHtml, largestImageCandidate } from "./color.ts";
+import {
+  heroImageFromHtml,
+  largestImageCandidate,
+  wikipediaQueries,
+  wikipediaThumbnailFromSummary,
+} from "./color.ts";
 
 const PAGE = "https://example.org/exhibition/show/";
 
@@ -100,5 +105,34 @@ Deno.test("inline style width and ?width= query still work", () => {
   assertEquals(
     largestImageCandidate(`<img src="/cdn/p.jpg?width=1280&q=80">`),
     { src: "/cdn/p.jpg?width=1280&q=80", width: 1280 },
+  );
+});
+
+Deno.test("Wikipedia queries skip short and placeholder names", () => {
+  assertEquals(wikipediaQueries({ title: "Kin", venue: null }), []);
+  assertEquals(wikipediaQueries({ title: "New item", venue: "X" }), []);
+  assertEquals(
+    wikipediaQueries({ title: "Nick Cave at All Points East", venue: "All Points East" }),
+    ["All Points East", "Nick Cave at All Points East"],
+  );
+});
+
+Deno.test("Wikipedia summary: keep a matching original image, drop disambiguation", () => {
+  const page = {
+    type: "standard",
+    title: "All Points East",
+    originalimage: { source: "https://upload.wikimedia.org/wiki/ape.jpg" },
+  };
+  assertEquals(
+    wikipediaThumbnailFromSummary(page, "All Points East"),
+    "https://upload.wikimedia.org/wiki/ape.jpg",
+  );
+  assertEquals(
+    wikipediaThumbnailFromSummary({ ...page, type: "disambiguation" }, "All Points East"),
+    null,
+  );
+  assertEquals(
+    wikipediaThumbnailFromSummary(page, "Somewhere Else Festival"),
+    null,
   );
 });

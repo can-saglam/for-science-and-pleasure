@@ -23,12 +23,12 @@ export async function notifyPartnersOfSave(
   const name = await displayName(admin, save.adderUserId, save.adderEmail);
   const tokens = await groupTokens(admin, save.groupId, save.adderUserId);
 
-  const body = `${name} added: ${save.title}${save.venue ? ` — ${save.venue}` : ""}`;
+  const body = `${name} added ${save.title}${save.venue ? ` at ${save.venue}` : ""}`;
   let sent = 0;
   let failed = 0;
   for (const token of tokens) {
     try {
-      const result = await sendApnsAlert(token, body);
+      const result = await sendApnsAlert(token, body, "Can We Go?", {}, save.groupId);
       if (result === "sent") {
         sent++;
       } else if (result === "gone") {

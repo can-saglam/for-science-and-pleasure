@@ -78,7 +78,7 @@ enum AppleSignIn {
                 // signed in (the system sheet has already said so).
                 return "Sign in to your Apple Account in Settings first, then try again."
             case .notInteractive:
-                return "Sign in with Apple needs the screen — please try again."
+                return "Sign in with Apple needs the screen. Please try again."
             default:
                 return "Apple couldn't complete the sign-in. Please try again."
             }
@@ -92,6 +92,14 @@ enum AppleSignIn {
     /// `.revoked` and `.notFound` sign out — `.transferred` and any lookup
     /// failure (offline) leave the session alone.
     static func checkCredentialState() async {
+        #if targetEnvironment(simulator)
+        // The Simulator's credential lookup returns `.notFound` even for a
+        // fresh, valid Sign in with Apple. Email sessions never hit this
+        // (no Apple user id); Apple-only on the sim used to bounce straight
+        // back to the sign-in screen. Trust the session here — a real
+        // phone still checks below.
+        return
+        #else
         guard let userID = SupabaseAuth.appleUserID else { return }
         let state: ASAuthorizationAppleIDProvider.CredentialState
         do {
@@ -102,5 +110,6 @@ enum AppleSignIn {
         if state == .revoked || state == .notFound {
             SupabaseAuth.shared.signOut()
         }
+        #endif
     }
 }

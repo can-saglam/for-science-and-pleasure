@@ -487,6 +487,30 @@ than a hope.
   Connect. Enrolment applies from the next fiscal month, so do it early.
 - Ops: production APNs key check (Supabase is already on the paid tier from
   Phase 0).
+- **Venue photos for Maps pins (Google Places fallback)**. A Google Maps
+  share never fetches the Maps page (JS-only, and the only image is the
+  Maps icon), so a pin's thumbnail can only come from the official site the
+  model finds by web search, or Wikipedia. Both miss often for small,
+  new or badly-indexed places (16 Sep: Londöner by Best Mangal has a site
+  with a fine og:image, but its `<title>` is the Squarespace placeholder
+  "Your Site Title", so search never surfaced it and the card shipped
+  blank). Fix: when a Maps pin ends with no image, ask Places API (New)
+  for the place's own photos. Three calls, two of them free: Text Search
+  restricted to IDs (free, unlimited; the new API doesn't take the `ftid`
+  in the redirect URL, so look up by name + address) → Place Details with
+  the `photos` field (in the IDs Only SKU, free, unlimited) → Place Photos
+  media for the first photo (1,000 free/month, then $7 per 1,000, so 0.7¢
+  a card). Runs only on the no-image path, so the bill is a few cents at
+  hundreds of pins a month and ~$60 at 10,000. Needs a Cloud project +
+  billing account + a key restricted to Places API (New) and stored as a
+  Supabase secret (`GOOGLE_PLACES_KEY`), with a daily quota cap and a
+  budget alert on the key. Two policy obligations: show
+  `authorAttributions` wherever the photo appears (a "Photo: Sita via
+  Google" line on the detail page; new `image_attribution` column carried
+  through sync) and note that Places content isn't meant to be cached
+  past 30 days, which storing `image_url` technically stretches. Backfill
+  the existing image-less Maps cards once it's live. New customers get a
+  $300 credit for 90 days; enrol when the beta opens, not before.
 
 ## What stays untouched
 
@@ -583,6 +607,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [ ] App Review kit: free-tier demo group seeded to the cap, permanent invite code, nightly reset; review notes carry the code only — never an account password
 - [ ] Apple Small Business Program enrolment
 - [ ] Production APNs key check
+- [ ] Google Places photo fallback for image-less Maps pins: Cloud project + restricted key as `GOOGLE_PLACES_KEY` (quota cap, budget alert); IDs-only Text Search → `photos` → Place Photos media in `extractCard`; `image_attribution` column + attribution line on the detail page; backfill existing blank Maps cards. Cost: free to 1,000 photos/month, then 0.7¢ each
 - [ ] External TestFlight beta, then launch
 
 ## Post-launch backlog (cut from launch, not forgotten)

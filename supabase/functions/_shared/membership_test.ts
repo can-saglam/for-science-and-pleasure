@@ -34,9 +34,9 @@ Deno.test("isAction", () => {
 });
 
 Deno.test("inviteMessage", () => {
-  assertEquals(inviteMessage("KV7P2M", "Joyce", null), "Join Joyce on Can We Go? — code KV7-P2M");
+  assertEquals(inviteMessage("KV7P2M", "Joyce", null), "Join Joyce on Can We Go? Your code is KV7-P2M");
   assertEquals(
     inviteMessage("KV7P2M", null, "https://apps.apple.com/x"),
-    "Join me on Can We Go? — code KV7-P2M https://apps.apple.com/x",
+    "Join me on Can We Go? Your code is KV7-P2M https://apps.apple.com/x",
   );
 });

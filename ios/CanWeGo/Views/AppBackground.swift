@@ -73,6 +73,18 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
+    /// A small copy of the home-screen icon as a plain image asset, for
+    /// showing the icon inside the app (icon sets can't be loaded).
+    var iconPreviewName: String {
+        switch self {
+        case .midnight: "IconPreviewMidnight"
+        case .ink: "IconPreviewInk"
+        case .forest: "IconPreviewForest"
+        case .wine: "IconPreviewWine"
+        case .cream: "IconPreviewCream"
+        }
+    }
+
     /// Tint for controls: toolbar buttons, the selected tab, links.
     var accent: Color {
         switch self {
@@ -117,12 +129,44 @@ final class ThemeStore {
 
     var current: AppTheme {
         didSet {
-            defaults?.set(current.rawValue, forKey: "appTheme")
-            applyInterfaceStyle()
-            #if !APP_EXTENSION
-            WidgetStore.writeTheme(current)
-            #endif
+            guard persistChanges else { return }
+            persist(current)
         }
+    }
+
+    /// `preferredColorScheme` / window traits. Updated only when a
+    /// choice is committed, so scrubbing the onboarding carousel can
+    /// repaint SwiftUI colours without a UIKit trait rebuild mid-gesture.
+    private(set) var scheme: AppTheme
+
+    /// When false, `current` is a live preview only — no disk, widgets,
+    /// or window-style flip. The onboarding slider uses this so a swipe
+    /// does not stall on `WidgetCenter.reloadAllTimelines`.
+    private var persistChanges = true
+
+    private func persist(_ theme: AppTheme) {
+        defaults?.set(theme.rawValue, forKey: "appTheme")
+        scheme = theme
+        applyInterfaceStyle()
+        #if !APP_EXTENSION
+        WidgetStore.writeTheme(theme)
+        #endif
+    }
+
+    /// Paint `theme` without the persist side-effects. Call `commit()`
+    /// when the gesture settles.
+    func preview(_ theme: AppTheme) {
+        guard theme != current else { return }
+        persistChanges = false
+        current = theme
+        persistChanges = true
+    }
+
+    /// Write whatever `preview` left unsaved. No-op if traits already
+    /// match the live theme.
+    func commit() {
+        guard scheme != current else { return }
+        persist(current)
     }
 
     private let defaults = UserDefaults(suiteName: SharedInbox.groupID)
@@ -131,7 +175,9 @@ final class ThemeStore {
         // CWG_THEME env var lets simulator runs pin a theme for screenshots.
         let stored = ProcessInfo.processInfo.environment["CWG_THEME"]
             ?? defaults?.string(forKey: "appTheme")
-        current = stored.flatMap(AppTheme.init(rawValue:)) ?? .midnight
+        let initial = stored.flatMap(AppTheme.init(rawValue:)) ?? .midnight
+        current = initial
+        scheme = initial
         // After the singleton is live — doing this inline re-enters
         // `shared` mid-init and traps. `writeTheme` used to read
         // `ThemeStore.shared` from here and crashed launch on device.
@@ -196,6 +242,21 @@ final class ThemeStore {
                 window.tintColor = ink
             }
         }
+        #endif
+    }
+
+    /// Flips the home-screen icon to match the theme. Safe to call often:
+    /// it does nothing when the icon already matches, and the system
+    /// refuses the change while the app isn't active, so callers run it
+    /// at moments the app is (a picker change, a sheet closing, onboarding
+    /// finishing).
+    func syncAppIcon() {
+        #if !APP_EXTENSION
+        let wanted = current.iconName
+        guard UIApplication.shared.supportsAlternateIcons,
+              UIApplication.shared.alternateIconName != wanted
+        else { return }
+        UIApplication.shared.setAlternateIconName(wanted)
         #endif
     }
 
@@ -355,7 +416,7 @@ private struct AppColorSchemeModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .preferredColorScheme(themes.current.colorScheme)
+            .preferredColorScheme(themes.scheme.colorScheme)
             .foregroundStyle(themes.current.ink)
     }
 }

@@ -287,7 +287,7 @@ try:
         s, b = gm(jwt_ann, {"action": "nope"}); check("fn: unknown action → 400", s == 400)
         s, b = gm(jwt_ann, {"action": "card"}); check("fn: card", s == 200 and b.get("name") == "Ann's saves", f"{s} {b}")
         s, b = gm(jwt_ann, {"action": "invite"})
-        check("fn: invite formats code and message", s == 200 and "-" in b.get("code", "") and b.get("message", "").startswith("Join Ann on Can We Go? — code "), f"{s} {b}")
+        check("fn: invite formats code and message", s == 200 and "-" in b.get("code", "") and b.get("message", "").startswith("Join Ann on Can We Go? Your code is "), f"{s} {b}")
         code = b["code"]
         s, b = gm(jwt_lose, {"action": "preview", "code": code.lower()}); check("fn: preview", s == 200 and b.get("status") == "ok", f"{s} {b}")
         s, b = gm(jwt_lose, {"action": "preview", "code": "not a code"}); check("fn: malformed code → unknown", s == 200 and b.get("status") == "unknown", f"{s} {b}")

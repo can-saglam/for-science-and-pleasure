@@ -5,6 +5,8 @@ import {
   colorFromImageUrl,
   heroImageFromHtml,
   heroImageFromUrl,
+  wikipediaImage,
+  wikipediaQueries,
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
 import {
@@ -52,7 +54,7 @@ export interface ParsedCard {
 export class VagueInputError extends Error {
   constructor() {
     super(
-      "That reads like a search, not a save. Name one place or event — a venue, a show, a restaurant — or paste a link to it.",
+      "That reads like a search, not a save. Name one place or event (a venue, a show, a restaurant) or paste a link to it.",
     );
     this.name = "VagueInputError";
   }
@@ -438,6 +440,15 @@ export async function extractCard(
   // rainbow-streak thumbnails — never let any maps-branded asset through.
   if (imageUrl && /(?:gstatic|googleusercontent)\.com.*maps|maps_\d+dp\.(?:png|webp)/i.test(imageUrl)) {
     imageUrl = null;
+  }
+  // Named festivals and museums often have a Wikipedia photo when the
+  // listing page is a JS shell or the save had no URL at all. Short or
+  // generic names never reach this (see wikipediaQueries).
+  if (!imageUrl) {
+    for (const query of wikipediaQueries(card)) {
+      imageUrl = await wikipediaImage(query);
+      if (imageUrl) break;
+    }
   }
 
   let color = await colorPromise.catch(() => null);

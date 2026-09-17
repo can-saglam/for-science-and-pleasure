@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import TipKit
 
 /// Map-or-list, shared by the Events and Places tabs: switch to the map on
 /// one and the other stays on the map, so geographic browsing carries
@@ -37,12 +38,19 @@ struct LibraryView: View {
     /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
     @State private var refreshNotice: (text: String, icon: String)?
     @State private var syncStatus = SyncStatus.shared
+    private let shareTip = ShareTip()
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
 
-    private enum ArchiveSide: String, CaseIterable {
-        case all = "All"
-        case been = "We Did Go"
+    private enum ArchiveSide: CaseIterable {
+        case all, been
+
+        @MainActor var label: String {
+            switch self {
+            case .all: "All"
+            case .been: Voice.didGoSection
+            }
+        }
     }
 
     // MARK: - Filtering
@@ -539,6 +547,15 @@ struct LibraryView: View {
                     .transition(.opacity)
             }
 
+            // Second launch onwards, until dismissed or a share lands:
+            // saves can come from the share sheet.
+            TipView(shareTip)
+                .tipBackground(AppBackground.wash(0.06))
+                .tipCornerRadius(12)
+                .tipImageSize(CGSize(width: 22, height: 22))
+                .padding(.top, 6)
+                .cardListRow()
+
             if categories.count > 1 || areas.count > 1 {
                 // Not cardListRow(): its insets would win over these, and
                 // the row above and below the chips wants to be tighter.
@@ -570,7 +587,20 @@ struct LibraryView: View {
                     .cardListRow()
             }
 
-            if visible.isEmpty && been.isEmpty && missed.isEmpty {
+            if visible.isEmpty && been.isEmpty && missed.isEmpty && base.isEmpty && awaitingFirstPull {
+                ContentUnavailableView {
+                    Label(
+                        partnerFirstName.map { "\($0)'s saves are on the way" } ?? "Your library is on the way",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                } description: {
+                    Text("Give it a moment. Everything already saved lands here.")
+                } actions: {
+                    ProgressView()
+                }
+                .padding(.top, 40)
+                .cardListRow()
+            } else if visible.isEmpty && been.isEmpty && missed.isEmpty {
                 ContentUnavailableView {
                     Label(
                         base.isEmpty ? emptyTitle : "Nothing matches",
@@ -700,12 +730,41 @@ struct LibraryView: View {
             case "park", "outdoors": return "Share a park or a walk from Maps."
             case "museum": return "Share a museum from its site or Maps."
             case "festival": return "Share a festival lineup or ticket page."
-            default: return "Share a link and it lands here for both of you."
+            default: return "Share a link and it lands here\(forWhom)."
             }
         }
-        return kind == Item.Kind.place
-            ? "Share a restaurant, a gallery or a park from Safari, Google Maps or Instagram — it lands here for both of you."
-            : "Share a gig from DICE, an exhibition from a gallery's page, or paste any link — it lands here for both of you."
+        // The first week reads differently alone and together: alone, the
+        // way in is the + and the share sheet, and the invite is the next
+        // step; together, whatever either of you saves shows up here.
+        let how = kind == Item.Kind.place
+            ? "Share a restaurant, a gallery or a park from Safari, Google Maps or Instagram, or paste a link with +."
+            : "Share a gig from DICE, an exhibition from a gallery's page, or paste any link with +."
+        if sharedLibrary {
+            return "\(how) It lands here\(forWhom)."
+        }
+        return "\(how) Invite someone from Settings and you'll share one library."
+    }
+
+    /// More than one member on the card: saves are for everyone in it.
+    private var sharedLibrary: Bool { (GroupStore.shared.card?.members.count ?? 1) > 1 }
+
+    private var forWhom: String {
+        guard sharedLibrary else { return "" }
+        return (GroupStore.shared.card?.members.count ?? 0) > 2 ? " for everyone" : " for both of you"
+    }
+
+    /// Just joined, first pull still running: the library isn't empty, it
+    /// hasn't arrived yet. Named after the person whose saves are coming.
+    private var awaitingFirstPull: Bool {
+        sharedLibrary && !syncStatus.hasSyncedOnce && syncStatus.syncing
+    }
+
+    private var partnerFirstName: String? {
+        guard let card = GroupStore.shared.card else { return nil }
+        let me = SupabaseAuth.shared.userId
+        return card.members.first { $0.userId != me }.flatMap {
+            $0.displayName?.isEmpty == false ? $0.displayName : MembersStore.shared.name(forUser: $0.userId)
+        }
     }
 
     /// The journal at the end of the list. Events keep theirs folded into a
@@ -716,7 +775,7 @@ struct LibraryView: View {
         if kind == Item.Kind.event {
             if !query.isEmpty {
                 if !been.isEmpty {
-                    SectionHeader(title: "We Did Go", count: been.count)
+                    SectionHeader(title: Voice.didGoSection, count: been.count)
                         .frame(minHeight: 44)
                         .cardListRow()
                     ForEach(been) { item in
@@ -788,7 +847,7 @@ struct LibraryView: View {
 
             if archiveOpen {
                 Picker("Archive filter", selection: $archiveSide.animation(.snappy)) {
-                    ForEach(ArchiveSide.allCases, id: \.self) { Text($0.rawValue) }
+                    ForEach(ArchiveSide.allCases, id: \.self) { Text($0.label) }
                 }
                 .pickerStyle(.segmented)
                 .sensoryFeedback(.selection, trigger: archiveSide)

@@ -11,12 +11,9 @@ struct CaptureView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var text = ""
-    @State private var photoItem: PhotosPickerItem?
     @State private var imageJPEG: Data?
-    @State private var cameraOpen = false
     @State private var busy = false
     @State private var errorMessage: String?
-    @FocusState private var inputFocused: Bool
 
     /// Unsaved model object; only inserted into the store on "Save".
     @State private var draft: Item?
@@ -52,8 +49,8 @@ struct CaptureView: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(
-                draft == nil ? "Where are we going?" : (manual ? "Add your own" : "Looks right?")
+            .sheetTitle(
+                draft == nil ? Voice.whereGoing : (manual ? "Add your own" : "Looks right?")
             )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -105,22 +102,10 @@ struct CaptureView: View {
                 Task { await parse() }
             }
         }
-        .onChange(of: photoItem) { _, item in
-            guard let item else { return }
-            Task { await loadPhoto(item) }
-        }
         // A changed input is a new question; the old duplicate verdict goes.
         .onChange(of: text) { _, _ in
             existing = nil
             saveAnyway = false
-        }
-        .fullScreenCover(isPresented: $cameraOpen) {
-            CameraPicker { image in
-                withAnimation(.snappy) {
-                    imageJPEG = image.compressedForUpload()
-                }
-            }
-            .ignoresSafeArea()
         }
     }
 
@@ -128,114 +113,10 @@ struct CaptureView: View {
 
     @ViewBuilder
     private var inputStage: some View {
-        // One composer, AI-app style: the field on top, attachments in the
-        // middle, and a tool row along the bottom — gallery and camera on
-        // the left, the round send button on the right.
-        VStack(alignment: .leading, spacing: 0) {
-            TextField(
-                "An exhibition, a restaurant, a link…",
-                text: $text,
-                axis: .vertical
-            )
-            .lineLimit(3...8)
-            .textFieldStyle(.plain)
-            .focused($inputFocused)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
-
-            if let image = imageJPEG.flatMap(UIImage.init(data:)) {
-                attachedThumbnail(image)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-            }
-
-            HStack(spacing: 8) {
-                if busy {
-                    // The send button is already spinning; the copy alone
-                    // says what's happening.
-                    ParsingPhrases()
-                        .padding(.leading, 6)
-                } else {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        composerIcon("photo")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Attach a photo")
-
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button {
-                            Haptics.tap()
-                            cameraOpen = true
-                        } label: {
-                            composerIcon("camera")
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Take a photo")
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                Button {
-                    Haptics.tap()
-                    Task { await parse() }
-                } label: {
-                    Group {
-                        if busy {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(AppBackground.onProminent)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.body.weight(.semibold))
-                        }
-                    }
-                    .frame(width: 34, height: 34)
-                    // Lit (white pill, dark glyph) whenever there's something
-                    // to send — including while it's being sent, so the
-                    // spinner stays dark-on-white in every theme.
-                    .foregroundStyle(
-                        canParse
-                            ? AnyShapeStyle(AppBackground.onProminent)
-                            : AnyShapeStyle(AppBackground.ink.opacity(0.45))
-                    )
-                    .background(
-                        Circle().fill(canParse
-                            ? Color.white.opacity(0.92)
-                            : AppBackground.wash(0.16))
-                    )
-                    // On cream the lit white disc sits on a near-white
-                    // field; a hairline gives it an edge.
-                    .overlay(
-                        Circle().strokeBorder(
-                            AppBackground.ink.opacity(
-                                canParse && AppBackground.theme.isLight ? 0.22 : 0),
-                            lineWidth: 1)
-                    )
-                    .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .disabled(busy || !canParse)
-                .accessibilityLabel("Add something")
-            }
-            .padding(10)
-            .animation(.snappy, value: busy)
+        // The shared composer (also the first-run's save page).
+        Composer(text: $text, imageJPEG: $imageJPEG, busy: busy) {
+            Task { await parse() }
         }
-        .background(AppBackground.wash(0.08), in: .rect(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(
-                    AppBackground.ink.opacity(inputFocused ? 0.22 : 0.10),
-                    lineWidth: 1
-                )
-        )
-        // Anywhere on the composer counts as the field. No auto-focus on
-        // appear: the keyboard would shove the sheet to full height, and the
-        // half-open drawer is the point.
-        .contentShape(.rect(cornerRadius: 24, style: .continuous))
-        .onTapGesture { inputFocused = true }
-        .animation(.snappy, value: inputFocused)
 
         if let errorMessage {
             // The input is still in the field above — nothing is lost — so
@@ -288,51 +169,6 @@ struct CaptureView: View {
         .padding(.top, 2)
     }
 
-    /// Small round tool button in the composer's bottom row.
-    private func composerIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(AppBackground.ink.opacity(0.85))
-            .frame(width: 34, height: 34)
-            .background(AppBackground.wash(0.10), in: .circle)
-            .contentShape(.circle)
-    }
-
-    /// Just the picture with a small × on its corner — the way AI composers
-    /// show attachments. It speaks for itself; no caption needed.
-    private func attachedThumbnail(_ image: UIImage) -> some View {
-        Image(uiImage: image)
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-            .frame(width: 64, height: 64)
-            .clipShape(.rect(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(AppBackground.ink.opacity(0.2), lineWidth: 1)
-            )
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    withAnimation(.snappy) {
-                        imageJPEG = nil
-                        photoItem = nil
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 20, height: 20)
-                        .background(.black.opacity(0.55), in: .circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove photo")
-                .offset(x: 6, y: -6)
-            }
-            // Keep the × tappable where it pokes past the picture's corner.
-            .padding(.top, 6)
-            .padding(.trailing, 6)
-            .transition(reduceMotion ? .opacity : .scale(scale: 0.95).combined(with: .opacity))
-    }
-
     // MARK: - Stage 2: preview / edit
 
     @ViewBuilder
@@ -374,7 +210,7 @@ struct CaptureView: View {
            let day = (draft.endsOn ?? draft.startsOn).flatMap({ DayString.text($0) }) {
             VStack(alignment: .leading, spacing: 10) {
                 Label(
-                    "This happened on \(day). Add it to We Did Go instead?",
+                    "This happened on \(day). Add it to \(Voice.didGoSection) instead?",
                     systemImage: "checkmark.seal"
                 )
                 .font(.footnote.weight(.medium))
@@ -384,7 +220,7 @@ struct CaptureView: View {
                     draft.status = Item.Status.done
                     save(draft)
                 } label: {
-                    Label("We did go!", systemImage: "checkmark.seal.fill")
+                    Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
@@ -489,19 +325,20 @@ struct CaptureView: View {
     /// block: the pair may genuinely want two entries.
     private func duplicateNotice(_ twin: Item, saveAnyway: (() -> Void)?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(DuplicateFinder.describe(twin))
-                        .font(.footnote.weight(.semibold))
-                    Text("\u{201c}\(twin.title)\u{201d}")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            } icon: {
-                Image(systemName: "books.vertical")
+            Label(DuplicateFinder.describe(twin), systemImage: "books.vertical")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppBackground.warning)
+
+            // The card itself, as it sits in the library: "already saved"
+            // is obvious at a glance, and a tap opens it.
+            Button {
+                Haptics.tap()
+                openExisting(twin)
+            } label: {
+                ItemCard(item: twin, compact: true)
             }
-            .foregroundStyle(AppBackground.warning)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(twin.title)")
 
             HStack(spacing: 10) {
                 Button {
@@ -546,7 +383,6 @@ struct CaptureView: View {
     private func parse() async {
         busy = true
         errorMessage = nil
-        inputFocused = false
         defer { busy = false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Known URL? Say so before spending a parse — unless they've already
@@ -599,53 +435,6 @@ struct CaptureView: View {
         Task {
             try? await Task.sleep(for: .seconds(0.6))
             dismiss()
-        }
-    }
-
-    private func loadPhoto(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data)
-        else { return }
-        withAnimation(.snappy) {
-            imageJPEG = image.compressedForUpload()
-        }
-    }
-}
-
-// MARK: - Camera
-
-/// System camera, feeding the same attachment slot as the photo picker.
-private struct CameraPicker: UIViewControllerRepresentable {
-    let onImage: (UIImage) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
-        init(_ parent: CameraPicker) { self.parent = parent }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let image = info[.originalImage] as? UIImage {
-                parent.onImage(image)
-            }
-            parent.dismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
         }
     }
 }
