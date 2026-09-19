@@ -22,10 +22,20 @@ final class LocationStore: NSObject, CLLocationManagerDelegate {
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
     }
 
+    /// A fix only — never the permission prompt. Places-on-appear uses this.
     func refresh() {
         switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        default:
+            break
+        }
+    }
+
+    /// Map locate and onboarding "Use my location" — the only places we ask.
+    func ask() {
+        switch manager.authorizationStatus {
         case .notDetermined:
-            // CWG_NO_PROMPTS keeps automated screenshot runs alert-free.
             guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse, .authorizedAlways:

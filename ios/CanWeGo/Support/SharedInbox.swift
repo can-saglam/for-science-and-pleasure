@@ -2,8 +2,9 @@ import Foundation
 
 /// Hand-off lane between the share extension and the app. The extension
 /// can't touch the CloudKit-synced store directly, so it drops parsed cards
-/// as JSON files into the App Group container; the app sweeps them into
-/// SwiftData whenever it comes to the foreground.
+/// as JSON files into the App Group container; the app claims them into
+/// SwiftData whenever it comes to the foreground — one file at a time,
+/// deleted only after that row has been saved.
 enum SharedInbox {
     static let groupID = "group.com.cansaglam.CanWeGo"
 
@@ -21,6 +22,7 @@ enum SharedInbox {
         var reminderOffsetDays: Int?
         var reminderAnchor: String?
         var remindAt: String?
+        var remindTime: String?
         var url: String?
         var notes: String?
         var lat: Double?
@@ -32,6 +34,15 @@ enum SharedInbox {
         /// Share-sheet "Save anyway" after a duplicate warning.
         var allowDuplicate: Bool?
         var savedAt: Date = .now
+        /// Who was signed in when the extension wrote this. A different
+        /// account on the same phone must not claim it.
+        var userId: String?
+        var groupId: String?
+    }
+
+    struct Claim {
+        let save: PendingSave
+        let file: URL
     }
 
     private static var directory: URL? {
@@ -52,23 +63,40 @@ enum SharedInbox {
         try JSONEncoder().encode(save).write(to: file, options: .atomic)
     }
 
-    /// Returns all pending saves and removes them from the container.
-    static func drain() -> [PendingSave] {
+    /// Files this account may import. Decode failures and other people's
+    /// saves stay on disk. The caller deletes a file only after a successful
+    /// `context.save()` — or after deciding a duplicate should be dropped.
+    static func claim(for userId: UUID?) -> [Claim] {
         guard let directory,
               let files = try? FileManager.default.contentsOfDirectory(
                   at: directory, includingPropertiesForKeys: nil
               )
         else { return [] }
 
-        var saves: [PendingSave] = []
+        var claims: [Claim] = []
         for file in files where file.pathExtension == "json" {
-            if let data = try? Data(contentsOf: file),
-               let save = try? JSONDecoder().decode(PendingSave.self, from: data) {
-                saves.append(save)
+            guard let data = try? Data(contentsOf: file),
+                  let save = try? JSONDecoder().decode(PendingSave.self, from: data)
+            else { continue }
+            if let owner = save.userId, let me = userId, owner.lowercased() != me.uuidString.lowercased() {
+                continue
             }
-            try? FileManager.default.removeItem(at: file)
+            claims.append(Claim(save: save, file: file))
         }
-        return saves.sorted { $0.savedAt < $1.savedAt }
+        return claims.sorted { $0.save.savedAt < $1.save.savedAt }
+    }
+
+    static func acknowledge(_ claim: Claim) {
+        try? FileManager.default.removeItem(at: claim.file)
+    }
+
+    static func removeAll() {
+        guard let directory,
+              let files = try? FileManager.default.contentsOfDirectory(
+                  at: directory, includingPropertiesForKeys: nil
+              )
+        else { return }
+        for file in files { try? FileManager.default.removeItem(at: file) }
     }
 }
 
@@ -89,6 +117,7 @@ extension Item {
         reminderOffsetDays = pending.reminderOffsetDays
         reminderAnchor = pending.reminderAnchor
         remindAt = pending.remindAt
+        remindTime = pending.remindTime
         url = pending.url
         notes = pending.notes
         lat = pending.lat
@@ -99,5 +128,7 @@ extension Item {
         if let status = pending.status { self.status = status }
         createdAt = pending.savedAt
         updatedAt = pending.savedAt
+        if let gid = pending.groupId { groupId = UUID(uuidString: gid) }
+        if let uid = pending.userId { createdBy = UUID(uuidString: uid); updatedBy = createdBy }
     }
 }

@@ -40,7 +40,7 @@ final class SupabaseAuth {
     /// nothing local was lost, because it wasn't: the store stays put.
     private(set) var sessionExpired = false
 
-    var signedIn: Bool { session != nil }
+    var signedIn: Bool { session != nil && !Self.signedOutFlag }
     var email: String? { session?.email }
 
     /// The signed-in user's id, read from the access token's `sub` claim
@@ -63,7 +63,27 @@ final class SupabaseAuth {
         UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
     }
 
+    /// Written on sign-out so the Share Extension cannot refresh an old
+    /// in-memory token and put the session back in the keychain.
+    private static var signedOutFlag: Bool {
+        get {
+            (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard)
+                .bool(forKey: KeychainSession.signedOutKey)
+        }
+        set {
+            let d = UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
+            if newValue { d.set(true, forKey: KeychainSession.signedOutKey) }
+            else { d.removeObject(forKey: KeychainSession.signedOutKey) }
+        }
+    }
+
     private init() {
+        if Self.signedOutFlag {
+            KeychainSession.delete()
+            defaults.removeObject(forKey: Self.storeKey)
+            session = nil
+            return
+        }
         session = storedSession()
     }
 
@@ -71,14 +91,26 @@ final class SupabaseAuth {
     /// in memory, because the share extension rotates tokens in its own
     /// process and this one only reads the store at launch.
     private func storedSession() -> Session? {
-        guard let data = defaults.data(forKey: Self.storeKey) else { return nil }
-        return try? JSONDecoder().decode(Session.self, from: data)
+        if let data = KeychainSession.load(),
+           let session = try? JSONDecoder().decode(Session.self, from: data) {
+            return session
+        }
+        guard let data = defaults.data(forKey: Self.storeKey),
+              let session = try? JSONDecoder().decode(Session.self, from: data)
+        else { return nil }
+        KeychainSession.save(data)
+        defaults.removeObject(forKey: Self.storeKey)
+        return session
     }
 
     private func persist() {
+        if Self.signedOutFlag || session == nil {
+            KeychainSession.delete()
+            defaults.removeObject(forKey: Self.storeKey)
+            return
+        }
         if let session, let data = try? JSONEncoder().encode(session) {
-            defaults.set(data, forKey: Self.storeKey)
-        } else {
+            KeychainSession.save(data)
             defaults.removeObject(forKey: Self.storeKey)
         }
     }
@@ -92,6 +124,7 @@ final class SupabaseAuth {
     /// email rather than creating a second one. The nonce ties the token to
     /// this request so a captured one can't be replayed.
     func signInWithApple(identityToken: String, nonce: String, appleUserID: String) async throws {
+        Self.signedOutFlag = false
         session = try await Self.token(
             grant: "id_token",
             body: ["provider": "apple", "id_token": identityToken, "nonce": nonce]
@@ -100,8 +133,29 @@ final class SupabaseAuth {
     }
 
     func signOut() {
+        let refresh = session?.refreshToken
+        let access = session?.accessToken
+        Self.signedOutFlag = true
         session = nil
         Self.appleUserID = nil
+        KeychainSession.delete()
+        SharedInbox.removeAll()
+        if let refresh {
+            Task { await Self.logoutRemote(refresh: refresh, access: access) }
+        }
+    }
+
+    /// Best-effort server revoke. Offline still clears local state above.
+    private static func logoutRemote(refresh: String, access: String?) async {
+        var request = URLRequest(url: baseURL.appending(path: "auth/v1/logout"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        if let access {
+            request.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try? JSONEncoder().encode(["refresh_token": refresh])
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     // MARK: - Apple credential state
@@ -138,24 +192,38 @@ final class SupabaseAuth {
     ///  2. serialize renewals so concurrent syncs share one rotation,
     ///  3. when the server genuinely rejects the renewal, sign out — the
     ///     login screen is recoverable, a zombie session is not.
+    ///  4. a signed-out flag beats any in-memory token, so the extension
+    ///     cannot write the session back after Settings signs out.
     @MainActor
     func validToken() async throws -> String {
+        if Self.signedOutFlag {
+            session = nil
+            throw AuthError(message: "Signed out.")
+        }
         if let stored = storedSession(),
            stored.expiresAt > (session?.expiresAt ?? .distantPast) {
             session = stored
         }
-        guard let current = session else { throw AuthError(message: "Signed out.") }
+        guard let current = session, !Self.signedOutFlag else {
+            session = nil
+            throw AuthError(message: "Signed out.")
+        }
         if current.expiresAt > Date.now.addingTimeInterval(60) {
             return current.accessToken
         }
 
         let task = refreshTask ?? Task { [token = current.refreshToken] in
-            try await Self.token(grant: "refresh_token", body: ["refresh_token": token])
+            if Self.signedOutFlag { throw AuthError(message: "Signed out.") }
+            return try await Self.token(grant: "refresh_token", body: ["refresh_token": token])
         }
         refreshTask = task
         do {
             let fresh = try await task.value
             refreshTask = nil
+            if Self.signedOutFlag {
+                session = nil
+                throw AuthError(message: "Signed out.")
+            }
             session = fresh
             return fresh.accessToken
         } catch {

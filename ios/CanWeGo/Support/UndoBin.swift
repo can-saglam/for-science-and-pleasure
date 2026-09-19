@@ -18,6 +18,7 @@ struct ItemSnapshot {
     var reminderOffsetDays: Int?
     var reminderAnchor: String?
     var remindAt: String?
+    var remindTime: String?
     var price: String?
     var category: String?
     var notes: String?
@@ -37,7 +38,7 @@ extension Item {
             area: area, address: address, url: url, imageUrl: imageUrl,
             startsOn: startsOn, endsOn: endsOn,
             reminderOffsetDays: reminderOffsetDays, reminderAnchor: reminderAnchor,
-            remindAt: remindAt, price: price,
+            remindAt: remindAt, remindTime: remindTime, price: price,
             category: category, notes: notes, status: status,
             colorHex: colorHex, lat: lat, lng: lng,
             addedByEmail: addedByEmail, createdAt: createdAt, updatedAt: updatedAt
@@ -60,6 +61,7 @@ extension Item {
         reminderOffsetDays = s.reminderOffsetDays
         reminderAnchor = s.reminderAnchor
         remindAt = s.remindAt
+        remindTime = s.remindTime
         price = s.price
         category = s.category
         notes = s.notes
@@ -79,6 +81,9 @@ extension Item {
 final class UndoBin {
     static let shared = UndoBin()
 
+    /// How long every Undo stays on offer. The toast's ring drains over it.
+    static let window: Double = 5
+
     private(set) var deleted: ItemSnapshot?
     private var expiry: Task<Void, Never>?
 
@@ -92,11 +97,28 @@ final class UndoBin {
     private(set) var saved: (id: UUID, title: String)?
     private var savedExpiry: Task<Void, Never>?
 
+    /// The card that just arrived in the library — a save from the sheet
+    /// or the share extension, a delete taken back, a done put back. The
+    /// list scrolls to it and its border glows for a moment, so the eye
+    /// finds where it went instead of reading a toast about it.
+    private(set) var landed: UUID?
+    private var landedExpiry: Task<Void, Never>?
+
+    func land(_ id: UUID) {
+        landed = id
+        landedExpiry?.cancel()
+        landedExpiry = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.2))
+            guard !Task.isCancelled else { return }
+            if self.landed == id { self.landed = nil }
+        }
+    }
+
     func stash(_ snapshot: ItemSnapshot) {
         deleted = snapshot
         expiry?.cancel()
         expiry = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(Self.window))
             guard !Task.isCancelled else { return }
             self.deleted = nil
         }
@@ -106,7 +128,7 @@ final class UndoBin {
         done = (item.id, item.title)
         doneExpiry?.cancel()
         doneExpiry = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(Self.window))
             guard !Task.isCancelled else { return }
             self.done = nil
         }
@@ -114,9 +136,10 @@ final class UndoBin {
 
     func stashSaved(_ item: Item) {
         saved = (item.id, item.title)
+        land(item.id)
         savedExpiry?.cancel()
         savedExpiry = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(Self.window))
             guard !Task.isCancelled else { return }
             self.saved = nil
         }
@@ -129,9 +152,7 @@ final class UndoBin {
         let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
         if let item = try? context.fetch(fetch).first {
             stash(item.snapshot)
-            SupabaseSync.setDeleted(item.id, true)
-            context.delete(item)
-            try? context.save()
+            item.softDelete()
         }
         savedExpiry?.cancel()
         self.saved = nil
@@ -143,6 +164,7 @@ final class UndoBin {
         let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
         if let item = try? context.fetch(fetch).first {
             item.putBack()
+            land(item.id)
         }
         doneExpiry?.cancel()
         self.done = nil
@@ -150,14 +172,28 @@ final class UndoBin {
 
     func restore(into context: ModelContext) {
         guard let deleted else { return }
+        let id = deleted.id
+        let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
+        if let item = try? context.fetch(fetch).first {
+            item.deletedAt = nil
+            item.updatedAt = .now
+            item.stampAuthor()
+            try? context.save()
+            Task { @MainActor in SupabaseSync.setDeleted(item.id, false) }
+            clear()
+            land(item.id)
+            return
+        }
         let item = Item(restoring: deleted)
         // Fresh timestamp so the resurrected item wins over the remote
         // soft delete instead of being re-deleted on the next pull.
         item.updatedAt = .now
+        item.stampAuthor()
         context.insert(item)
         try? context.save()
         Task { @MainActor in SupabaseSync.setDeleted(item.id, false) }
         clear()
+        land(item.id)
     }
 
     func clear() {
@@ -170,5 +206,6 @@ final class UndoBin {
         clear()
         doneExpiry?.cancel(); done = nil
         savedExpiry?.cancel(); saved = nil
+        landedExpiry?.cancel(); landed = nil
     }
 }

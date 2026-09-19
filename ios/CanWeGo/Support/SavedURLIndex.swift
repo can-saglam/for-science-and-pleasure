@@ -24,6 +24,7 @@ enum SavedURLIndex {
     }
 
     static func rebuild(from items: [Item], extraURLs: [String] = []) {
+        let items = items.filter { !$0.isDeleted }
         var urls = Set(items.compactMap { $0.url.map(normalize) })
         for url in extraURLs { urls.insert(normalize(url)) }
         var ids: [String: String] = [:]

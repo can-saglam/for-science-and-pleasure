@@ -46,10 +46,9 @@ export function admin(): SupabaseClient {
 }
 
 /**
- * Which group a calendar/digest URL key belongs to. Each group has its own
- * feed_token. The pre-groups FEED_SECRET / INGEST_SECRET keys keep working
- * for the founding group so the calendar subscriptions added before 1b
- * don't silently stop updating.
+ * Which group a calendar URL key belongs to. Each group has its own
+ * feed_token. A dedicated FEED_SECRET still opens the founding group for
+ * the subscriptions added before per-group tokens.
  */
 export async function groupForFeedKey(
   db: SupabaseClient,
@@ -63,8 +62,8 @@ export async function groupForFeedKey(
     .maybeSingle();
   if (byToken?.id) return byToken.id;
 
-  const legacy = Deno.env.get("FEED_SECRET") ?? Deno.env.get("INGEST_SECRET");
-  if (legacy && key === legacy) {
+  const feed = Deno.env.get("FEED_SECRET");
+  if (feed && key === feed) {
     const { data: founding } = await db
       .from("groups")
       .select("id")
@@ -74,19 +73,6 @@ export async function groupForFeedKey(
     return founding?.id ?? null;
   }
   return null;
-}
-
-/** The group a legacy Shortcut save belongs to, from its added_by email. */
-export async function groupForEmail(
-  db: SupabaseClient,
-  email: string | null | undefined,
-): Promise<{ groupId: string; userId: string } | null> {
-  if (!email) return null;
-  const { data, error } = await db.rpc("group_for_email", { p_email: email });
-  if (error || !data) return null;
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row?.group_id) return null;
-  return { groupId: row.group_id, userId: row.user_id };
 }
 
 /** Display name for a user, from profiles; falls back to the email's local part. */

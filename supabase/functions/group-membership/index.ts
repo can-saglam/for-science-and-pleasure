@@ -67,6 +67,28 @@ Deno.serve(async (req) => {
   const keepCopy = body.keep_copy === true;
 
   const db = admin();
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  if (action === "preview" || action === "join") {
+    const { count: userFails } = await db
+      .from("invite_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("ok", false)
+      .gte("at", hourAgo);
+    if ((userFails ?? 0) >= 20) return json({ error: "too_many_attempts" }, 429);
+    if (code) {
+      const { count: codeFails } = await db
+        .from("invite_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("code", code)
+        .eq("ok", false)
+        .gte("at", hourAgo);
+      if ((codeFails ?? 0) >= 30) {
+        await db.from("group_invites").update({ expires_at: new Date().toISOString() }).eq("code", code);
+        return json(action === "preview" ? { status: "unknown" } : { error: "unknown" });
+      }
+    }
+  }
   try {
     switch (action) {
       case "card": {
@@ -99,6 +121,8 @@ Deno.serve(async (req) => {
       case "preview": {
         const { data, error } = await db.rpc("membership_preview", { p_user: userId, p_code: code });
         if (error) throw error;
+        const ok = data?.status === "ok";
+        await db.from("invite_attempts").insert({ user_id: userId, code, ok });
         return json(data);
       }
       case "join": {
@@ -113,6 +137,11 @@ Deno.serve(async (req) => {
           if (error.code === "23514") return json({ error: "full" });
           throw error;
         }
+        await db.from("invite_attempts").insert({
+          user_id: userId,
+          code,
+          ok: data?.joined === true,
+        });
         return json(data);
       }
       case "leave": {

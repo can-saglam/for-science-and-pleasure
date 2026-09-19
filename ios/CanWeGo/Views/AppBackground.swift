@@ -2,41 +2,72 @@ import SwiftUI
 
 // MARK: - Themes
 
-/// Five moods, one app: the signature deep blue, a pure black, a dark
-/// forest green, a deep wine red, and a cream paper for daylight. Each
-/// theme derives its whole palette — tab shades, sheet depth, control
-/// accent — from one base color, so everything stays tuned.
+/// Nine moods, one app. The deep set: the signature midnight blue, a pure
+/// black, a dark forest green, a deep wine red. The mid-tones from the
+/// print sheet: cobalt, moss, umber. And two papers for daylight — oat
+/// and stone. Each theme derives its whole palette — tab shades,
+/// sheet depth, control accent — from one base color, so everything
+/// stays tuned.
 enum AppTheme: String, CaseIterable, Identifiable {
     case midnight
+    case cobalt
     case ink
     case forest
+    case moss
+    case umber
     case wine
-    case cream
+    case oat
+    case stone
 
     var id: String { rawValue }
 
     var name: String {
         switch self {
         case .midnight: "Midnight Blue"
+        case .cobalt: "Cobalt"
         case .ink: "Pure Black"
         case .forest: "Forest Green"
+        case .moss: "Moss"
+        case .umber: "Umber"
         case .wine: "Wine Red"
-        case .cream: "Cream"
+        case .oat: "Oat"
+        case .stone: "Stone"
         }
     }
 
-    /// Cream is the only light page; everything else is a dark base.
-    var isLight: Bool { self == .cream }
+    /// The papers — oat and stone — are light pages with dark type;
+    /// everything else is a dark base.
+    var isLight: Bool {
+        switch self {
+        case .oat, .stone: true
+        default: false
+        }
+    }
+
+    /// Cobalt, moss and umber sit between the deep bases and the papers:
+    /// dark enough for light type, light enough that a few mixes need a
+    /// gentler hand.
+    var isMidTone: Bool {
+        switch self {
+        case .cobalt, .moss, .umber: true
+        default: false
+        }
+    }
 
     var colorScheme: ColorScheme { isLight ? .light : .dark }
 
     /// Logo, titles, and anything that used to be hardcoded white.
     /// Midnight and forest print in the warm cream of the olive
-    /// reference; cream flips to black; ink and wine stay white.
+    /// reference; umber in a paler parchment; cobalt and moss in a soft
+    /// white; stone flips to near-black, oat to a dark brown; ink and wine
+    /// stay white.
     var ink: Color {
         switch self {
-        case .cream: .black
+        case .stone: Color(hex: "#0D0F0A") ?? .black
+        case .oat: Color(hex: "#3E2C14") ?? Color(red: 0.243, green: 0.173, blue: 0.078)
         case .midnight, .forest: Self.forestCream
+        case .umber: Color(hex: "#EFEED2") ?? Self.forestCream
+        case .cobalt, .moss: Color(hex: "#FAF8F0") ?? .white
         default: .white
         }
     }
@@ -47,14 +78,22 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight:
             (Color(hex: "#0C169D") ?? Color(red: 0.047, green: 0.086, blue: 0.616))
                 .shifted(brightness: -0.12)
+        case .cobalt:
+            Color(hex: "#365AA8") ?? Color(red: 0.212, green: 0.353, blue: 0.659)
         case .ink:
             .black
         case .forest:
             Color(hex: "#323316") ?? Color(red: 0.196, green: 0.200, blue: 0.086)
+        case .moss:
+            Color(hex: "#465A37") ?? Color(red: 0.275, green: 0.353, blue: 0.216)
+        case .umber:
+            Color(hex: "#564A30") ?? Color(red: 0.337, green: 0.290, blue: 0.188)
         case .wine:
             Color(hex: "#440015") ?? Color(red: 0.267, green: 0, blue: 0.082)
-        case .cream:
-            Color(hex: "#F8F0CA") ?? Color(red: 0.973, green: 0.941, blue: 0.792)
+        case .oat:
+            Color(hex: "#E3DDCF") ?? Color(red: 0.890, green: 0.867, blue: 0.812)
+        case .stone:
+            Color(hex: "#C8CBC4") ?? Color(red: 0.784, green: 0.796, blue: 0.769)
         }
     }
 
@@ -66,10 +105,14 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var iconName: String? {
         switch self {
         case .midnight: nil
+        case .cobalt: "AppIconCobalt"
         case .ink: "AppIconInk"
         case .forest: "AppIconForest"
+        case .moss: "AppIconMoss"
+        case .umber: "AppIconUmber"
         case .wine: "AppIconWine"
-        case .cream: "AppIconCream"
+        case .oat: "AppIconOat"
+        case .stone: "AppIconStone"
         }
     }
 
@@ -78,44 +121,63 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var iconPreviewName: String {
         switch self {
         case .midnight: "IconPreviewMidnight"
+        case .cobalt: "IconPreviewCobalt"
         case .ink: "IconPreviewInk"
         case .forest: "IconPreviewForest"
+        case .moss: "IconPreviewMoss"
+        case .umber: "IconPreviewUmber"
         case .wine: "IconPreviewWine"
-        case .cream: "IconPreviewCream"
+        case .oat: "IconPreviewOat"
+        case .stone: "IconPreviewStone"
         }
     }
 
     /// Tint for controls: toolbar buttons, the selected tab, links.
+    /// Papers use their ink; the mid-tones lift a pale wash of their own
+    /// hue, like midnight's periwinkle; umber uses its parchment ink.
     var accent: Color {
         switch self {
         case .midnight: Color(hex: "#97A4FF") ?? .white
+        case .cobalt: Color(hex: "#D3DEFF") ?? .white
         case .ink: .white
         case .forest: Self.forestCream
+        case .moss: Color(hex: "#DCE8C8") ?? .white
+        case .umber, .oat, .stone: ink
         case .wine: Color(hex: "#FFA2B8") ?? .white
-        case .cream: .black
+        }
+    }
+
+    /// Accents that are just the theme's ink or a near-white — nothing
+    /// to deepen into a swipe fill.
+    var accentIsNeutral: Bool {
+        switch self {
+        case .ink, .forest, .umber, .oat, .stone: true
+        default: false
         }
     }
 
     /// How much of an item's color soaks into its card. Pure black needs a
-    /// slightly stronger pour to keep cards from going murky; cream wants
-    /// a whisper so the paper still reads as paper.
+    /// slightly stronger pour to keep cards from going murky; the papers
+    /// want a whisper so they still read as paper; the mid-tones already
+    /// carry colour, so a little less.
     var cardAccentMix: Double {
         switch self {
         case .ink: 0.30
-        case .cream: 0.16
+        case .oat, .stone: 0.16
+        case .cobalt, .moss, .umber: 0.28
         default: 0.34
         }
     }
 
     /// The lift that separates a card from the page behind it. Dark
-    /// themes mix in their ink (white, or forest's cream); cream mixes
-    /// in black so cards sit *on* the paper instead of bleaching out.
+    /// themes mix in their ink (white, or forest's cream); the papers mix
+    /// in black so cards sit *on* the page instead of bleaching out.
     var cardLiftColor: Color { isLight ? .black : ink }
 
     var cardLiftAmount: Double {
         switch self {
         case .ink: 0.07
-        case .cream: 0.05
+        case .oat, .stone: 0.05
         default: 0.06
         }
     }
@@ -175,7 +237,9 @@ final class ThemeStore {
         // CWG_THEME env var lets simulator runs pin a theme for screenshots.
         let stored = ProcessInfo.processInfo.environment["CWG_THEME"]
             ?? defaults?.string(forKey: "appTheme")
-        let initial = stored.flatMap(AppTheme.init(rawValue:)) ?? .midnight
+        // "cream" was retired; the nearest paper stands in for anyone who had it.
+        let initial = stored.flatMap(AppTheme.init(rawValue:))
+            ?? (stored == "cream" ? .oat : .midnight)
         current = initial
         scheme = initial
         // After the singleton is live — doing this inline re-enters
@@ -226,7 +290,7 @@ final class ThemeStore {
     }
 
     /// UIKit pickers, menus and glass follow the *window* style, not
-    /// SwiftUI's `preferredColorScheme`. Cream is light; everything else
+    /// SwiftUI's `preferredColorScheme`. The papers are light; everything else
     /// stays dark — otherwise a Light system setting paints black
     /// "Google Maps" on a dark row. Always hops to the next turn so a
     /// trait change never lands inside `body` or `dispatch_once`.
@@ -260,6 +324,24 @@ final class ThemeStore {
         #endif
     }
 
+    /// Has a theme ever been chosen on this device? False on a fresh
+    /// install, when the first run picks one from the system appearance.
+    var hasStoredChoice: Bool { defaults?.string(forKey: "appTheme") != nil }
+
+    /// The home-screen icon swap raises a system alert whenever the app is
+    /// in the foreground. The first run ends on the library, not on that
+    /// alert: it books the swap and `RootGate` performs it the next time
+    /// the app goes to the background, where iOS changes the icon quietly.
+    func deferIconSync() {
+        defaults?.set(true, forKey: "iconSyncPending")
+    }
+
+    func syncAppIconIfPending() {
+        guard defaults?.bool(forKey: "iconSyncPending") == true else { return }
+        defaults?.removeObject(forKey: "iconSyncPending")
+        syncAppIcon()
+    }
+
     #if !APP_EXTENSION
     private static var windows: [UIWindow] {
         UIApplication.shared.connectedScenes
@@ -273,7 +355,7 @@ final class ThemeStore {
 
 /// Every screen sits on a slightly different shade of the theme base, so
 /// tabs feel distinct without shouting. Dark themes keep light text;
-/// cream flips the ink to black.
+/// the papers flip the ink dark.
 enum AppBackground {
     static var theme: AppTheme { ThemeStore.shared.current }
 
@@ -283,45 +365,49 @@ enum AppBackground {
     /// Control accent for the current theme.
     static var accent: Color { theme.accent }
 
-    /// Logo and primary marks — cream on midnight and forest, black on cream, white elsewhere.
+    /// Logo and primary marks — cream on midnight and forest, dark on the papers, white elsewhere.
     static var ink: Color { theme.ink }
 
     /// Label on a white (or near-white) prominent glass pill.
-    /// Cream prints black; dark themes print the page colour.
+    /// The papers print their ink; dark themes print the page colour.
     static var onProminent: Color { theme.isLight ? ink : base }
 
     /// The small icon squircle on settings rows. Always a light badge with
-    /// a dark glyph — accent on the dark themes, white on cream — so a
+    /// a dark glyph — accent on the dark themes, white on the papers — so a
     /// theme switch never inverts it: a cross-fade through an inversion
     /// passes a frame where badge and glyph are the same grey.
     static var badge: Color { theme.isLight ? .white : accent }
     static var badgeGlyph: Color { theme.isLight ? ink : base }
 
     /// Warnings, error notes, duplicate notices. System orange reads on the
-    /// dark pages but sits at ~1.5:1 on cream paper, so cream deepens it
-    /// to a burnt orange.
+    /// dark pages but sits at ~1.5:1 on the papers, so they deepen it to
+    /// a burnt orange; on umber's brown it goes paler to stay distinct.
     static var warning: Color {
-        theme.isLight ? Color(red: 0.62, green: 0.32, blue: 0) : .orange
+        if theme.isLight { return Color(red: 0.62, green: 0.32, blue: 0) }
+        if theme == .umber { return Color(red: 1.0, green: 0.72, blue: 0.36) }
+        return .orange
     }
 
-    /// Destructive rows and urgent copy. Deeper on cream (system red is
-    /// under 3:1 there); on wine, system red melts into the page, so it
-    /// lifts toward the theme's pink instead.
+    /// Destructive rows and urgent copy. Deeper on the papers (system red
+    /// is under 3:1 there); on wine, system red melts into the page, so it
+    /// lifts toward the theme's pink; the mid-tones lift it a touch too,
+    /// so it stays legible against a coloured page.
     static var destructive: Color {
         if theme.isLight { return Color(red: 0.72, green: 0.10, blue: 0.14) }
         if theme == .wine { return Color(red: 1.0, green: 0.47, blue: 0.53) }
+        if theme.isMidTone { return Color(red: 1.0, green: 0.55, blue: 0.55) }
         return .red
     }
 
     /// A hairline wash for inset rows and fields. White on dark pages,
-    /// black on cream, so the same 8% still reads as a recess.
+    /// dark on the papers, so the same 8% still reads as a recess.
     static func wash(_ opacity: Double) -> Color {
         ink.opacity(opacity)
     }
 
-    /// A touch toward teal, and brighter: out on the town. Cream keeps its
-    /// pages on the one paper the drawers use — the tab tints read as
-    /// dirt on a light page.
+    /// A touch toward teal, and brighter: out on the town. The papers keep
+    /// their pages on the one shade the drawers use — the tab tints read
+    /// as dirt on a light page.
     static var places: Color {
         theme.isLight ? sheet : base.shifted(hue: -0.020, brightness: 0.045)
     }
@@ -339,23 +425,27 @@ enum AppBackground {
 
     /// Stock green/red swipe buttons clashed with every theme, so these
     /// derive from the palette. Deepened accent — dark enough that the
-    /// system's white label stays readable. Ink, forest and cream use
-    /// charcoal because their accents are already white, cream or black.
+    /// system's white label stays readable. Themes whose accent is just
+    /// their ink (or black, on the papers) use charcoal instead.
     static var swipeDone: Color {
-        theme == .ink || theme == .forest || theme.isLight
+        theme.accentIsNeutral
             ? Color(white: 0.24)
             : accent.mix(with: .black, by: 0.4)
     }
     /// Red pulled toward the base: still unmistakably destructive, but
-    /// speaking the theme's tone rather than shouting over it.
+    /// speaking the theme's tone rather than shouting over it. The
+    /// mid-tones take less base so the red doesn't go muddy.
     static var swipeDelete: Color {
-        Color(red: 0.85, green: 0.16, blue: 0.22).mix(with: base, by: theme.isLight ? 0.15 : 0.4)
+        let pull = theme.isLight ? 0.15 : (theme.isMidTone ? 0.25 : 0.4)
+        return Color(red: 0.85, green: 0.16, blue: 0.22).mix(with: base, by: pull)
     }
     /// A quiet lift off the base for the non-committal "put back". The
-    /// system draws swipe labels white, so cream uses a mid grey rather
-    /// than a darker paper that would leave white type at 1.4:1.
+    /// system draws swipe labels white, so the papers use a mid grey
+    /// rather than a darker paper that would leave white type at 1.4:1;
+    /// the mid-tones lift less, since they start brighter.
     static var swipePutBack: Color {
-        theme.isLight ? Color(white: 0.45) : base.shifted(brightness: 0.18)
+        if theme.isLight { return Color(white: 0.45) }
+        return base.shifted(brightness: theme.isMidTone ? 0.10 : 0.18)
     }
 }
 
@@ -393,22 +483,33 @@ extension View {
             .background { ThemeFill(color: color) }
     }
 
-    /// Light text on the dark bases, black on cream. Midnight and forest
+    /// Light text on the dark bases, dark on the papers. Midnight and forest
     /// also paint primary type in the warm cream ink.
     func appColorScheme() -> some View {
         modifier(AppColorSchemeModifier())
     }
 
-    /// White glass pill, dark-enough label — cream gets black type.
+    /// White glass pill, dark-enough label — the papers get dark type.
+    /// Disabled, the pill drops to a wash of the page and the label goes
+    /// to dimmed ink: the system's own greying kept the page-coloured
+    /// label, which vanished into the grey pill on every dark theme.
     func prominentGlass() -> some View {
-        self
-            .buttonStyle(.glassProminent)
-            .tint(.white)
-            .foregroundStyle(AppBackground.onProminent)
+        modifier(ProminentGlassModifier())
     }
 }
 
-/// Observes the theme so flipping cream ↔ dark actually updates the
+private struct ProminentGlassModifier: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.glassProminent)
+            .tint(isEnabled ? Color.white : AppBackground.wash(0.10))
+            .foregroundStyle(isEnabled ? AppBackground.onProminent : AppBackground.ink.opacity(0.5))
+    }
+}
+
+/// Observes the theme so flipping paper ↔ dark actually updates the
 /// window. Does not also push `environment(\.colorScheme)` — that loops
 /// with `preferredColorScheme` and crashes AttributeGraph.
 private struct AppColorSchemeModifier: ViewModifier {

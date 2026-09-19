@@ -412,27 +412,26 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
-[functions.ingest]
-verify_jwt = false
-
-# Auth handled in-function: members' JWTs (web) or the ingest secret (iOS).
 [functions.parse]
-verify_jwt = false
+verify_jwt = true
 
 [functions.locate]
-verify_jwt = false
+verify_jwt = true
 
 [functions.calendar]
 verify_jwt = false
 
-[functions.digest]
-verify_jwt = false
-
 [functions.suggest]
+verify_jwt = true
+
+[functions.starters]
 verify_jwt = true
 
 [functions.send-reminders]
 verify_jwt = false
 
 [functions.notify-save]
+verify_jwt = true
+
+[functions.delete-account]
 verify_jwt = true

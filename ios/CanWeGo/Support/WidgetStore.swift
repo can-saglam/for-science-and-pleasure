@@ -46,7 +46,7 @@ enum WidgetStore {
 
     static func sync(items: [Item]) {
         // The widget shows things you could still go to.
-        let active = items.filter { $0.isEvent && !$0.isDone && !$0.isMissed }
+        let active = items.filter { $0.isEvent && !$0.isDeleted && !$0.isDone && !$0.isMissed }
         let entries = active.map { item in
             (
                 entry: Entry(

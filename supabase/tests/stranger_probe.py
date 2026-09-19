@@ -72,7 +72,7 @@ try:
     s, b = http("/functions/v1/group-membership", "POST", {"action": "card"}, jwt=jwt); check("group-membership: card is own solo group", s == 200 and b.get("group_id") == own_gid and len(b.get("members", [])) == 1, f"{s} {b}")
     s, b = http("/functions/v1/group-membership", "POST", {"action": "card"}); check("group-membership: anon → 401", s == 401, f"{s} {b}")
     s, b = http(f"/functions/v1/ingest", "POST", {"text": "x", "added_by": email}, key=ANON, jwt=None)
-    check("ingest: no secret → 401", s == 401, f"{s} {b}")
+    check("ingest: retired endpoint is gone", s == 404, f"{s} {b}")
 finally:
     s, b = http(f"/auth/v1/admin/users/{uid}", "DELETE", key=SVC); print("probe user deleted:", s)
     # The probe's own personal group (and anything in it) and its profile tombstone go too.

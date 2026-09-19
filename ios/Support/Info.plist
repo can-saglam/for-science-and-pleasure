@@ -14,7 +14,7 @@
 		<string>remote-notification</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Finds your home city so dates and the map match this library, and shows you on the map of your saved places.</string>
+	<string>Used when you tap Use my location to set a home city, to show you on the map, and for distance chips on saved places.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Snap a poster or flyer to save it straight to your list.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>

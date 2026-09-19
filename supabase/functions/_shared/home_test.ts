@@ -9,6 +9,7 @@ import {
   homeLabel,
   homeToday,
   LONDON,
+  UNSET,
   namesCity,
   priceExamples,
 } from "./home.ts";
@@ -24,6 +25,7 @@ const LISBON: Home = {
 Deno.test("homeLabel", () => {
   assertEquals(homeLabel(LONDON), "London, United Kingdom");
   assertEquals(homeLabel(LISBON), "Lisbon, Portugal");
+  assertEquals(homeLabel(UNSET), "the city named on the page");
 });
 
 Deno.test("homeToday: the date on the home clock, not UTC", () => {
@@ -73,6 +75,7 @@ Deno.test("geocodeQuery: home appended only when the address names no city", () 
     "12 Rue de Rivoli, Paris, France",
   );
   assertEquals(geocodeQuery("Rua Augusta 100", LISBON), "Rua Augusta 100, Lisbon, Portugal");
+  assertEquals(geocodeQuery("20 Deptford Broadway", UNSET), "20 Deptford Broadway");
 });
 
 Deno.test("geocodeNearHome: suffixed first, bare fallback, no double call when unsuffixed", async () => {
@@ -100,8 +103,8 @@ Deno.test("geocodeNearHome: suffixed first, bare fallback, no double call when u
   assertEquals(calls.length, 1); // suffixed query hit: no fallback
 });
 
-Deno.test("homeFromRow: null row → London; partial row fills from London", () => {
-  assertEquals(homeFromRow(null), LONDON);
+Deno.test("homeFromRow: null/blank row is city-neutral; named row keeps its city", () => {
+  assertEquals(homeFromRow(null), UNSET);
   assertEquals(
     homeFromRow({
       home_locality: "Lisbon",
@@ -119,7 +122,8 @@ Deno.test("homeFromRow: null row → London; partial row fills from London", () 
     home_lat: null,
     home_lng: null,
   });
-  assertEquals(partial, LONDON);
+  assertEquals(partial.locality, "");
+  assertEquals(partial.timezone, "Europe/London");
   // A named home with no coordinates stays coordinate-less rather than
   // borrowing London's.
   const noCoords = homeFromRow({

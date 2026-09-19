@@ -1,5 +1,5 @@
 // Home-clock arithmetic, kept free of I/O so it can be unit-tested.
-// Used by send-reminders (10:00 home hour) and the Shortcut digest pull.
+// Used by send-reminders (10:00 home hour).
 
 export interface Schedule {
   group_id: string;

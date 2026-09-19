@@ -74,11 +74,10 @@ shoot settings-join 5 CWG_SETTINGS=1 CWG_JOIN=1
 shoot update-required 4 CWG_FORCE_UPDATE=1
 
 echo "First run (preview mode)"
-for page in welcome name theme code home save notify; do
+for page in welcome name code home save joined notify; do
   shoot "onboarding-$page" 5 CWG_ONBOARDING_PREVIEW=1 "CWG_ONBOARDING_PAGE=$page"
 done
-for theme in midnight ink forest wine cream; do
-  shoot "onboarding-theme-$theme" 5 CWG_ONBOARDING_PREVIEW=1 CWG_ONBOARDING_PAGE=theme "CWG_THEME=$theme"
+for theme in midnight cobalt ink forest moss umber wine oat stone; do
   shoot "library-theme-$theme" 5 "CWG_THEME=$theme"
 done
 

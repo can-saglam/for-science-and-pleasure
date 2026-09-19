@@ -56,10 +56,12 @@ struct ItemForm: View {
     @ViewBuilder
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.caption.weight(.semibold))
-                .tracking(1.1)
-                .foregroundStyle(.secondary)
+            // Same voice as the library's section headers ("Last chance",
+            // "Nearby"): footnote, semibold, a fixed share of the ink —
+            // the only all-caps in the app was here.
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppBackground.ink.opacity(SectionHeader.titleOpacity))
             content()
         }
     }

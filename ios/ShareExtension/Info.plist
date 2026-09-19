@@ -8,6 +8,7 @@
 	<array>
 		<string>PPNeueGstaad-Bold.otf</string>
 		<string>PPNeueGstaad-CondensedRegular.otf</string>
+		<string>PPNeueGstaad-CondensedBold.otf</string>
 	</array>
 	<key>NSExtension</key>
 	<dict>

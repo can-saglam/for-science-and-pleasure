@@ -2,12 +2,12 @@
 // coordinates and returns proposed locations (venue/area/address + lat/lng).
 // Nothing is written here — the client shows the proposals for confirmation
 // and applies the accepted ones itself (RLS enforces membership).
-// Auth mirrors parse: members' JWTs from the web app, or the ingest secret
-// from the iOS app. Stateless — proposals are returned, never written.
+// A member JWT is required. Stateless — proposals are returned, never written.
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { corsHeaders, geocode, resolveMapsLink } from "../_shared/geo.ts";
-import { resolveCaller } from "../_shared/groups.ts";
-import { geocodeNearHome, groupHome, type Home, homeLabel, LONDON } from "../_shared/home.ts";
+import { admin, resolveCaller } from "../_shared/groups.ts";
+import { geocodeNearHome, groupHome, type Home, homeLabel } from "../_shared/home.ts";
+import { consumeQuota } from "../_shared/quota.ts";
 
 interface LocateItem {
   id: string;
@@ -60,17 +60,26 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
   try {
-    const secret = req.headers.get("x-ingest-secret");
-    const secretOk = Boolean(secret) && secret === Deno.env.get("INGEST_SECRET");
-    // JWT → group → home city (see parse). Secret alone → London.
+    if (!(req.headers.get("Authorization") ?? "").startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const caller = await resolveCaller(req);
-    if (!secretOk && !caller) {
+    if (!caller) {
       return new Response(JSON.stringify({ error: "not in a group" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const home = caller ? await groupHome(caller.client, caller.groupId) : LONDON;
+    if (!await consumeQuota(admin(), caller.userId, "locate")) {
+      return new Response(JSON.stringify({ error: "daily limit reached" }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const home = await groupHome(caller.client, caller.groupId);
     const where = homeLabel(home);
 
     const body = await req.json();

@@ -26,10 +26,18 @@ struct CaptureView: View {
     /// override and the same input parses through.
     @State private var existing: Item?
     @State private var saveAnyway = false
-    /// Half height for the one-field input stage; the card preview gets the
-    /// full sheet.
+    /// The input stage hugs its content — title plus composer, plus the
+    /// error or duplicate notice when there is one — instead of sitting at
+    /// half height over empty space. The card preview gets the full sheet.
     @State private var detent: PresentationDetent = .medium
+    @State private var headerHeight: CGFloat = 0
+    @State private var inputHeight: CGFloat = 0
     @State private var confirmDiscard = false
+
+    private var inputDetent: PresentationDetent {
+        guard inputHeight > 0 else { return .medium }
+        return .height(headerHeight + inputHeight)
+    }
 
     private var canParse: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
@@ -47,52 +55,58 @@ struct CaptureView: View {
                     }
                 }
                 .padding(20)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    // Only the input stage drives the small detent; the
+                    // preview's long form goes to .large regardless.
+                    guard draft == nil else { return }
+                    inputHeight = height
+                }
             }
             .scrollDismissesKeyboard(.interactively)
+            // The header lives in the top safe-area inset, so its height
+            // shows up here rather than in the content above.
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { headerHeight = $0 }
             .sheetTitle(
                 draft == nil ? Voice.whereGoing : (manual ? "Add your own" : "Looks right?")
-            )
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
+            ) {
+                dismiss()
             }
+            // The wash at the top: a faint breath of ink while the parser
+            // reads, which turns into the card's own colour as it lands —
+            // the sheet takes the save's colour a beat before the card.
             .background(alignment: .top) {
-                if let draft {
-                    LinearGradient(
-                        colors: [draft.accentColor.opacity(0.25), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 220)
-                    .ignoresSafeArea()
-                }
+                let tint = draft?.accentColor ?? AppBackground.ink
+                let strength: Double = draft != nil ? 0.25 : (busy ? 0.09 : 0)
+                LinearGradient(
+                    colors: [tint.opacity(strength), tint.opacity(0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 220)
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: draft != nil ? 0.8 : 0.4), value: draft?.id)
+                .animation(.easeInOut(duration: 0.4), value: busy)
             }
             .background { ThemeFill(color: AppBackground.sheet) }
         }
-        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDetents([inputDetent, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
         .sensoryFeedback(.success, trigger: saved) { _, new in new }
         .onChange(of: draft != nil) { _, hasDraft in
-            withAnimation(.snappy) { detent = hasDraft ? .large : .medium }
+            withAnimation(.snappy) { detent = hasDraft ? .large : inputDetent }
+        }
+        // The measured height settles a frame or two after the sheet
+        // appears (and moves when a notice comes or goes): follow it.
+        .onChange(of: inputDetent) { _, now in
+            guard draft == nil else { return }
+            withAnimation(.snappy) { detent = now }
         }
         .onAppear {
             // CWG_BLANK is only set by automated screenshot runs; it jumps
             // straight to the blank-card edit stage.
             if ProcessInfo.processInfo.environment["CWG_BLANK"] != nil, draft == nil {
-                let blank = Item()
-                blank.kind = Item.Kind.place
-                draft = blank
-                editing = true
-                manual = true
+                startManual()
             }
             // CWG_DUPE (screenshot runs): type in a link already in the
             // library and send it, to photograph the duplicate notice.
@@ -113,8 +127,9 @@ struct CaptureView: View {
 
     @ViewBuilder
     private var inputStage: some View {
-        // The shared composer (also the first-run's save page).
-        Composer(text: $text, imageJPEG: $imageJPEG, busy: busy) {
+        // The shared composer (also the first-run's save page), here with
+        // the blank-card tool next to the photo and camera buttons.
+        Composer(text: $text, imageJPEG: $imageJPEG, busy: busy, onManual: startManual) {
             Task { await parse() }
         }
 
@@ -148,25 +163,28 @@ struct CaptureView: View {
             }
             .transition(.opacity)
         }
+    }
 
-        Button {
-            Haptics.tap()
-            let blank = Item()
-            blank.kind = Item.Kind.place
-            blank.source = "manual"
-            withAnimation(.snappy) {
-                draft = blank
-                editing = true
-                manual = true
-            }
-        } label: {
-            Label("Add it manually", systemImage: "square.and.pencil")
-                .font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity)
+    /// Skip the parser: a blank card straight into the form.
+    private func startManual() {
+        let blank = Item()
+        blank.kind = Item.Kind.place
+        blank.source = "manual"
+        withAnimation(.snappy) {
+            draft = blank
+            editing = true
+            manual = true
         }
-        .buttonStyle(.glass)
-        .controlSize(.large)
-        .padding(.top, 2)
+    }
+
+    /// Back from the blank card to the composer. Whatever was typed in
+    /// the field before is still there.
+    private func leaveManual() {
+        withAnimation(.snappy) {
+            draft = nil
+            editing = false
+            manual = false
+        }
     }
 
     // MARK: - Stage 2: preview / edit
@@ -236,12 +254,7 @@ struct CaptureView: View {
             Button {
                 save(draft)
             } label: {
-                // The acknowledgement is the label itself crossfading to
-                // "Saved" — no burst; the library's toast says the rest.
-                Label(saved ? "Saved" : "Save to library", systemImage: "checkmark")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .contentTransition(.opacity)
+                SaveMorphLabel("Save to library", systemImage: "checkmark", saved: saved)
             }
             .prominentGlass()
             .controlSize(.large)
@@ -249,20 +262,31 @@ struct CaptureView: View {
             // Not `.disabled`: that would grey the button out under "Saved".
             .allowsHitTesting(!saved)
 
-            if !saved {
+            if !saved, manual {
+                // A blank card is always in edit mode and the × already
+                // throws it away, so the one secondary action is the way
+                // back to the composer.
+                Button {
+                    Haptics.tap()
+                    leaveManual()
+                } label: {
+                    Label("Look it up instead", systemImage: "sparkle.magnifyingglass")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+            } else if !saved {
                 HStack(spacing: 10) {
-                    // A blank card is always in edit mode — no toggle.
-                    if !manual {
-                        Button {
-                            Haptics.tap()
-                            withAnimation(.snappy) { editing.toggle() }
-                        } label: {
-                            Label(editing ? "Show card" : "Edit first", systemImage: editing ? "rectangle.on.rectangle" : "pencil")
-                                .font(.subheadline.weight(.medium))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glass)
+                    Button {
+                        Haptics.tap()
+                        withAnimation(.snappy) { editing.toggle() }
+                    } label: {
+                        Label(editing ? "Show card" : "Edit first", systemImage: editing ? "rectangle.on.rectangle" : "pencil")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.glass)
 
                     Button(role: .destructive) {
                         Haptics.tap()
@@ -424,7 +448,7 @@ struct CaptureView: View {
     private func save(_ item: Item) {
         item.createdAt = .now
         item.updatedAt = .now
-        item.addedByEmail = SupabaseAuth.shared.email
+        item.stampAuthor()
         context.insert(item)
         try? context.save()
         Task { await SupabaseSync.announceSave(item) }

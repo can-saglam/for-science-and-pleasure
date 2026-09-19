@@ -21,6 +21,8 @@ struct ItemDetailView: View {
     @State private var detent: PresentationDetent = .medium
     @State private var fetching = false
     @State private var fetchNote: String?
+    /// A rendered postcard of this save, on its way to the share sheet.
+    @State private var shareCard: ShareCard.Rendered?
 
     private enum CalendarState {
         case idle, added, failed
@@ -106,7 +108,7 @@ struct ItemDetailView: View {
             .background(alignment: .top) {
                 if !showsHero {
                     LinearGradient(
-                        colors: [item.accentColor.opacity(0.22), .clear],
+                        colors: [item.accentColor.opacity(0.22), item.accentColor.opacity(0)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -147,14 +149,29 @@ struct ItemDetailView: View {
                             Text("Cancel").font(.subheadline)
                         }
                         .accessibilityLabel("Cancel editing")
-                    } else if let url = item.url.flatMap(URL.init(string:)) {
-                        ShareLink(item: url, message: Text(shareMessage)) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
                     } else {
-                        ShareLink(item: shareMessage) {
+                        // The link for a chat, or the card as a postcard —
+                        // the same pair the long-press menu offers.
+                        Menu {
+                            if let url = item.url.flatMap(URL.init(string:)) {
+                                ShareLink(item: url, message: Text(shareMessage)) {
+                                    Label("Share link", systemImage: "link")
+                                }
+                            } else {
+                                ShareLink(item: shareMessage) {
+                                    Label("Share details", systemImage: "text.alignleft")
+                                }
+                            }
+                            Button {
+                                Haptics.tap()
+                                Task { shareCard = await ShareCard.render(item) }
+                            } label: {
+                                Label("Share as image", systemImage: "photo")
+                            }
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
+                        .accessibilityLabel("Share")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -172,6 +189,10 @@ struct ItemDetailView: View {
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
+        .sheet(item: $shareCard) { card in
+            ActivitySheet(items: [card.image])
+                .presentationDetents([.medium, .large])
+        }
         // The edit form needs the room, so entering edit expands the sheet.
         .onChange(of: editing) { _, isEditing in
             if isEditing { detent = .large }
@@ -216,6 +237,7 @@ struct ItemDetailView: View {
         copy.reminderOffsetDays = item.reminderOffsetDays
         copy.reminderAnchor = item.reminderAnchor
         copy.remindAt = item.remindAt
+        copy.remindTime = item.remindTime
         copy.notes = item.notes
         copy.summary = item.summary
         copy.address = item.address
@@ -242,6 +264,7 @@ struct ItemDetailView: View {
         item.reminderOffsetDays = scratch.reminderOffsetDays
         item.reminderAnchor = scratch.reminderAnchor
         item.remindAt = scratch.remindAt
+        item.remindTime = scratch.remindTime
         item.notes = scratch.notes
         item.summary = scratch.summary
         item.address = scratch.address
@@ -252,6 +275,7 @@ struct ItemDetailView: View {
         item.lng = scratch.lng
         item.reconcileReminder()
         item.updatedAt = .now
+        item.stampAuthor()
         try? context.save()
         self.scratch = nil
     }
@@ -409,7 +433,7 @@ struct ItemDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.title)
-                .font(.display(24, relativeTo: .title2))
+                .font(.displaySmallBold(28, relativeTo: .title2))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 if let label = item.timeLabel {
@@ -434,8 +458,7 @@ struct ItemDetailView: View {
     private var readingContent: some View {
         if let summary = item.summary {
             Text(summary)
-                .font(.post(17))
-                .lineSpacing(3)
+                .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
 
@@ -490,8 +513,7 @@ struct ItemDetailView: View {
 
         if let notes = item.notes, !notes.isEmpty {
             Text(notes)
-                .font(.post(15, relativeTo: .subheadline))
-                .lineSpacing(2)
+                .font(.subheadline)
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 14, style: .continuous))
@@ -525,9 +547,7 @@ struct ItemDetailView: View {
                     Button(role: .destructive) {
                         Haptics.tap()
                         UndoBin.shared.stash(item.snapshot)
-                        SupabaseSync.setDeleted(item.id, true)
-                        context.delete(item)
-                        try? context.save()
+                        item.softDelete()
                         dismiss()
                     } label: {
                         Label("Delete", systemImage: "trash")

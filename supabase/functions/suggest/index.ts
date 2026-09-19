@@ -2,8 +2,9 @@
 // couple's own library for a given date. Authenticated (member JWT).
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { corsHeaders } from "../_shared/extract.ts";
-import { resolveCaller } from "../_shared/groups.ts";
+import { admin, resolveCaller } from "../_shared/groups.ts";
 import { groupHome, homeLabel } from "../_shared/home.ts";
+import { consumeQuota } from "../_shared/quota.ts";
 
 const PLANS_SCHEMA = {
   type: "object",
@@ -43,6 +44,12 @@ Deno.serve(async (req) => {
     if (!caller) {
       return new Response(JSON.stringify({ error: "not in a group" }), {
         status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!await consumeQuota(admin(), caller.userId, "suggest")) {
+      return new Response(JSON.stringify({ error: "daily limit reached" }), {
+        status: 429,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

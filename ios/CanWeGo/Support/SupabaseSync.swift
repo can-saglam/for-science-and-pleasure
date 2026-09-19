@@ -91,6 +91,7 @@ enum SupabaseSync {
         let mine = locals.filter { item in
             guard !isQuarantined(item) else { return false }
             if let me, item.createdBy == me || item.updatedBy == me { return true }
+            if item.updatedAt > lastSyncAt { return true }
             // Saves made before the app stamped ids, or offline before the
             // first pull: the email is the only attribution they carry.
             return item.createdBy == nil && item.addedByEmail != nil && item.addedByEmail == email
@@ -109,6 +110,12 @@ enum SupabaseSync {
 
     private static func hasLocals(context: ModelContext) -> Bool {
         ((try? context.fetchCount(FetchDescriptor<Item>())) ?? 0) > 0
+    }
+
+    /// Empties the local library (account deletion, or a successful swap).
+    static func wipeLocalLibrary(context: ModelContext) {
+        wipeLocals(context: context)
+        resetCursor()
     }
 
     private static func wipeLocals(context: ModelContext) {
@@ -169,17 +176,21 @@ enum SupabaseSync {
             let cursor = lastSyncAt
             let fresh = cursor == .distantPast
             let group = GroupStore.shared
-            // A session's first sync learns the group before anything else;
-            // later syncs rely on the card ContentView refreshes on every
-            // foreground.
-            if fresh { await group.refresh() }
+            guard await group.refresh() else {
+                throw SyncProblem(message: "Couldn\u{2019}t load your group. Try again in a moment.")
+            }
             // Whose library is this? Another account's, another group's, or
             // — a store from before ownership was tracked (which may hold
             // anything, including the iCloud-era duplicates) — nobody's. In
             // each case it goes before the pull, so nothing of theirs is
             // shown as ours or pushed as ours.
+            let locals = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+            let otherGroup = group.card.map { gid in
+                locals.contains { $0.groupId != nil && $0.groupId != gid.groupId }
+                    && !locals.contains { $0.groupId == gid.groupId || $0.groupId == nil }
+            } ?? false
             let untracked = group.libraryGroupId == nil && hasLocals(context: context)
-            let foreign = forceSwap || group.libraryIsForeign || untracked
+            let foreign = forceSwap || group.libraryIsForeign || untracked || otherGroup
             if fresh || foreign {
                 // Ownership is only ever recorded against a known group.
                 guard group.card != nil else {
@@ -202,7 +213,7 @@ enum SupabaseSync {
             if fresh || foreign {
                 // The server is canonical (it may be newer than a seeded
                 // store), so pull before pushing whatever only exists locally.
-                try await pull(context: context)
+                let serverTimes = try await pull(context: context)
                 // Worth a word only when it's the same person whose group
                 // changed under them; a different account signing in, or a
                 // store nobody had claimed, is simply shown its own library.
@@ -212,14 +223,15 @@ enum SupabaseSync {
                     SyncStatus.shared.librarySwappedTo = group.card?.name
                 }
                 // After a wipe nothing local can be ahead of the server.
+                // After a fresh cursor, only rows newer than the snapshot.
                 if !foreign {
-                    do { try await push(context: context, since: cursor) } catch { pushError = error }
+                    do { try await push(context: context, since: cursor, serverTimes: serverTimes) } catch { pushError = error }
                 }
             } else {
-                // Push and pull fail independently: one stuck local row must
-                // never block receiving the partner's saves.
+                // Push first: a failed push must not let pull destroy a
+                // newer local row. Pull itself is last-write-wins.
                 do { try await push(context: context, since: cursor) } catch { pushError = error }
-                try await pull(context: context)
+                _ = try await pull(context: context)
                 // An empty store nobody had claimed is this account's now.
                 if group.libraryGroupId == nil, group.card != nil { group.libraryReplaced() }
             }
@@ -292,7 +304,7 @@ enum SupabaseSync {
 
     private struct AppConfig: Decodable {
         var min_build: Int
-        var store_url: String
+        var store_url: String?
     }
 
     /// Reads `app_config.min_build` and compares it to this build. Below it,
@@ -311,7 +323,8 @@ enum SupabaseSync {
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   let config = try JSONDecoder().decode([AppConfig].self, from: data).first
             else { return true }
-            SyncStatus.shared.storeURL = URL(string: config.store_url)
+            let raw = config.store_url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            SyncStatus.shared.storeURL = raw.isEmpty || raw.hasPrefix("itms") ? nil : URL(string: raw)
             let current = buildNumber >= config.min_build
             SyncStatus.shared.updateRequired = !current
             return current
@@ -340,6 +353,7 @@ enum SupabaseSync {
         var reminder_offset_days: Int?
         var reminder_anchor: String?
         var remind_at: String?
+        var remind_time: String?
         var notes: String?
         var color: String?
         var source: String?
@@ -378,6 +392,7 @@ enum SupabaseSync {
             try c.encode(reminder_offset_days, forKey: .reminder_offset_days)
             try c.encode(reminder_anchor, forKey: .reminder_anchor)
             try c.encode(remind_at, forKey: .remind_at)
+            try c.encode(remind_time, forKey: .remind_time)
             try c.encode(notes, forKey: .notes)
             try c.encode(color, forKey: .color)
             // `source` is NOT NULL on the server; rows from before the
@@ -448,9 +463,17 @@ enum SupabaseSync {
 
     // MARK: - Push
 
-    private static func push(context: ModelContext, since cursor: Date) async throws {
+    private static func push(
+        context: ModelContext, since cursor: Date, serverTimes: [UUID: Date] = [:]
+    ) async throws {
         let locals = try context.fetch(FetchDescriptor<Item>())
-        let dirty = locals.filter { $0.updatedAt > cursor && !isQuarantined($0) }
+        let dirty = locals.filter { item in
+            guard !isQuarantined(item) else { return false }
+            if let server = serverTimes[item.id] {
+                return item.updatedAt > server
+            }
+            return item.updatedAt > cursor
+        }
         guard !dirty.isEmpty else { return }
         do {
             try await upsert(rows: dirty.map(row(from:)))
@@ -534,6 +557,7 @@ enum SupabaseSync {
             reminder_offset_days: item.reminderOffsetDays,
             reminder_anchor: item.reminderAnchor,
             remind_at: item.remindAt,
+            remind_time: item.remindTime,
             notes: item.notes,
             color: item.colorHex,
             source: item.source,
@@ -545,44 +569,79 @@ enum SupabaseSync {
             created_by: item.createdBy,
             created_at: item.createdAt,
             updated_at: item.updatedAt,
-            deleted_at: nil
+            deleted_at: item.deletedAt
         )
     }
 
     // MARK: - Pull
 
-    private static func pull(context: ModelContext) async throws {
-        // The whole table, soft-deleted rows included, so removals propagate.
-        // Fine at this scale (two people's saves).
-        var request = try await request(path: "rest/v1/items", query: [
-            .init(name: "select", value: "*"),
-            .init(name: "order", value: "updated_at.asc"),
-        ])
-        request.httpMethod = "GET"
+    private static let pageSize = 1000
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            throw SyncProblem(
-                message: "Couldn't fetch the latest saves.",
-                detail: "Pull failed (\(status)): \(String(data: data.prefix(300), encoding: .utf8) ?? "")",
-                status: status
-            )
-        }
-        // Row-by-row tolerance: one malformed row (an odd date, a null in a
-        // required field) must not poison the entire pull for everyone.
-        struct Lenient: Decodable {
-            let row: Row?
-            init(from decoder: Decoder) { row = try? Row(from: decoder) }
-        }
-        let rows = try decoder.decode([Lenient].self, from: data).compactMap(\.row)
+    /// Full snapshot in Range pages. Returns each row's server `updated_at`
+    /// so a fresh-cursor push only sends locals that are actually newer.
+    @discardableResult
+    private static func pull(context: ModelContext) async throws -> [UUID: Date] {
+        var rows: [Row] = []
+        var offset = 0
+        while true {
+            let end = offset + pageSize - 1
+            var request = try await request(path: "rest/v1/items", query: [
+                .init(name: "select", value: "*"),
+                .init(name: "order", value: "updated_at.asc"),
+            ])
+            request.httpMethod = "GET"
+            request.setValue("\(offset)-\(end)", forHTTPHeaderField: "Range")
+            request.setValue("count=exact", forHTTPHeaderField: "Prefer")
 
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? 0
+            guard status == 200 || status == 206 else {
+                throw SyncProblem(
+                    message: "Couldn't fetch the latest saves.",
+                    detail: "Pull failed (\(status)): \(String(data: data.prefix(300), encoding: .utf8) ?? "")",
+                    status: status
+                )
+            }
+            struct Lenient: Decodable {
+                let row: Row?
+                init(from decoder: Decoder) { row = try? Row(from: decoder) }
+            }
+            let page = try decoder.decode([Lenient].self, from: data).compactMap(\.row)
+            rows.append(contentsOf: page)
+
+            let range = http?.value(forHTTPHeaderField: "Content-Range")
+            if let total = contentRangeTotal(range) {
+                if rows.count >= total || page.isEmpty { break }
+                offset += pageSize
+                continue
+            }
+            // A full page with no range would be silently truncated — fail
+            // rather than treat the server as empty or complete.
+            if page.count >= pageSize {
+                throw SyncProblem(
+                    message: "Couldn't fetch the latest saves.",
+                    detail: "Pull truncated without a Content-Range."
+                )
+            }
+            break
+        }
+
+        var serverTimes: [UUID: Date] = [:]
         let locals = try context.fetch(FetchDescriptor<Item>())
-        let byID = Dictionary(locals.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var byID = Dictionary(locals.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
         for row in rows {
-            if row.deleted_at != nil {
-                if let local = byID[row.id] { context.delete(local) }
+            serverTimes[row.id] = row.updated_at
+            if let deleted = row.deleted_at {
+                if let local = byID[row.id] {
+                    // Last-write-wins: a newer local edit keeps the row and
+                    // retries on the next push.
+                    if row.updated_at >= local.updatedAt {
+                        local.deletedAt = deleted
+                        local.updatedAt = row.updated_at
+                    }
+                }
                 continue
             }
             if let local = byID[row.id] {
@@ -593,9 +652,26 @@ enum SupabaseSync {
                 let item = Item()
                 apply(row, to: item)
                 context.insert(item)
+                byID[row.id] = item
+            }
+        }
+
+        // After a complete snapshot, drop leftovers from another group.
+        if let gid = GroupStore.shared.card?.groupId {
+            let leftover = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+            for local in leftover where local.groupId != nil && local.groupId != gid {
+                context.delete(local)
             }
         }
         if context.hasChanges { try context.save() }
+        return serverTimes
+    }
+
+    /// PostgREST `Content-Range: 0-999/1234` (or `*/0`).
+    private static func contentRangeTotal(_ header: String?) -> Int? {
+        guard let header, let slash = header.lastIndex(of: "/") else { return nil }
+        let total = header[header.index(after: slash)...]
+        return Int(total)
     }
 
     private static func apply(_ row: Row, to item: Item) {
@@ -616,6 +692,8 @@ enum SupabaseSync {
         item.reminderOffsetDays = row.reminder_offset_days
         item.reminderAnchor = row.reminder_anchor
         item.remindAt = row.remind_at
+        // Postgres `time` comes back as HH:MM:SS; keep the HH:mm the app writes.
+        item.remindTime = row.remind_time.map { String($0.prefix(5)) }
         item.notes = row.notes
         item.colorHex = row.color
         item.source = row.source
@@ -627,6 +705,7 @@ enum SupabaseSync {
         item.createdBy = row.created_by
         item.createdAt = row.created_at
         item.updatedAt = row.updated_at
+        item.deletedAt = row.deleted_at
     }
 
     // MARK: - Column patches

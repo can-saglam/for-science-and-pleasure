@@ -33,6 +33,12 @@ struct SettingsView: View {
     @State private var showAuth = false
     @State private var showOnboardingPreview = false
     @State private var confirmSignOut = false
+    @State private var legal: LegalPage?
+    @State private var confirmDelete = false
+    @State private var showDeleteConfirm = false
+    @State private var deletePhrase = ""
+    @State private var deleteBusy = false
+    @State private var deleteError: String?
     /// Which maps app gets the directions taps — same key `TransportApp` reads.
     @AppStorage(TransportApp.key, store: UserDefaults(suiteName: SharedInbox.groupID))
     private var transportApp = TransportApp.google.rawValue
@@ -73,14 +79,12 @@ struct SettingsView: View {
                 GroupSection(ui: groupUI)
 
                 Section("Appearance") {
-                    menuRow("Theme", icon: "paintpalette.fill") {
-                        Picker(selection: theme) {
-                            ForEach(AppTheme.allCases) { option in
-                                Text(option.name).tag(option)
-                            }
-                        } label: { EmptyView() }
+                    // The same one-tap swatch row as the first run: the
+                    // whole sheet repaints under the finger, no sub-screen.
+                    ThemeSwatchRow(title: "Theme") { option in
+                        theme.wrappedValue = option
                     }
-                    .sensoryFeedback(.selection, trigger: themes.current)
+                    .padding(.vertical, 6)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -113,6 +117,22 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Your library")
+                }
+                .listRowBackground(Self.rowBackground)
+
+                Section("Legal") {
+                    Button {
+                        Haptics.tap()
+                        legal = .privacy
+                    } label: {
+                        row("Privacy", icon: "hand.raised.fill")
+                    }
+                    Button {
+                        Haptics.tap()
+                        legal = .terms
+                    } label: {
+                        row("Terms", icon: "doc.text.fill")
+                    }
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -178,6 +198,29 @@ struct SettingsView: View {
                         } label: {
                             row("Sign out", icon: "rectangle.portrait.and.arrow.right")
                                 .foregroundStyle(AppBackground.destructive)
+                        }
+                        Button(role: .destructive) {
+                            Haptics.tap()
+                            deletePhrase = ""
+                            deleteError = nil
+                            confirmDelete = true
+                        } label: {
+                            row("Delete account", icon: "trash")
+                                .foregroundStyle(AppBackground.destructive)
+                        }
+                        .confirmationDialog(
+                            "Delete your account?",
+                            isPresented: $confirmDelete,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Export, then type DELETE", role: .destructive) {
+                                _ = exportFile()
+                                deletePhrase = ""
+                                showDeleteConfirm = true
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text(deleteAccountCopy)
                         }
                         .confirmationDialog(
                             "Sign out?",
@@ -255,6 +298,28 @@ struct SettingsView: View {
             .onChange(of: syncStatus.syncing) { _, now in
                 if !now { pending = SupabaseSync.pendingCount(context: context) }
             }
+            .sheet(item: $legal) { page in
+                LegalSheet(page: page)
+            }
+            .alert("Type DELETE to confirm", isPresented: $showDeleteConfirm) {
+                TextField("DELETE", text: $deletePhrase)
+                    .textInputAutocapitalization(.characters)
+                Button("Delete account", role: .destructive) {
+                    Task { await deleteAccount() }
+                }
+                .disabled(deletePhrase.trimmingCharacters(in: .whitespaces) != "DELETE")
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(deleteAccountCopy)
+            }
+            .alert("Couldn't delete the account", isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            )) {
+                Button("OK") {}
+            } message: {
+                Text(deleteError ?? "")
+            }
             .fullScreenCover(isPresented: $showAuth) {
                 AuthView()
             }
@@ -310,7 +375,6 @@ struct SettingsView: View {
         Binding(
             get: { themes.current },
             set: { new in
-                Haptics.selection()
                 themes.select(new)
                 syncAppIcon()
             }
@@ -322,6 +386,47 @@ struct SettingsView: View {
     /// system refuses icon changes while the app isn't active).
     private func syncAppIcon() {
         themes.syncAppIcon()
+    }
+
+    private var deleteAccountCopy: String {
+        let shared = (GroupStore.shared.card?.members.count ?? 0) > 1
+        if shared {
+            return "You share this library. Deleting your account leaves their saves where they are. Export a Markdown copy from Your library first if you want one."
+        }
+        return "You're the only member. Deleting your account removes this library. Export a Markdown copy from Your library first if you want one."
+    }
+
+    private func deleteAccount() async {
+        guard deletePhrase.trimmingCharacters(in: .whitespaces) == "DELETE" else { return }
+        deleteBusy = true
+        defer { deleteBusy = false }
+        do {
+            _ = exportFile()
+            let jwt = try await SupabaseAuth.shared.validToken()
+            var request = URLRequest(url: SupabaseAuth.baseURL.appending(path: "functions/v1/delete-account"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+            request.httpBody = Data("{}".utf8)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else {
+                let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+                throw SupabaseAuth.AuthError(message: message ?? "Delete failed (\(status)).", status: status)
+            }
+            SupabaseSync.wipeLocalLibrary(context: context)
+            SharedInbox.removeAll()
+            #if !APP_EXTENSION
+            OnboardingGate.clearSkip()
+            #endif
+            HomeStore.shared.signedOut()
+            GroupStore.shared.signedOut()
+            SupabaseAuth.shared.signOut()
+            dismiss()
+        } catch {
+            deleteError = SyncProblem(error).message
+        }
     }
 
     /// Same shape as the web export: grouped, human-readable Markdown.
@@ -347,10 +452,10 @@ struct SettingsView: View {
             lines.append("")
         }
 
-        section("Events", items.filter { $0.isEvent && !$0.isDone && !$0.isMissed })
-        section("Places", items.filter { $0.isPlace && !$0.isDone && !$0.isMissed })
-        section("Been", items.filter(\.isDone))
-        section("Missed", items.filter(\.isMissed))
+        section("Events", items.filter { !$0.isDeleted && $0.isEvent && !$0.isDone && !$0.isMissed })
+        section("Places", items.filter { !$0.isDeleted && $0.isPlace && !$0.isDone && !$0.isMissed })
+        section("Been", items.filter { !$0.isDeleted && $0.isDone })
+        section("Missed", items.filter { !$0.isDeleted && $0.isMissed })
 
         let url = FileManager.default.temporaryDirectory
             .appending(path: "can-we-go.md")

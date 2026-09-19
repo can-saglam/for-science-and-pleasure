@@ -9,6 +9,8 @@ import TipKit
 final class ViewMode {
     static let shared = ViewMode()
     var showMap = false
+    /// The Events map's footer toggle: pins for things not open yet too.
+    var mapShowsUpcoming = false
 }
 
 /// One tab per kind, carrying the whole story of that kind.
@@ -38,6 +40,9 @@ struct LibraryView: View {
     /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
     @State private var refreshNotice: (text: String, icon: String)?
     @State private var syncStatus = SyncStatus.shared
+    @State private var undoBin = UndoBin.shared
+    /// A pull-to-refresh in flight: the wordmark's "?" rocks meanwhile.
+    @State private var refreshing = false
     private let shareTip = ShareTip()
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
@@ -56,7 +61,7 @@ struct LibraryView: View {
     // MARK: - Filtering
 
     private var base: [Item] {
-        items.filter { $0.kind == kind && !$0.isDone && !$0.isMissed }
+        items.filter { $0.kind == kind && !$0.isDeleted && !$0.isDone && !$0.isMissed }
     }
 
     /// One chip/search filter shared by the active list and the journal.
@@ -227,13 +232,13 @@ struct LibraryView: View {
 
     private var been: [Item] {
         items
-            .filter { $0.kind == kind && $0.isDone && matches($0) }
+            .filter { $0.kind == kind && !$0.isDeleted && $0.isDone && matches($0) }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private var missed: [Item] {
         items
-            .filter { $0.kind == kind && $0.isMissed && $0.endsOn != nil && matches($0) }
+            .filter { $0.kind == kind && !$0.isDeleted && $0.isMissed && $0.endsOn != nil && matches($0) }
             .sorted {
                 ($0.endsOn ?? "") != ($1.endsOn ?? "")
                     ? ($0.endsOn ?? "") > ($1.endsOn ?? "")
@@ -258,13 +263,15 @@ struct LibraryView: View {
     // MARK: - Map
 
     /// The Events map only pins what you could walk into today: running or
-    /// undated things — nothing not-yet-open, nothing gone.
+    /// undated things — nothing not-yet-open, nothing gone. The footer
+    /// pill on the map lets the not-yet-open ones in.
     private var mapItems: [Item] {
         guard kind == Item.Kind.event else { return visible }
         return visible.filter {
             switch $0.timeBucket {
             case .now, .lastChance, .undated: true
-            case .upcoming, .past: false
+            case .upcoming: mode.mapShowsUpcoming
+            case .past: false
             }
         }
     }
@@ -304,9 +311,13 @@ struct LibraryView: View {
                 if mode.showMap {
                     MapPinsView(
                         items: mapItems,
-                        hiddenUpcoming: kind == Item.Kind.event
+                        upcoming: kind == Item.Kind.event
                             ? visible.filter { $0.timeBucket == .upcoming }.count
-                            : 0
+                            : 0,
+                        showsUpcoming: Binding(
+                            get: { mode.mapShowsUpcoming },
+                            set: { mode.mapShowsUpcoming = $0 }
+                        )
                     ) { selected = $0 }
                         .transition(.opacity)
                 }
@@ -326,7 +337,7 @@ struct LibraryView: View {
             // No navigation title: the wordmark owns the leading edge, and
             // the bottom bar already says which tab you're on.
             .navigationBarTitleDisplayMode(.inline)
-            .logoTitle()
+            .logoTitle(refreshing: refreshing)
             // Our own search control, not `.searchable`: the system pins
             // its search item to the far trailing end and won't hide it on
             // the map — this one sits left of the group and steps aside, so
@@ -384,10 +395,6 @@ struct LibraryView: View {
             // CWG_OPEN / CWG_CHIP are only set by automated screenshot runs;
             // they deep-open an item / preselect a chip and do nothing otherwise.
             .task {
-                // One coarse location fix so place cards can show distance.
-                if kind == Item.Kind.place {
-                    LocationStore.shared.refresh()
-                }
                 let env = ProcessInfo.processInfo.environment
                 if let probe = env["CWG_OPEN"],
                    let match = visible.first(where: { $0.title.localizedCaseInsensitiveContains(probe) }) {
@@ -537,6 +544,25 @@ struct LibraryView: View {
     }
 
     private var list: some View {
+        ScrollViewReader { proxy in
+            listBody
+                // A card just landed in this tab: bring it into view, then
+                // its own glow (ItemCardRow) says "here". A beat's delay lets
+                // the row exist before the scroll asks for it.
+                .onChange(of: undoBin.landed) { _, id in
+                    guard let id, !mode.showMap,
+                          (visible + been).contains(where: { $0.id == id })
+                    else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(0.3))
+                        guard undoBin.landed == id else { return }
+                        withAnimation(.snappy) { proxy.scrollTo(id, anchor: .center) }
+                    }
+                }
+        }
+    }
+
+    private var listBody: some View {
         List {
             // CWG_STALE only exists so screenshot runs can photograph the banner.
             if (syncStatus.isStale && SupabaseAuth.shared.signedIn)
@@ -579,12 +605,14 @@ struct LibraryView: View {
             }
 
             if visible.isEmpty && !been.isEmpty && query.isEmpty && category == nil && area == nil {
-                Text("Nothing coming up")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .cardListRow()
+                EmptyFigure(
+                    title: "Nothing coming up",
+                    message: kind == Item.Kind.place
+                        ? "Everywhere you saved, you've been. Add the next one with +."
+                        : "Everything you saved has been and gone. Add the next one with +."
+                )
+                .padding(.vertical, 8)
+                .cardListRow()
             }
 
             if visible.isEmpty && been.isEmpty && missed.isEmpty && base.isEmpty && awaitingFirstPull {
@@ -601,19 +629,14 @@ struct LibraryView: View {
                 .padding(.top, 40)
                 .cardListRow()
             } else if visible.isEmpty && been.isEmpty && missed.isEmpty {
-                ContentUnavailableView {
-                    Label(
-                        base.isEmpty ? emptyTitle : "Nothing matches",
-                        systemImage: emptyGlyph
-                    )
-                } description: {
-                    Text(
-                        base.isEmpty
-                            ? emptyPrompt
-                            : "Try a different word, or clear the filters."
-                    )
-                } actions: {
-                    if category != nil || area != nil || !query.isEmpty {
+                let filtered = category != nil || area != nil || !query.isEmpty
+                EmptyFigure(
+                    title: base.isEmpty ? emptyTitle : "Nothing matches",
+                    message: base.isEmpty ? emptyPrompt : "Try a different word, or clear the filters.",
+                    // A chip's own glyph when one is chosen; the figure otherwise.
+                    glyph: category != nil ? emptyGlyph : nil
+                ) {
+                    if filtered {
                         Button("Clear filters") {
                             Haptics.tap()
                             withAnimation(.snappy) {
@@ -640,7 +663,9 @@ struct LibraryView: View {
         // Pull-to-refresh answers either way: a thump and "Updated just
         // now", or a brief notice when the sync couldn't get through.
         .refreshable {
+            refreshing = true
             await SupabaseSync.sync(context: context)
+            refreshing = false
             if let problem = SyncStatus.shared.problem {
                 let offline = problem.status == 0
                 showRefreshNotice(
@@ -700,6 +725,58 @@ struct LibraryView: View {
     }
 
     // MARK: - Empty states
+
+    /// The running figure from the welcome page, small and in the ink,
+    /// with a line under it — the brand in the emptiest screen instead of
+    /// a system placeholder. A chip's glyph stands in when one is chosen.
+    private struct EmptyFigure<Actions: View>: View {
+        let title: String
+        let message: String
+        var glyph: String? = nil
+        @ViewBuilder var actions: () -> Actions
+
+        init(title: String, message: String, glyph: String? = nil,
+             @ViewBuilder actions: @escaping () -> Actions = { EmptyView() }) {
+            self.title = title
+            self.message = message
+            self.glyph = glyph
+            self.actions = actions
+        }
+
+        var body: some View {
+            VStack(spacing: 14) {
+                if let glyph {
+                    Image(systemName: glyph)
+                        .font(.system(size: 34, weight: .medium))
+                        .foregroundStyle(AppBackground.ink.opacity(0.55))
+                        .frame(height: 56)
+                } else {
+                    Image("Figure")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 56)
+                        .foregroundStyle(AppBackground.ink.opacity(0.7))
+                        .accessibilityHidden(true)
+                }
+                VStack(spacing: 6) {
+                    Text(title)
+                        .font(.displaySmallBold(22, relativeTo: .title3))
+                        .foregroundStyle(AppBackground.ink)
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                actions()
+                    .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+    }
 
     private var emptyTitle: String {
         if let category {
@@ -825,7 +902,7 @@ struct LibraryView: View {
                 HStack(spacing: 6) {
                     Text("Archive")
                     Text("\(archiveAll.count)")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(AppBackground.ink.opacity(SectionHeader.countOpacity))
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
@@ -833,7 +910,9 @@ struct LibraryView: View {
                         .animation(reduceMotion ? nil : .snappy, value: archiveOpen)
                 }
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                // Same ink shares as SectionHeader, so the count is always
+                // the dimmer of the two on every theme.
+                .foregroundStyle(AppBackground.ink.opacity(SectionHeader.titleOpacity))
                 .padding(.leading, 4)
                 .padding(.top, 12)
                 .contentShape(.rect)
@@ -870,8 +949,7 @@ struct LibraryView: View {
             categories: categories,
             areas: areas,
             category: $category,
-            area: $area,
-            fadeColor: kind == Item.Kind.place ? AppBackground.places : AppBackground.library
+            area: $area
         )
     }
 }
@@ -879,20 +957,13 @@ struct LibraryView: View {
 /// Liquid Glass filter chips — the one custom control layer here.
 /// Categories first, then (for Places) neighbourhoods after a divider.
 ///
-/// Deliberately its own view: the end-of-row fade tracks scroll position,
-/// and while this state lived on LibraryView every swipe past the edge
-/// recomputed the entire page (sections, sorts and all) mid-gesture —
-/// the source of the chip row's jumpiness. Here a flip re-renders only
-/// this row.
+/// Deliberately its own view so a chip toggle re-renders only this row,
+/// not the whole page (sections, sorts and all) behind it.
 private struct ChipRow: View {
     let categories: [String]
     let areas: [String]
     @Binding var category: String?
     @Binding var area: String?
-    let fadeColor: Color
-
-    /// Whether the row is scrolled to its end — drives the fade hint.
-    @State private var atEnd = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -924,28 +995,10 @@ private struct ChipRow: View {
             }
             .padding(.vertical, 2)
         }
+        // Chips run straight off the screen edge — no fade. The glass
+        // capsules are brighter than the papers, so any dissolve into the
+        // page read as a smudge; a clean cut hints at more just as well.
         .scrollClipDisabled()
-        .onScrollGeometryChange(for: Bool.self) { geo in
-            geo.contentOffset.x + geo.containerSize.width >= geo.contentSize.width - 8
-        } action: { _, nowAtEnd in
-            if atEnd != nowAtEnd { atEnd = nowAtEnd }
-        }
-        // A soft dissolve into the page at the screen edge, hinting there
-        // are more chips to scroll. A mask can't do this: it would also clip
-        // the intentional overflow into the margins (scrollClipDisabled).
-        .overlay(alignment: .trailing) {
-            LinearGradient(
-                colors: [.clear, fadeColor],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(width: 36)
-            // The row is inset 20 pt from the screen; reach the true edge.
-            .offset(x: 20)
-            .allowsHitTesting(false)
-            .opacity(atEnd ? 0 : 1)
-            .animation(.easeOut(duration: 0.15), value: atEnd)
-        }
     }
 
     private func chip(_ label: String, isOn: Bool, toggle: @escaping () -> Void) -> some View {

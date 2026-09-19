@@ -142,6 +142,9 @@ struct GroupSection: View {
             } label: {
                 SettingsRow(title: "City", icon: "building.2.fill")
             }
+        } else if !HomeStore.shared.isSet {
+            SettingsRow(title: "Set a home city", icon: "building.2.fill")
+                .foregroundStyle(.secondary)
         }
 
         // One call to action, always present until the group is at four.
@@ -384,18 +387,8 @@ struct InviteSheet: View {
             }
             .padding(24)
             .appBackground(AppBackground.sheet)
-            .sheetTitle(groupName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
+            .sheetTitle(groupName) {
+                dismiss()
             }
         }
         .presentationDetents([.fraction(0.55), .large])
@@ -418,7 +411,7 @@ struct PlusSheet: View {
                     .foregroundStyle(AppBackground.accent)
                 VStack(spacing: 8) {
                     Text("Room for two more")
-                        .font(.title2.weight(.bold))
+                        .font(.displaySmallBold(30, relativeTo: .title2))
                     Text("Free groups have two seats. Plus opens two more: four people, one library, everyone adding and planning together.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

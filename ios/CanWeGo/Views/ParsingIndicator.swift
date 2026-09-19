@@ -4,6 +4,9 @@ import SwiftUI
 /// blue, with rotating status copy underneath. Shared by the capture sheet
 /// and the share extension.
 struct ParsingIndicator: View {
+    /// What's being read, for the first line of the ticker.
+    var text: String? = nil
+    var hasImage = false
     @State private var spinning = false
 
     var body: some View {
@@ -25,10 +28,42 @@ struct ParsingIndicator: View {
                 )
                 .onAppear { spinning = true }
 
-            ParsingPhrases()
+            ParsingPhrases(text: text, hasImage: hasImage)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// A save button's face: the words give way to a single checkmark that
+/// bounces in when `saved` flips, then the sheet leaves. The
+/// acknowledgement is the button itself; the library's toast says the rest.
+struct SaveMorphLabel: View {
+    let title: String
+    let systemImage: String
+    let saved: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(_ title: String, systemImage: String, saved: Bool) {
+        self.title = title
+        self.systemImage = systemImage
+        self.saved = saved
+    }
+
+    var body: some View {
+        ZStack {
+            Label(title, systemImage: systemImage)
+                .opacity(saved ? 0 : 1)
+            Image(systemName: "checkmark")
+                .font(.body.weight(.bold))
+                .symbolEffect(.bounce, value: saved)
+                .opacity(saved ? 1 : 0)
+                .scaleEffect(saved ? 1 : 0.6)
+        }
+        .font(.subheadline.weight(.semibold))
+        .frame(maxWidth: .infinity)
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.35), value: saved)
+        .accessibilityLabel(saved ? "Saved" : title)
     }
 }
 
@@ -100,10 +135,16 @@ struct SmallRing: View {
     }
 }
 
-/// Status copy that moves while the parser works.
+/// Status copy that moves while the parser works. The first line names
+/// what's being read — "Reading timeout.com…", "Reading the photo…" —
+/// when the caller knows; the rest are the same for everything.
 struct ParsingPhrases: View {
-    private static let phrases = [
-        "Reading it…",
+    /// What was sent: the text (a link or a name) and whether a picture
+    /// came with it. Nil keeps the generic first line.
+    var text: String? = nil
+    var hasImage = false
+
+    private static let rest = [
         "Finding the details…",
         "Checking the map…",
         "Nearly there…",
@@ -111,10 +152,31 @@ struct ParsingPhrases: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var phrases: [String] {
+        [Self.opener(text: text, hasImage: hasImage)] + Self.rest
+    }
+
+    /// "Reading timeout.com…" for a link, "Reading the photo…" for a
+    /// picture (with or without words), "Reading it…" otherwise.
+    static func opener(text: String?, hasImage: Bool) -> String {
+        if let host = text.flatMap(firstHost) { return "Reading \(host)…" }
+        if hasImage { return "Reading the photo…" }
+        return "Reading it…"
+    }
+
+    /// The first link's host, without "www." — the site as people say it.
+    private static func firstHost(in text: String) -> String? {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let range = NSRange(text.startIndex..., in: text)
+        guard let host = detector?.firstMatch(in: text, range: range)?.url?.host() else { return nil }
+        let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return bare.isEmpty ? nil : bare
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2.4)) { context in
             let step = Int(context.date.timeIntervalSinceReferenceDate / 2.4)
-            Text(Self.phrases[step % Self.phrases.count])
+            Text(phrases[step % phrases.count])
                 .id(step)
                 .transition(reduceMotion ? .opacity : .push(from: .bottom))
                 .animation(.snappy, value: step)

@@ -22,11 +22,10 @@ bottom), item detail, and a one-off import from the web app's Supabase data.
    This writes `ios/CanWeGo/Resources/seed-items.json` (gitignored — it's
    personal data and the repo is public). The app imports it on first launch
    if its store is empty.
-4. The capture flow ("+" button) calls the Supabase `parse` edge function,
-   authenticated with the ingest secret. It reads
-   `ios/CanWeGo/Resources/Secrets.plist` (gitignored) — copy
-   `Secrets.example.plist` and fill in the values from `.supabase.env`.
-   Already generated on this machine.
+4. The capture flow ("+" button) calls the Supabase `parse` edge function
+   with the signed-in user's JWT. `Secrets.plist` (gitignored) only needs
+   `SUPABASE_URL` — copy `Secrets.example.plist`. Already generated on this
+   machine.
 5. Build & run. On a simulator without an iCloud account the app silently
    falls back to a local-only store — sign into iCloud in the simulator's
    Settings (or run on your phone) to get sync.

@@ -132,7 +132,7 @@ struct ContentView: View {
             .allowsHitTesting(false)
     }
 
-    var body: some View {
+    private var tabs: some View {
         // The system tab bar is the only place the bubbly light-bend
         // lives — a custom glass pill can slide, it cannot refract.
         // Add is a search-role tab so it renders as the trailing glass
@@ -238,6 +238,13 @@ struct ContentView: View {
         )) {
             JoinSheet(initialCode: joinCode)
         }
+    }
+
+    /// The tabs plus their sheets and deep-link plumbing (`tabs`), then
+    /// the overlays and lifecycle. Two chains: one was more than the
+    /// type-checker would finish in reasonable time.
+    var body: some View {
+        tabs
         // Five-second Undo after a save, a swipe-delete or "We did go!".
         .overlay(alignment: .bottom) {
             VStack(spacing: 10) {
@@ -267,6 +274,8 @@ struct ContentView: View {
         .onChange(of: undoBin.saved?.id) { _, id in
             if id != nil { announceUndo("Saved. Undo available.") }
         }
+        // A card landing on the other tab: go there, so the glow is seen.
+        .onChange(of: undoBin.landed) { _, id in followLanding(id) }
         .onChange(of: undoBin.deleted?.id) { _, id in
             if id != nil { announceUndo("Deleted. Undo available.") }
         }
@@ -340,67 +349,91 @@ struct ContentView: View {
         // Sweep anything the share extension parked in the App Group inbox,
         // then refresh the shared URL index.
         .onChange(of: scenePhase, initial: true) { _, phase in
-            guard phase == .active else { return }
-            dayOfMonth = Calendar.current.component(.day, from: Date())
-            // A reminder tap that landed before the UI existed (cold start).
-            if let pending = ItemGate.pending {
-                openItem(pending)
-            }
-            let existing = Set(items.compactMap { $0.url.map(SavedURLIndex.normalize) })
-            let pending = SharedInbox.drain()
-            var drained: [Item] = []
-            for save in pending {
-                // The extension warns about duplicates, but its index can
-                // lag — this is the authoritative check.
-                if save.allowDuplicate != true,
-                   let url = save.url, existing.contains(SavedURLIndex.normalize(url)) {
-                    continue
-                }
-                let item = Item(pending: save)
-                item.addedByEmail = SupabaseAuth.shared.email
-                context.insert(item)
-                drained.append(item)
-            }
-            if !pending.isEmpty {
-                try? context.save()
-                // They've found the share sheet; no need to point at it.
-                ShareTip.hasShared = true
-            }
-            if !drained.isEmpty {
-                // Share-sheet saves ping the other member once they land.
-                Task {
-                    for item in drained { await SupabaseSync.announceSave(item) }
-                }
-            }
-            SavedURLIndex.rebuild(from: items, extraURLs: pending.compactMap(\.url))
-            SpotlightIndex.sync(items: items)
-            // Fill the in-memory image cache from disk before the cards
-            // need it — off the main thread, so the launch animation never
-            // competes with a dozen JPEG decodes. Only the first screenful:
-            // warming the whole library once held every decoded image in
-            // RAM at once, and the rest loads lazily as it scrolls in.
-            ImageStore.prewarm(prewarmURLs)
-            // Backfill runs after the pull, not before — on a fresh install
-            // the library is empty until the first sync lands.
-            Task {
-                await SupabaseSync.sync(context: context)
-                // Anything new the pull brought in warms up too.
-                ImageStore.prewarm(prewarmURLs)
-                await ThumbnailBackfill.run(context: context)
-                // The widget's snapshot rebuilds after the pull, so it
-                // rotates through the freshest library.
-                WidgetStore.sync(items: items)
-            }
-            Task { await MembersStore.shared.refresh() }
-            Task { await GroupStore.shared.refresh() }
-            // Home first: it's the clock every time label below is read on.
-            Task { await HomeStore.shared.refresh() }
+            if phase == .active { becameActive() }
         }
         // Any local save (add, edit, done, delete-undo…) syncs to the shared
         // table after a short debounce.
         .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
             SupabaseSync.schedule(context: context)
         }
+    }
+
+    /// Everything that runs when the app comes to the front.
+    private func becameActive() {
+        dayOfMonth = Calendar.current.component(.day, from: Date())
+        // A reminder tap that landed before the UI existed (cold start).
+        if let pending = ItemGate.pending {
+            openItem(pending)
+        }
+        let existing = Set(items.compactMap { $0.url.map(SavedURLIndex.normalize) })
+        var claimed: [Item] = []
+        var claimedURLs: [String] = []
+        // A foreign library is about to be replaced — leave the files
+        // so they can land once this account's store is in place.
+        if !group.libraryIsForeign {
+            for claim in SharedInbox.claim(for: SupabaseAuth.shared.userId) {
+                let save = claim.save
+                if save.allowDuplicate != true,
+                   let url = save.url, existing.contains(SavedURLIndex.normalize(url)) {
+                    SharedInbox.acknowledge(claim)
+                    continue
+                }
+                let item = Item(pending: save)
+                item.addedByEmail = SupabaseAuth.shared.email
+                if item.createdBy == nil { item.createdBy = SupabaseAuth.shared.userId }
+                item.updatedBy = SupabaseAuth.shared.userId
+                context.insert(item)
+                do {
+                    try context.save()
+                    SharedInbox.acknowledge(claim)
+                    claimed.append(item)
+                    if let url = save.url { claimedURLs.append(url) }
+                } catch {
+                    context.delete(item)
+                    try? context.save()
+                }
+            }
+        }
+        if !claimed.isEmpty {
+            // They've found the share sheet; no need to point at it.
+            ShareTip.hasShared = true
+            // Show where the newest one went.
+            if let last = claimed.last { undoBin.land(last.id) }
+            Task {
+                for item in claimed { await SupabaseSync.announceSave(item) }
+            }
+        }
+        let listed = items.filter { !$0.isDeleted }
+        SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
+        SpotlightIndex.sync(items: listed)
+        // Fill the in-memory image cache from disk before the cards
+        // need it — off the main thread, so the launch animation never
+        // competes with a dozen JPEG decodes. Only the first screenful:
+        // warming the whole library once held every decoded image in
+        // RAM at once, and the rest loads lazily as it scrolls in.
+        ImageStore.prewarm(prewarmURLs)
+        // Backfill runs after the pull, not before — on a fresh install
+        // the library is empty until the first sync lands.
+        Task {
+            await SupabaseSync.sync(context: context)
+            // Anything new the pull brought in warms up too.
+            ImageStore.prewarm(prewarmURLs)
+            await ThumbnailBackfill.run(context: context)
+            // The widget's snapshot rebuilds after the pull, so it
+            // rotates through the freshest library.
+            WidgetStore.sync(items: items.filter { !$0.isDeleted })
+        }
+        Task { await MembersStore.shared.refresh() }
+        Task { await GroupStore.shared.refresh() }
+        // Home first: it's the clock every time label below is read on.
+        Task { await HomeStore.shared.refresh() }
+    }
+
+    /// A card landing on the other tab: go there, so the glow is seen.
+    private func followLanding(_ id: UUID?) {
+        guard let id, let item = items.first(where: { $0.id == id }), !item.isDone else { return }
+        let target = item.isEvent ? 0 : 1
+        if tab != target { withAnimation(.snappy) { tab = target } }
     }
 
     private func announceUndo(_ message: String) {
@@ -425,12 +458,10 @@ struct ContentView: View {
             Text(message)
                 .font(.subheadline)
                 .lineLimit(1)
-            Button("Undo") {
+            UndoButton(seconds: UndoBin.window, reduceMotion: reduceMotion) {
                 Haptics.tap()
                 undo()
             }
-            .font(.subheadline.weight(.semibold))
-            .accessibilityLabel("Undo")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -442,7 +473,7 @@ struct ContentView: View {
     /// them: urgent events first (the events tab is the landing page), then
     /// places. Everything past this loads lazily on scroll.
     private var prewarmURLs: [URL] {
-        let active = items.filter { !$0.isDone }
+        let active = items.filter { !$0.isDeleted && !$0.isDone }
         let events = active.filter(\.isEvent)
             .sorted { ($0.daysUntilClose ?? .max) < ($1.daysUntilClose ?? .max) }
         let places = active.filter(\.isPlace)
@@ -488,6 +519,41 @@ struct ContentView: View {
                 tab = new
             }
         )
+    }
+}
+
+/// "Undo" in a capsule whose outline drains over the window it's good
+/// for — how long you have, without a number. Holds a full ring under
+/// Reduce Motion.
+private struct UndoButton: View {
+    let seconds: Double
+    let reduceMotion: Bool
+    let action: () -> Void
+    @State private var shownAt = Date.now
+
+    var body: some View {
+        Button(action: action) {
+            TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
+                let elapsed = context.date.timeIntervalSince(shownAt)
+                let remaining = reduceMotion ? 1 : max(0, 1 - elapsed / seconds)
+                Text("Undo")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(AppBackground.ink.opacity(0.08), in: .capsule)
+                    .overlay(
+                        Capsule()
+                            .trim(from: 0, to: remaining)
+                            .stroke(AppBackground.ink.opacity(0.55), style: .init(lineWidth: 1.5, lineCap: .round))
+                            // Trim runs from the capsule's trailing middle;
+                            // flipped so the ring drains away from the eye.
+                            .rotationEffect(.degrees(180))
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Undo")
+        .onAppear { shownAt = .now }
     }
 }
 

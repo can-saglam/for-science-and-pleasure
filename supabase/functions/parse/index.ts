@@ -1,7 +1,6 @@
 // parse: stateless extraction endpoint. Takes {text?, image_base64?, image_media_type?}
-// and returns a parsed card; nothing is stored. Two callers, two auth paths:
-// the web app sends a member's JWT, the iOS app sends the ingest secret
-// (the same one already embedded in the share-sheet Shortcut).
+// and returns a parsed card; nothing is stored. A member JWT is required —
+// the home city comes from their group. The old ingest-secret path is gone.
 import { internalErrorBody } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -10,29 +9,35 @@ import {
   VagueInputError,
 } from "../_shared/extract.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
-import { resolveCaller } from "../_shared/groups.ts";
-import { groupHome, LONDON } from "../_shared/home.ts";
+import { admin, resolveCaller } from "../_shared/groups.ts";
+import { groupHome } from "../_shared/home.ts";
+import { consumeQuota, quotaResponse } from "../_shared/quota.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
   try {
-    const secret = req.headers.get("x-ingest-secret");
-    const secretOk = Boolean(secret) && secret === Deno.env.get("INGEST_SECRET");
-    // The caller's JWT is what tells us which group — and so which home
-    // city — the parse is for. The secret alone still gets in (older
-    // builds, the Shortcut) and parses against London.
+    if (!(req.headers.get("Authorization") ?? "").startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const caller = await resolveCaller(req);
-    if (!secretOk && !caller) {
-      // A signed-in user who isn't in a group yet can't use the parser
-      // either — there's nowhere for the result to go.
+    if (!caller) {
       return new Response(JSON.stringify({ error: "not in a group" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const home = caller ? await groupHome(caller.client, caller.groupId) : LONDON;
+    if (!await consumeQuota(admin(), caller.userId, "parse")) {
+      return new Response(quotaResponse().body, {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const home = await groupHome(caller.client, caller.groupId);
 
     const body = await req.json();
     if (!body.text && !body.image_base64) {

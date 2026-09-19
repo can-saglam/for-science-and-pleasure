@@ -39,17 +39,30 @@ enum OnboardingGate {
         guard let key = skipKey else { return }
         (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(true, forKey: key)
     }
+
+    static func clearSkip() {
+        guard let key = skipKey else { return }
+        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).removeObject(forKey: key)
+    }
 }
 
 /// First run. One question a page, centred on a soft wash of the theme:
 /// a welcome, Sign in with Apple, then only what the account still lacks
-/// (a name if Apple didn't hand one over, a look, a shared library, a
-/// home city), the person's own first save, and only after that the ask
-/// for notifications, once there's a real card to be notified about.
+/// (a name if Apple didn't hand one over, a home city), the person's own
+/// first save, and only after that the ask for notifications, once
+/// there's a real card to be notified about.
+///
+/// The look is not a question: a fresh install takes a theme from the
+/// system appearance, and the page that shows the first real card offers
+/// a row of swatches to repaint it. Joining a group is not a question
+/// either unless there's a reason to ask — an invite link, or a tap on
+/// "Joining someone?" — and a join swaps the first-save page for a look
+/// at what the group already has.
 ///
 /// Someone who already has an account never sees a page past sign-in:
 /// the moment the session lands and the card says name and home are on
-/// record, the view hands straight over to the library.
+/// record, the view hands straight over to the library. A run cut short
+/// (app killed, call taken) resumes on the page it left.
 ///
 /// Navigation lives in one bottom bar: back, dots, forward. The forward
 /// control is an arrow until a step has a named outcome ("Set as home",
@@ -69,8 +82,8 @@ struct OnboardingView: View {
     @State private var themes = ThemeStore.shared
     @State private var auth = SupabaseAuth.shared
 
-    enum Page: Hashable { case welcome, home, name, theme, code, save, notify }
-    @State private var pages: [Page] = [.welcome, .name, .theme, .code, .home, .save, .notify]
+    enum Page: String, Hashable { case welcome, home, name, code, save, joined, notify }
+    @State private var pages: [Page] = [.welcome, .name, .home, .save, .notify]
     @State private var index = 0
 
     // Sign in (the welcome page is the front door when there's no session)
@@ -108,10 +121,27 @@ struct OnboardingView: View {
     @State private var parsing = false
     @State private var parseTask: Task<Void, Never>?
     @State private var parsed: Item?
-    @State private var clipboardHasLink = false
+    /// Three real things in the home city, fetched the moment a home is
+    /// known so they're waiting when the save page comes up.
+    @State private var starters: [ParseClient.Starter] = []
+    @State private var startersTask: Task<Void, Never>?
+    @State private var startersFor: String?
+
+    // Joined
+    @State private var groupCards: [Item] = []
 
     // Notify
     @State private var notifyStatus: UNAuthorizationStatus = .notDetermined
+
+    // Welcome
+    @State private var legal: LegalPage?
+    @State private var drift = false
+    /// Welcome's card fan has been dealt (once per run of the flow).
+    @State private var dealt = false
+    /// A finger on one of the fan's cards: how far it's been pulled from
+    /// its seat, and which one is up off the table.
+    @State private var pulled: [Int: CGSize] = [:]
+    @State private var lifted: Int?
 
     @State private var busy = false
     /// Everything that should freeze the bottom bar, not just server writes.
@@ -162,23 +192,18 @@ struct OnboardingView: View {
         .task { setUp() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshOffers() }
+            if phase == .background { saveResume() }
         }
         // An invite link tapped while the first run is up.
         .onReceive(NotificationCenter.default.publisher(for: .cwgJoinCode)) { note in
             if let code = note.object as? String { takeInviteCode(code) }
         }
         .onChange(of: codeDraft) { _, new in codeTyped(new) }
-        .onChange(of: page) { old, _ in
+        .onChange(of: page) { _, _ in
             refreshOffers()
-            // The carousel is rebuilt on every visit; forget where it was
-            // parked so the next visit parks on the current theme again
-            // instead of reading its fresh zero offset as a choice.
-            if old == .theme {
-                themes.commit()
-                themeScroll = nil
-                carouselReady = false
-            }
+            saveResume()
         }
+        .sheet(item: $legal) { LegalSheet(page: $0) }
     }
 
     // MARK: Chrome
@@ -225,11 +250,18 @@ struct OnboardingView: View {
             let centreY = h * 0.2
             Map(position: $camera, interactionModes: []) {
                 if let c = picked?.coordinate {
+                    // The same pin the library map draws: accent disc,
+                    // white ring, a house for home.
                     Annotation("", coordinate: c) {
-                        Circle()
-                            .fill(AppBackground.ink)
-                            .frame(width: 10, height: 10)
-                            .overlay(Circle().stroke(AppBackground.base, lineWidth: 2))
+                        ZStack {
+                            Circle().fill(AppBackground.accent)
+                            Circle().strokeBorder(.white, lineWidth: 3)
+                            Image(systemName: "house.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 28, height: 28)
+                        .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
                     }
                 }
             }
@@ -374,7 +406,7 @@ struct OnboardingView: View {
         switch page {
         case .welcome:
             return Forward(title: "Get started", disabled: needsSignIn || unreachable, run: advance)
-        case .theme:
+        case .joined:
             return Forward(run: advance)
         case .name:
             return Forward(disabled: trimmedName.isEmpty, run: commitName)
@@ -398,13 +430,20 @@ struct OnboardingView: View {
             // Only ask when asking will do something: the system prompt
             // shows once, for `.notDetermined`. Otherwise just finish.
             if notifyStatus == .notDetermined {
-                return Forward(title: "Notify me") {
-                    if !preview { PushRegistrar.register() }
-                    finish()
-                }
+                return Forward(title: "Notify me") { Task { await askNotifications() } }
             }
             return Forward(title: "Done", run: finish)
         }
+    }
+
+    /// The system prompt comes up over this page — the one that explained
+    /// it — and the run finishes once it's answered, not underneath it.
+    private func askNotifications() async {
+        if preview { finish(); return }
+        busy = true
+        await PushRegistrar.requestNow()
+        busy = false
+        finish()
     }
 
     // MARK: Pages
@@ -414,17 +453,17 @@ struct OnboardingView: View {
         switch page {
         case .welcome: welcomePage
         case .name: namePage
-        case .theme: themePage
         case .code: codePage
         case .home: homePage
         case .save: savePage
+        case .joined: joinedPage
         case .notify: notifyPage
         }
     }
 
     private func headline(_ text: String) -> some View {
         Text(text)
-            .font(.display(34, relativeTo: .largeTitle))
+            .font(.displaySmallBold(38, relativeTo: .largeTitle))
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -506,35 +545,195 @@ struct OnboardingView: View {
     /// asked of them; returning ones skip the whole run.
     private var welcomePage: some View {
         VStack(spacing: 22) {
-            Image("Figure")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(height: 168)
-                .foregroundStyle(AppBackground.ink)
-                .accessibilityHidden(true)
+            cardFan
+                .padding(.bottom, 18)
+                // Drawn over the wordmark and button below, so a card
+                // pulled down travels across the page, not under it.
+                .zIndex(1)
             LogoTitle(height: 52)
             Text(auth.sessionExpired && !preview
                  ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
-                 : "The things you want to go to.\nYours, or shared.")
-                .font(.display(20, relativeTo: .title3))
+                 : "Save the things you want to go to.\nShare them. Get a nudge\nbefore they close.")
+                .font(.displaySmallBold(23, relativeTo: .title3))
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
 
             if needsSignIn || unreachable || signingIn || preview {
                 signInBlock
-                    .padding(.top, 18)
+                    .padding(.top, 12)
             }
 
-            // Temporary: the welcome page has no bottom bar, so there's
-            // no other way past Apple while trying the rest of the run.
-            quiet("Skip (debug)") { advance() }
+            legalLine
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 40)
         .animation(ease, value: signingIn)
         .animation(ease, value: unreachable)
+        .onAppear {
+            guard !dealt else { return }
+            if reduceMotion {
+                dealt = true
+                return
+            }
+            // Deal the hand, then let it breathe once the last card has
+            // settled.
+            dealt = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.3))
+                drift = true
+            }
+        }
+    }
+
+    /// The fan's seats, back to front: (tilt°, x, y). A cascade rather
+    /// than a spread, so each card behind shows its title line above the
+    /// one in front, and the front card sits straight and whole.
+    private static let seats: [(Double, Double, Double)] = [
+        (-4.0, -30.0, -56.0),
+        (3.0, 26.0, -20.0),
+        (-2.0, -22.0, 16.0),
+        (0.0, 12.0, 58.0),
+    ]
+
+    /// What the app makes, before anyone is asked for anything: four
+    /// cards dealt into a loose stack, then drifting a little. Real
+    /// `ItemCard`s on made-up saves with bundled photos, so the look is
+    /// exactly the library's — countdown badge, melt and all. Each one
+    /// can be picked up and pulled about; it springs back to its seat.
+    private var cardFan: some View {
+        ZStack {
+            ForEach(Array(Self.sampleCards.enumerated()), id: \.offset) { i, item in
+                let seat = Self.seats[i]
+                let front = i == Self.seats.count - 1
+                let sway = front ? 0.0 : (i.isMultiple(of: 2) ? 1.0 : -1.0)
+                let pull = pulled[i] ?? .zero
+                let held = lifted == i
+                ItemCard(item: item)
+                    .frame(width: 280)
+                    // A held card tilts with the pull, like a card on a
+                    // table dragged from one edge.
+                    .rotationEffect(.degrees((dealt ? seat.0 + (drift ? 1.2 : -1.2) * sway : 0) + pull.width / 16))
+                    .offset(
+                        x: (dealt ? seat.1 : 0) + pull.width,
+                        y: (dealt ? seat.2 + (drift ? -3 : 3) * sway : 110) + pull.height
+                    )
+                    .scaleEffect(dealt ? (held ? 1.03 : 1) : 0.86)
+                    .opacity(dealt ? 1 : 0)
+                    .shadow(
+                        color: .black.opacity(themes.current.isLight ? (held ? 0.16 : 0.10) : (held ? 0.5 : 0.35)),
+                        radius: held ? 24 : 16, y: held ? 14 : 8
+                    )
+                    // Depth is fixed: a card pulled out from the middle
+                    // of the stack stays in the middle of the stack.
+                    .zIndex(Double(i))
+                    // Dealt back to front, a beat apart.
+                    .animation(
+                        reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(i) * 0.13),
+                        value: dealt
+                    )
+                    .animation(reduceMotion ? nil : .spring(duration: 0.3), value: held)
+                    // Ahead of the page's scroll view, which has nothing
+                    // to scroll here but would still claim a vertical pull.
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                if lifted != i {
+                                    lifted = i
+                                    Haptics.tap()
+                                }
+                                pulled[i] = value.translation
+                            }
+                            .onEnded { value in
+                                // Springs home, overshooting a touch, and
+                                // lands with a soft thud sized to how far
+                                // it had to travel.
+                                let distance = hypot(value.translation.width, value.translation.height)
+                                withAnimation(reduceMotion ? .easeOut(duration: 0.25) : .spring(duration: 0.6, bounce: 0.45)) {
+                                    pulled[i] = .zero
+                                }
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .seconds(reduceMotion ? 0.25 : 0.3))
+                                    if pulled[i] == .zero {
+                                        Haptics.settle(0.4 + min(distance / 200, 0.6))
+                                        if lifted == i { lifted = nil }
+                                    }
+                                }
+                            }
+                    )
+            }
+        }
+        .frame(height: 250)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 5).repeatForever(autoreverses: true), value: drift)
+        .accessibilityHidden(true)
+    }
+
+    /// Four saves that read like a real week, back to front: an
+    /// exhibition with days left, a gig this week, a place to eat, and a
+    /// festival that's on today. Their photos come
+    /// from the bundle, handed to the image cache under made-up URLs so
+    /// the cards render them through the ordinary melt.
+    private static let sampleCards: [Item] = {
+        let day = { (n: Int) in DayString.addingDays(n, to: DayString.today()) }
+        let photo = { (asset: String) -> String? in
+            let url = URL(string: "cwg-sample://\(asset.lowercased())")!
+            guard let image = UIImage(named: asset) else { return nil }
+            ImageStore.seed(image, for: url)
+            return url.absoluteString
+        }
+        let a = Item()
+        a.kind = Item.Kind.event
+        a.title = "Anish Kapoor at Hayward Gallery"
+        a.venue = "Hayward Gallery"
+        a.area = "Southbank"
+        a.category = "exhibition"
+        a.startsOn = day(-40)
+        a.endsOn = day(9)
+        a.colorHex = "#B44A2C"
+        a.imageUrl = photo("SampleAnish")
+        let b = Item()
+        b.kind = Item.Kind.place
+        b.title = "Sessions Arts Club"
+        b.venue = "Sessions Arts Club"
+        b.area = "Clerkenwell"
+        b.category = "restaurant"
+        b.colorHex = "#2C7A6B"
+        b.imageUrl = photo("SampleSessions")
+        let c = Item()
+        c.kind = Item.Kind.event
+        c.title = "Open House Festival"
+        c.area = "London"
+        c.category = "festival"
+        c.startsOn = day(0)
+        c.endsOn = day(0)
+        c.colorHex = "#7A4FB4"
+        c.imageUrl = photo("SampleOpenHouse")
+        let d = Item()
+        d.kind = Item.Kind.event
+        d.title = "Poliça"
+        d.venue = "EartH"
+        d.area = "Dalston"
+        d.category = "gig"
+        d.startsOn = day(4)
+        d.endsOn = day(4)
+        d.colorHex = "#B8892E"
+        d.imageUrl = photo("SampleGig")
+        return [a, d, b, c]
+    }()
+
+    /// The two links App Review looks for under a sign-in button. The
+    /// pages ship in the bundle, so this works offline too.
+    private var legalLine: some View {
+        Text("By continuing you agree to the [Terms](cwg://terms) and [Privacy Policy](cwg://privacy).")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .tint(AppBackground.ink.opacity(0.8))
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .environment(\.openURL, OpenURLAction { url in
+                legal = url.host() == "terms" ? .terms : .privacy
+                return .handled
+            })
     }
 
     private var signInBlock: some View {
@@ -575,6 +774,15 @@ struct OnboardingView: View {
                 .accessibilityHint("Uses your Apple Account")
                 .disabled(!needsSignIn)
                 .opacity(needsSignIn ? 1 : 0.6)
+                // Previewing the run (Settings, screenshots): Apple's
+                // button is inert, so a tap on it just turns the page.
+                .overlay {
+                    if preview {
+                        Color.clear
+                            .contentShape(.rect)
+                            .onTapGesture { advance() }
+                    }
+                }
             }
 
             if let note {
@@ -643,6 +851,9 @@ struct OnboardingView: View {
             }
             index = min(1, pages.count - 1)
         }
+        if !pages.contains(.home), let home = chosenHome {
+            fetchStarters(for: home)
+        }
     }
 
     // MARK: Name
@@ -690,165 +901,35 @@ struct OnboardingView: View {
 
     // MARK: Theme
 
-    private var themePage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            headline("How should\nit look?")
-            lede("\(Self.spelled(AppTheme.allCases.count)) moods. The whole app repaints as you tap; change it any time in Settings.")
-
-            themeCarousel
-                // Bleed past the page margin so neighbours peek in.
-                .padding(.horizontal, -28)
-                .padding(.top, 6)
-        }
+    /// The look is chosen for them once, from the system appearance, and
+    /// only on a fresh install — never over a choice already on disk.
+    private func preselectTheme() {
+        guard !preview, !themes.hasStoredChoice else { return }
+        let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen
+        let dark = (screen?.traitCollection.userInterfaceStyle ?? .dark) != .light
+        themes.select(dark ? .midnight : .oat)
     }
 
-    /// "Five", not "5": the copy reads as prose, and stays right if a
-    /// theme is added.
-    private static func spelled(_ n: Int) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .spellOut
-        return (f.string(from: NSNumber(value: n)) ?? String(n)).capitalized
-    }
-
-    @State private var themeScroll: AppTheme?
-    @State private var carouselWidth: CGFloat = 0
-
-    /// Swipe through mini screens of each theme; the one that settles in
-    /// the centre becomes the theme.
-    private var themeCarousel: some View {
-        let thumb = max(carouselWidth * 0.58, 1)
-        let margin = max((carouselWidth - thumb) / 2, 0)
-        return ScrollView(.horizontal) {
-            HStack(spacing: 18) {
-                ForEach(AppTheme.allCases) { option in
-                    themeThumb(option)
-                        .frame(width: thumb)
-                        .contentShape(.rect)
-                        // A peeking neighbour is an invitation: tapping it
-                        // slides it to the centre (and so applies it).
-                        .onTapGesture {
-                            guard option != themeScroll else { return }
-                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.35)) { themeScroll = option }
-                        }
-                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                            content
-                                .scaleEffect(phase.isIdentity ? 1 : 0.92)
-                                .opacity(phase.isIdentity ? 1 : 0.55)
-                        }
-                        .id(option)
-                }
-            }
-            .scrollTargetLayout()
+    /// A row of swatches under the first real card: tap one and the card,
+    /// the page and the rest of the app repaint. Lives on the two pages
+    /// that show real cards, so the choice is made looking at the thing
+    /// it changes.
+    private var themeSwatches: some View {
+        ThemeSwatchRow { option in
+            // `preview` paints, `commit` writes: same pair the settings
+            // picker uses, without the window snapshot `select` takes.
+            themes.preview(option)
+            themes.commit()
         }
-        .contentMargins(.horizontal, margin, for: .scrollContent)
-        .scrollTargetBehavior(.viewAligned)
-        .scrollPosition(id: $themeScroll, anchor: .center)
-        .scrollIndicators(.hidden)
-        .scrollClipDisabled()
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-            carouselWidth = width
-            // Park on the current theme only once the thumbnails have a
-            // real size; before that the offsets mean nothing and the
-            // first frame would "choose" whichever theme sits at zero.
-            guard width > 0, themeScroll == nil else { return }
-            themeScroll = themes.current
-            Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                carouselReady = true
-            }
-        }
-        // Repaint as a thumbnail crosses the centre, mid-swipe, rather
-        // than waiting for the scroll to settle.
-        .onScrollGeometryChange(for: Int.self) { geo in
-            let step = thumb + 18
-            return Int(((geo.contentOffset.x + geo.contentInsets.leading) / step).rounded())
-        } action: { _, i in
-            guard carouselReady else { return }
-            let all = AppTheme.allCases
-            guard all.indices.contains(i), all[i] != themes.current else { return }
-            apply(all[i])
-        }
-        .onChange(of: themeScroll) { _, new in
-            if carouselReady, let new, new != themes.current { apply(new) }
-        }
-        .onScrollPhaseChange { _, phase in
-            if phase == .idle { themes.commit() }
-        }
-        // The page-wide theme ease must not also tween the thumbs: that
-        // fights the scroll transition and drops frames on device.
-        .animation(nil, value: themes.current)
-    }
-
-    @State private var carouselReady = false
-
-    /// Not `select`: that cross-dissolves the whole window via a UIKit
-    /// snapshot, which stalls a live scroll for a frame. `preview` paints
-    /// SwiftUI colours only; `commit` (on idle, or leaving the page)
-    /// writes disk, widgets and the window trait. No `withAnimation`
-    /// here — it would capture the scroll offset in the same transaction.
-    private func apply(_ theme: AppTheme) {
-        guard theme != themes.current else { return }
-        Haptics.selection()
-        themes.preview(theme)
-    }
-
-    private static let thumbAccents = ["#B44A2C", "#2C7A6B", "#7A4FB4"]
-
-    /// A little screen in the theme: wordmark up top, three sample cards.
-    private func themeThumb(_ option: AppTheme) -> some View {
-        let on = themes.current == option
-        return VStack(spacing: 12) {
-            VStack(spacing: 10) {
-                Image("Logo")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 16)
-                    .foregroundStyle(option.ink)
-                    .padding(.top, 6)
-                    .padding(.bottom, 4)
-                ForEach(Self.thumbAccents, id: \.self) { hex in
-                    let accent = Color(hex: hex) ?? option.ink
-                    VStack(alignment: .leading, spacing: 6) {
-                        Capsule().fill(option.ink.opacity(0.8))
-                            .frame(width: 70, height: 7)
-                        Capsule().fill(option.ink.opacity(0.4))
-                            .frame(width: 44, height: 5)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        option.base
-                            .mix(with: option.cardLiftColor, by: option.cardLiftAmount)
-                            .mix(with: accent, by: option.cardAccentMix),
-                        in: .rect(cornerRadius: 12)
-                    )
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(14)
-            .aspectRatio(0.66, contentMode: .fit)
-            .background(option.base, in: .rect(cornerRadius: 24))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .strokeBorder(AppBackground.ink.opacity(on ? 0.9 : 0.15), lineWidth: on ? 2 : 1)
-            )
-
-            Text(option.name)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(on ? AppBackground.ink : .secondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(option.name)
-        .accessibilityAddTraits(on ? .isSelected : [])
+        .padding(.top, 4)
     }
 
     // MARK: Code
 
     private var codePage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            headline("Did someone\nsend you a code?")
-            lede("Join them and you share one library. Everyone sees and edits everything. No code? Carry on and invite people later.")
+            headline("Got their code?")
+            lede("Join them and you share one library: everyone sees and edits everything. No code to hand? Carry on and invite people later from Settings.")
 
             slab {
                 // Formatting happens in the binding's setter, in the same
@@ -906,7 +987,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(p.name ?? "Their library")
-                        .font(.title3.weight(.bold))
+                        .font(.displaySmallBold(24, relativeTo: .title3))
                     Spacer()
                     if let home = p.homeLocality {
                         Label(home, systemImage: "house")
@@ -1001,15 +1082,23 @@ struct OnboardingView: View {
             joined = true
             note = nil
             drop(.home)
+            showJoined()
             return
         }
         busy = true
         defer { busy = false }
         focus = nil
         do {
-            _ = await SupabaseSync.flush(context: context)
+            guard await SupabaseSync.flush(context: context) else {
+                note = "Couldn't sync your latest edits. Try again once you're back online."
+                return
+            }
             try await group.join(code: code, keepCopy: false)
-            _ = await SupabaseSync.replaceLibrary(context: context)
+            let landed = await SupabaseSync.replaceLibrary(context: context)
+            guard landed else {
+                note = "You're in the group, but this phone couldn't refresh the library. Open the app again when you're online."
+                return
+            }
             await members.refresh()
             // Their group's home is now ours: the clock on every card
             // should tick in that city from the very first save.
@@ -1020,8 +1109,52 @@ struct OnboardingView: View {
             JoinGate.pendingCode = nil
             // Their group already knows where home is.
             if OnboardingGate.hasHome { drop(.home) }
+            showJoined()
         } catch {
             note = "Couldn't join. \(SyncProblem(error).message)"
+        }
+    }
+
+    /// A join answers "what's the first thing you'd go to?" better than
+    /// any typed link could: the library is already full of their saves.
+    /// The save page gives way to a look at it.
+    private func showJoined() {
+        let all = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        groupCards = all
+            .filter { $0.status == Item.Status.saved && $0.deletedAt == nil }
+            .sorted { $0.createdAt > $1.createdAt }
+        withAnimation(ease) {
+            if let i = pages.firstIndex(of: .save) {
+                pages[i] = .joined
+            } else if !pages.contains(.joined), let n = pages.firstIndex(of: .notify) {
+                pages.insert(.joined, at: n)
+            }
+        }
+    }
+
+    // MARK: Joined
+
+    private var joinedName: String {
+        codePreview?.inviter ?? codePreview?.name ?? "they"
+    }
+
+    private var joinedPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            headline("You're in.")
+            if groupCards.isEmpty {
+                lede("Nothing saved yet — you'll be the first. Anything either of you shares into the app lands here for both of you.")
+            } else {
+                lede("Some of what \(joinedName) has saved so far. It's your library now too: edit anything, add anything.")
+                ForEach(groupCards.prefix(3)) { item in
+                    ItemCard(item: item)
+                }
+                if groupCards.count > 3 {
+                    Text("…and \(groupCards.count - 3) more in the library.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            themeSwatches
         }
     }
 
@@ -1041,7 +1174,7 @@ struct OnboardingView: View {
             case .confirm: headline("Looks like\n\(picked?.locality ?? ""), right?")
             case .manual: headline("Where's home?")
             }
-            lede("The city your saves are about. A whole city, not a borough. It sets the clock on every card and where the map opens.")
+            lede("The city you go out in. It sets the clock on your cards and where the map opens.")
 
             switch homeVariant {
             case .finding:
@@ -1205,7 +1338,7 @@ struct OnboardingView: View {
         locating = true
         defer { locating = false }
         note = nil
-        LocationStore.shared.refresh()
+        LocationStore.shared.ask()
         if LocationStore.shared.authorization == .notDetermined {
             _ = await awaitAuthorizationAnswer(seconds: 90)
         }
@@ -1291,6 +1424,7 @@ struct OnboardingView: View {
     }
 
     private func commitHome(_ home: HomeStore.Home) async {
+        fetchStarters(for: home)
         if preview { advance(); return }
         busy = true
         defer { busy = false }
@@ -1302,20 +1436,55 @@ struct OnboardingView: View {
         advance()
     }
 
+    /// Ask the server for the city's three chips now, so they're on the
+    /// save page by the time it comes up. One fetch per city; a change
+    /// of mind on the home page refetches.
+    private func fetchStarters(for home: HomeStore.Home) {
+        let key = "\(home.locality)|\(home.country)"
+        guard startersFor != key else { return }
+        startersFor = key
+        starters = []
+        startersTask?.cancel()
+        startersTask = Task {
+            let found = try? await ParseClient.starters(locality: home.locality, country: home.country)
+            guard !Task.isCancelled, startersFor == key else { return }
+            withAnimation(ease) { starters = found ?? [] }
+        }
+    }
+
     // MARK: First save
 
-    private static let londonStarters: [(title: String, url: String)] = [
-        ("Photographers' Gallery", "https://thephotographersgallery.org.uk"),
-        ("Sessions Arts Club", "https://sessionsartsclub.com"),
-        ("Roundhouse", "https://www.roundhouse.org.uk"),
+    /// London answers at once while the server's chips are still on their
+    /// way — and is the fallback if they never arrive.
+    private static let londonStarters: [ParseClient.Starter] = [
+        .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place"),
+        .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place"),
+        .init(title: "Roundhouse", url: "https://www.roundhouse.org.uk", kind: "place"),
     ]
 
     /// Only a home that was actually chosen counts; `HomeStore.home` falls
     /// back to London when nothing is set, and that must not show London
     /// starters to someone in Lisbon who hasn't picked yet.
+    private var chosenHome: HomeStore.Home? {
+        picked ?? (HomeStore.shared.isSet ? HomeStore.shared.home : nil)
+    }
+
     private var homeIsLondon: Bool {
-        let home = picked ?? (HomeStore.shared.isSet ? HomeStore.shared.home : nil)
-        return home?.locality.compare("London", options: .caseInsensitive) == .orderedSame
+        chosenHome?.locality.compare("London", options: .caseInsensitive) == .orderedSame
+    }
+
+    /// The chips: the city's own from the server, London's built-in set
+    /// while those load (or if they fail), nothing when there's no home.
+    private var starterChips: [ParseClient.Starter] {
+        if !starters.isEmpty { return starters }
+        return homeIsLondon ? Self.londonStarters : []
+    }
+
+    /// The city the chips are actually about — the one they were fetched
+    /// for, which can differ from a guess that landed since.
+    private var starterCity: String? {
+        if !starters.isEmpty { return startersFor?.split(separator: "|").first.map(String.init) }
+        return homeIsLondon ? "London" : nil
     }
 
     private var savePage: some View {
@@ -1331,6 +1500,7 @@ struct OnboardingView: View {
                     note = nil
                     refreshOffers()
                 }
+                themeSwatches
             } else {
                 headline("What's the first thing\nyou'd go to?")
                 lede("Paste a link or just name it: a gig, a show, somewhere to eat. We look it up and make the card. Or skip and add one later.")
@@ -1351,36 +1521,38 @@ struct OnboardingView: View {
                         startParse()
                     }
 
-                    if clipboardHasLink, linkDraft.isEmpty, linkImage == nil {
-                        chip("Paste the link you copied", icon: "doc.on.clipboard") {
-                            let board = UIPasteboard.general
-                            let text = board.url?.absoluteString ?? board.string ?? ""
-                            linkDraft = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if linkURL != nil {
-                                startParse()
-                            } else {
-                                clipboardHasLink = false
-                                linkDraft = ""
-                                note = "That didn't look like a link."
-                            }
-                        }
-                    }
-
-                    if homeIsLondon, linkDraft.isEmpty, linkImage == nil {
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 8) {
-                                ForEach(Self.londonStarters, id: \.url) { s in
-                                    Button(s.title) {
-                                        Haptics.tap()
-                                        linkDraft = s.url
-                                        startParse()
+                    if linkDraft.isEmpty, linkImage == nil, !starterChips.isEmpty,
+                       let city = starterCity {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Or try one of these in \(city)")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 8) {
+                                    ForEach(starterChips) { s in
+                                        Button {
+                                            Haptics.tap()
+                                            linkDraft = s.url
+                                            startParse()
+                                        } label: {
+                                            Label(s.title, systemImage: s.kind == "event" ? "ticket" : "mappin.and.ellipse")
+                                                .font(.footnote.weight(.medium))
+                                                .lineLimit(1)
+                                        }
+                                        .buttonStyle(.glass)
                                     }
-                                    .buttonStyle(.glass)
                                 }
                             }
+                            .scrollIndicators(.hidden)
+                            .scrollClipDisabled()
                         }
-                        .scrollIndicators(.hidden)
-                        .scrollClipDisabled()
+                        .transition(.opacity)
+                    }
+
+                    // Joining isn't asked of everyone; this is the door
+                    // for the person who has a code and wasn't sent a link.
+                    if !joined, !pages.contains(.code) {
+                        quiet("Joining someone? Enter their code") { openCodePage() }
                     }
                     // The share-sheet lesson isn't here: it arrives as a
                     // tip in the library on the second launch (ShareTip).
@@ -1391,6 +1563,19 @@ struct OnboardingView: View {
         }
         .animation(ease, value: parsing)
         .animation(ease, value: parsed?.id)
+        .animation(ease, value: starterChips)
+    }
+
+    /// Puts the code page in front of this one and turns to it. Forward
+    /// from there comes back here; back goes to whatever was before.
+    private func openCodePage() {
+        note = nil
+        focus = nil
+        withAnimation(ease) {
+            if !pages.contains(.code) { pages.insert(.code, at: index) }
+            index = pages.firstIndex(of: .code) ?? index
+        }
+        refreshOffers()
     }
 
     /// The card, forming. Sits exactly where the field was and where the
@@ -1406,7 +1591,7 @@ struct OnboardingView: View {
             SkeletonLine(width: 104)
             HStack(spacing: 8) {
                 SmallRing()
-                ParsingPhrases()
+                ParsingPhrases(text: linkDraft, hasImage: linkImage != nil)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -1494,7 +1679,7 @@ struct OnboardingView: View {
         if preview { advance(); return }
         item.createdAt = .now
         item.updatedAt = .now
-        item.addedByEmail = SupabaseAuth.shared.email
+        item.stampAuthor()
         context.insert(item)
         do {
             try context.save()
@@ -1611,7 +1796,12 @@ struct OnboardingView: View {
     /// belongs to comes up as soon as there's a session to join with.
     private func takeInviteCode(_ code: String) {
         codeDraft = JoinSheet.formatTyping(code)
-        if !needsSignIn, let i = pages.firstIndex(of: .code) {
+        guard !needsSignIn else { return }
+        // A link is the one signal that puts the code page in the run.
+        if !pages.contains(.code) {
+            withAnimation(ease) { pages.insert(.code, at: min(max(index, 1), pages.count)) }
+        }
+        if let i = pages.firstIndex(of: .code) {
             withAnimation(ease) { index = i }
             note = nil
             Task { await lookup(code) }
@@ -1626,17 +1816,33 @@ struct OnboardingView: View {
         if !preview, let uid = SupabaseAuth.shared.userId, let existing = members.name(forUser: uid) {
             name = existing
         }
+        preselectTheme()
         // Before sign-in the account is unknown, so the run is the full
         // one; `signedInFromFrontDoor` trims it once the card is in.
         pages = pageOrder()
         // Preview only: `CWG_ONBOARDING_PAGE=home` (any Page name) opens
         // straight on that page, for checking one screen at a time.
         if preview, let raw = ProcessInfo.processInfo.environment["CWG_ONBOARDING_PAGE"],
-           let i = pages.firstIndex(where: { "\($0)" == raw }) {
+           let i = pages.firstIndex(where: { $0.rawValue == raw }) {
             index = i
         }
+        // Preview of the joined page: pretend the code was accepted.
+        if preview, ProcessInfo.processInfo.environment["CWG_ONBOARDING_PAGE"] == "joined" {
+            codePreview = Self.previewInvite
+            joined = true
+            showJoined()
+            if let i = pages.firstIndex(of: .joined) { index = i }
+        }
+        // Signed in but never finished: pick up where it left off.
+        if !preview, auth.signedIn { restoreResume() }
         if locationAllowed, pages.contains(.home) {
             Task { await guessHome() }
+        }
+        // A home already on record (a join, a second device mid-run)
+        // wants its chips ready before the save page. The preview fetches
+        // for the account's home so the page can be checked for real.
+        if preview || !pages.contains(.home), let home = chosenHome {
+            fetchStarters(for: home)
         }
         refreshOffers()
     }
@@ -1647,10 +1853,17 @@ struct OnboardingView: View {
 
     /// Home leads the questions when it can be guessed; pages the account
     /// already answers are dropped (never in preview, which shows them all).
+    /// The code page is in only when there's a reason: an invite link, or
+    /// the preview (which shows every page).
     private func pageOrder() -> [Page] {
         var order: [Page] = locationAllowed
-            ? [.welcome, .home, .name, .theme, .code, .save, .notify]
-            : [.welcome, .name, .theme, .code, .home, .save, .notify]
+            ? [.welcome, .home, .name, .save, .notify]
+            : [.welcome, .name, .home, .save, .notify]
+        if preview || JoinGate.pendingCode != nil {
+            // After the name; before home when home is still a question,
+            // so the group's home can answer it.
+            order.insert(.code, at: locationAllowed ? 3 : 2)
+        }
         if !preview {
             if OnboardingGate.hasName { order.removeAll { $0 == .name } }
             if OnboardingGate.hasHome { order.removeAll { $0 == .home } }
@@ -1658,29 +1871,73 @@ struct OnboardingView: View {
         return order
     }
 
-    /// Decides whether to offer a paste chip without reading the clipboard
-    /// — `hasStrings`/`hasURLs` and pattern detection never raise the
-    /// system paste prompt. The contents are read only on the tap.
+    // MARK: Resume
+
+    /// The page and the drafts, per account, so a run cut short comes
+    /// back where it was. Cleared when the run finishes.
+    private struct Resume: Codable {
+        var page: String
+        var name: String
+        var codeDraft: String
+        var cityDraft: String
+        var linkDraft: String
+    }
+
+    private var resumeKey: String? {
+        auth.userId.map { "onboarding.resume.\($0.uuidString.lowercased())" }
+    }
+
+    private var resumeDefaults: UserDefaults {
+        UserDefaults(suiteName: SharedInbox.groupID) ?? .standard
+    }
+
+    private func saveResume() {
+        guard !preview, let key = resumeKey, page != .welcome else { return }
+        let state = Resume(page: page.rawValue, name: name, codeDraft: codeDraft,
+                           cityDraft: cityDraft, linkDraft: linkDraft)
+        if let data = try? JSONEncoder().encode(state) {
+            resumeDefaults.set(data, forKey: key)
+        }
+    }
+
+    private func restoreResume() {
+        guard let key = resumeKey,
+              let data = resumeDefaults.data(forKey: key),
+              let state = try? JSONDecoder().decode(Resume.self, from: data),
+              let target = Page(rawValue: state.page)
+        else { return }
+        if name.isEmpty { name = state.name }
+        cityDraft = state.cityDraft
+        linkDraft = state.linkDraft
+        if !state.codeDraft.isEmpty {
+            codeDraft = state.codeDraft
+            if !pages.contains(.code) { pages.insert(.code, at: min(1, pages.count)) }
+        }
+        // The page may have been answered since (a second device): then
+        // land on the first one still open rather than a page that's gone.
+        // A joined page can't be rebuilt from cold; its neighbour will do.
+        if let i = pages.firstIndex(of: target) {
+            index = i
+        } else if target == .joined || target == .save || target == .notify,
+                  let i = pages.firstIndex(of: .save) ?? pages.firstIndex(of: .notify) {
+            index = i
+        } else {
+            index = min(1, pages.count - 1)
+        }
+    }
+
+    private func clearResume() {
+        guard let key = resumeKey else { return }
+        resumeDefaults.removeObject(forKey: key)
+    }
+
+    /// Decides whether to offer the code page's paste chip without reading
+    /// the clipboard — `hasStrings`/`hasURLs` never raise the system paste
+    /// prompt. The contents are read only on the tap.
     private func refreshOffers() {
         let board = UIPasteboard.general
-        clipboardHasText = false
-        clipboardHasLink = false
-        switch page {
-        case .code:
-            // A link is never a code; anything else that's text might be.
-            clipboardHasText = board.hasStrings && !board.hasURLs
-        case .save:
-            if board.hasURLs {
-                clipboardHasLink = true
-            } else if board.hasStrings {
-                Task {
-                    let found = try? await board.detectedPatterns(for: [\.probableWebURL])
-                    if page == .save { clipboardHasLink = found?.contains(\.probableWebURL) == true }
-                }
-            }
-        default:
-            break
-        }
+        // A link is never a code; anything else that's text might be.
+        clipboardHasText = page == .code && board.hasStrings && !board.hasURLs
     }
 
     /// Removes a page without moving the reader: if it sat before the
@@ -1716,8 +1973,11 @@ struct OnboardingView: View {
         if preview, let originalTheme {
             themes.select(originalTheme)
         } else if !preview {
-            // The look they chose should be the icon on the home screen too.
-            themes.syncAppIcon()
+            // The look they chose should be the icon on the home screen
+            // too — swapped in the background, so the library, not the
+            // system's "you changed the icon" alert, is what comes next.
+            themes.deferIconSync()
+            clearResume()
         }
         onFinished()
     }

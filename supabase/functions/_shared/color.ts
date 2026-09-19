@@ -252,27 +252,59 @@ export function largestImageCandidate(
 
   // srcset: take the widest entry; it names the size outright.
   const srcset = attr("srcset") ?? attr("data-srcset") ?? attr("data-lazy-srcset");
+  // Density entries (`1x, 2x`) name a multiple of the displayed width, not a
+  // size — Wix emits these and nothing else. Remembered for after the `w`
+  // pass so a real width always wins over an inferred one.
+  let densest: { url: string; density: number } | null = null;
+  let sawWidthDescriptor = false;
   if (srcset) {
-    for (const entry of srcset.split(",")) {
-      const [url, descriptor] = entry.trim().split(/\s+/);
-      const w = descriptor?.match(/^(\d+)w$/)?.[1];
-      if (!url || !w) continue;
-      if (Number(w) > width) {
-        width = Number(w);
-        src = url;
+    // Candidates are "URL descriptor" pairs. Matched rather than split on
+    // commas: Wix transform paths carry commas (`w_638,h_646`), and a URL
+    // never carries whitespace.
+    for (const m of srcset.matchAll(/(\S+)\s+(\d+(?:\.\d+)?)([wx])(?=\s*,|\s*$)/g)) {
+      const [, url, n, unit] = m;
+      if (unit === "w") {
+        sawWidthDescriptor = true;
+        if (Number(n) > width) {
+          width = Number(n);
+          src = url;
+        }
+      } else if (!densest || Number(n) > densest.density) {
+        densest = { url, density: Number(n) };
       }
+    }
+  }
+  // Mixing w and x in one srcset is invalid HTML; if a page does it anyway,
+  // the stated widths are the ones to trust.
+  if (densest && !sawWidthDescriptor) {
+    // The declared width times the density, or whatever the file's own URL
+    // says about itself when the tag declares nothing.
+    const declared = Number(
+      tagAttrs.match(/\bwidth\s*=\s*["']?(\d+)/i)?.[1] ??
+        tagAttrs.match(/\bstyle\s*=\s*["'][^"']*\bwidth\s*:\s*(\d+)px/i)?.[1] ?? 0,
+    );
+    const scaled = declared ? declared * densest.density : widthFromUrl(densest.url);
+    if (scaled > width) {
+      width = scaled;
+      src = densest.url;
     }
   }
   if (!src || CHROME_RE.test(src)) return null;
 
-  if (!width) {
-    width = Number(
-      src.match(/[?&](?:w|width)=(\d+)/i)?.[1] ??
-        src.match(/-(\d{3,4})x\d{3,4}\.(?:jpe?g|png|webp|avif)/i)?.[1] ??
-        (/-scaled\.(?:jpe?g|png|webp)/i.test(src) ? 1000 : 0),
-    );
-  }
+  if (!width) width = widthFromUrl(src);
   return width >= 500 ? { src, width } : null;
+}
+
+/// What a file's URL says about its own width: a `?w=` / `?width=` query,
+/// the WordPress size suffix (`-800x530.jpg`, `-scaled.jpg`), or Wix's
+/// transform path (`/v1/fill/w_638,h_646,…/`). Zero when it says nothing.
+function widthFromUrl(src: string): number {
+  return Number(
+    src.match(/[?&](?:w|width)=(\d+)/i)?.[1] ??
+      src.match(/-(\d{3,4})x\d{3,4}\.(?:jpe?g|png|webp|avif)/i)?.[1] ??
+      src.match(/\/(?:fill|fit)\/(?:[^/]*,)?w_(\d+)(?:,|\/)/i)?.[1] ??
+      (/-scaled\.(?:jpe?g|png|webp)/i.test(src) ? 1000 : 0),
+  );
 }
 
 /// Fetch a page and pull its best photo — for sites the model named when

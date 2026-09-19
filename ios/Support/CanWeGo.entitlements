@@ -12,6 +12,10 @@
 	<array>
 		<string>group.com.cansaglam.CanWeGo</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)group.com.cansaglam.CanWeGo</string>
+	</array>
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
 		<string>iCloud.com.cansaglam.CanWeGo</string>

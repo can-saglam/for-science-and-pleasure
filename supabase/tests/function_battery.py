@@ -37,26 +37,20 @@ s, b = call("/functions/v1/notify-save", "POST", {"item_id": item_id});         
 for fn, body in (("parse", {"text": "Tate Modern late, Friday"}), ("locate", {"items": [{"id": item_id, "title": "x"}]}), ("suggest", {"date": "2026-09-12"})):
     s, b = call(f"/functions/v1/{fn}", "POST", body, bearer(stranger)); check(f"{fn}: stranger → 403", s == 403, f"{s} {b[:120]}")
     s, b = call(f"/functions/v1/{fn}", "POST", body, bearer(can));      check(f"{fn}: member passes the gate", s != 403 and s != 401, f"{s} {b[:120]}")
-s, b = call("/functions/v1/parse", "POST", {"text": "x"}, {"x-ingest-secret": os.environ.get("STG_INGEST_SECRET", "stg-ingest-secret")}); check("parse: ingest secret still accepted", s not in (401, 403), f"{s} {b[:120]}")
+s, b = call("/functions/v1/parse", "POST", {"text": "x"}, {"x-ingest-secret": "stg-ingest-secret"}); check("parse: a shared-secret header is not auth", s in (401, 403), f"{s} {b[:120]}")
+s, b = call("/functions/v1/parse", "POST", {"text": "x"}); check("parse: no JWT → 401", s in (401, 403), f"{s} {b[:120]}")
 
-# calendar / digest feeds
+# calendar feed
 s, tok = call(f"/functions/v1/calendar?key={g['feed_token']}");            check("calendar: group feed_token → ICS", s == 200 and "BEGIN:VCALENDAR" in tok, f"{s} {tok[:80]}")
-s, leg = call("/functions/v1/calendar?key=stg-ingest-secret");             check("calendar: legacy secret → founding group's ICS (identical)", s == 200 and leg == tok, f"{s}")
+feed = os.environ.get("STG_FEED_SECRET")
+if feed:
+    s, leg = call(f"/functions/v1/calendar?key={feed}"); check("calendar: FEED_SECRET → founding group's ICS", s == 200 and leg == tok, f"{s}")
 s, b = call("/functions/v1/calendar?key=nope");                            check("calendar: bad key → 401", s == 401, f"{s}")
 s, b = call("/functions/v1/calendar");                                     check("calendar: no key → 401", s == 401, f"{s}")
-s, b = call(f"/functions/v1/digest?key={g['feed_token']}");                check("digest: feed_token → text", s == 200 and "text" in json.loads(b), f"{s} {b[:80]}")
-s, b = call("/functions/v1/digest?key=nope");                              check("digest: bad key → 401", s == 401, f"{s}")
 
-# ingest (Shortcut path)
-s, b = call("/functions/v1/ingest", "POST", {"text": "ingest test row", "added_by": STRANGER}, {"x-ingest-secret": os.environ.get("STG_INGEST_SECRET", "stg-ingest-secret")}); check("ingest: unknown added_by → 400", s == 400, f"{s} {b}")
-s, b = call("/functions/v1/ingest", "POST", {"text": "ingest test row", "added_by": CAN.upper()}, {"x-ingest-secret": os.environ.get("STG_INGEST_SECRET", "stg-ingest-secret")})
-ok = s == 200 and json.loads(b).get("ok"); check("ingest: member email (any case) → saved", ok, f"{s} {b}")
-if ok:
-    nid = json.loads(b)["id"]
-    s, row = call(f"/rest/v1/items?id=eq.{nid}&select=group_id,created_by,updated_by,source", headers=svc); row = json.loads(row)[0]
-    check("ingest: row stamped with group + creator", row["group_id"] == g["id"] and row["created_by"] and row["created_by"] == row["updated_by"], f"{row}")
-    call(f"/rest/v1/items?id=eq.{nid}", "DELETE", headers=svc)
-s, b = call("/functions/v1/ingest", "POST", {"text": "x", "added_by": CAN}, {"x-ingest-secret": "wrong"}); check("ingest: wrong secret → 401", s == 401, f"{s}")
+# retired endpoints stay gone
+for gone in ("ingest", "digest"):
+    s, b = call(f"/functions/v1/{gone}", "POST", {"text": "x"}, bearer(can)); check(f"{gone}: removed → 404", s == 404, f"{s} {b[:80]}")
 
 # send-reminders
 cron = os.environ.get("STG_CRON_SECRET", "stg-cron-secret")
@@ -91,6 +85,38 @@ runs = json.loads(b) if s == 200 else []
 check("send-reminders: force left no running leftover", s == 200 and all(x.get("status") != "running" for x in runs), f"{s} {b}")
 call(f"/rest/v1/reminder_runs?item_id=eq.{due_id}", "DELETE", headers=svc)
 call(f"/rest/v1/items?id=eq.{due_id}", "DELETE", headers=svc)
+
+# Hand-picked day + time on a place: fires once the home clock passes it, not at 10:00.
+custom_id = str(uuid.uuid4())
+custom = {
+    "id": custom_id, "kind": "place", "status": "saved", "title": "Reminder battery (custom)",
+    "source": "app", "group_id": g["id"],
+    "reminder_offset_days": 0, "reminder_anchor": "custom", "remind_at": "2026-12-15", "remind_time": "18:30",
+    "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+}
+s, b = call("/rest/v1/items", "POST", [custom], headers={**svc, "Prefer": "return=minimal"})
+check("send-reminders: planted a custom-time place", s in (201, 200), f"{s} {b}")
+bad = {**custom, "id": str(uuid.uuid4()), "reminder_anchor": "starts_on"}
+s, b = call("/rest/v1/items", "POST", [bad], headers={**svc, "Prefer": "return=minimal"})
+check("items: remind_time without custom anchor → rejected", s >= 400, f"{s}")
+s, b = call("/functions/v1/send-reminders", "POST", {"group_id": g["id"], "at": "2026-12-15T10:15:00Z"}, {"x-cron-secret": cron})
+r = json.loads(b) if s == 200 else {}
+g0 = (r.get("groups") or [{}])[0]
+check("send-reminders: custom time not yet → 0 items in the 10:00 hour", s == 200 and g0.get("items") == 0, f"{s} {b}")
+s, b = call("/functions/v1/send-reminders", "POST", {"group_id": g["id"], "at": "2026-12-15T18:20:00Z"}, {"x-cron-secret": cron})
+r = json.loads(b) if s == 200 else {}
+g0 = (r.get("groups") or [{}])[0]
+check("send-reminders: 18:20 with 18:30 pick → skipped", s == 200 and g0.get("skipped") is True, f"{s} {b}")
+s, b = call("/functions/v1/send-reminders", "POST", {"group_id": g["id"], "at": "2026-12-15T18:35:00Z"}, {"x-cron-secret": cron})
+r = json.loads(b) if s == 200 else {}
+g0 = (r.get("groups") or [{}])[0]
+check("send-reminders: 18:35 with 18:30 pick → 1 item", s == 200 and g0.get("items") == 1, f"{s} {b}")
+s, b = call("/functions/v1/send-reminders", "POST", {"group_id": g["id"], "at": "2026-12-15T18:50:00Z"}, {"x-cron-secret": cron})
+r = json.loads(b) if s == 200 else {}
+g0 = (r.get("groups") or [{}])[0]
+check("send-reminders: custom already-run skip", s == 200 and g0.get("items") == 0, f"{s} {b}")
+call(f"/rest/v1/reminder_runs?item_id=eq.{custom_id}", "DELETE", headers=svc)
+call(f"/rest/v1/items?id=eq.{custom_id}", "DELETE", headers=svc)
 
 print(); print(f"{len(failures)} failure(s)" if failures else "ALL PASS", "— functions")
 for f in failures: print("  -", f)

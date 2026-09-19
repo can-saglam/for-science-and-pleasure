@@ -2,8 +2,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The share sheet flow: read whatever was shared (link, text, image),
-/// run it through the parser, show the card, save on confirmation.
-/// Saves land in the App Group inbox; the app imports them on next open.
+/// look it up straight away, and show the card to confirm. Only members
+/// get that far — signed out, nothing leaves the phone. Saves land in the
+/// App Group inbox; the app imports them on next open.
 struct ShareView: View {
     let extensionContext: NSExtensionContext?
     let complete: () -> Void
@@ -11,6 +12,7 @@ struct ShareView: View {
 
     private enum Stage {
         case reading
+        case signedOut
         case parsing
         case preview(Item)
         case duplicate
@@ -44,23 +46,13 @@ struct ShareView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Mirrors the in-app capture flow's preview title.
-            .sheetTitle(isPreview ? "Looks right?" : "Can We Go?")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        cancel()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
+            .sheetTitle(isPreview ? "Looks right?" : "Can We Go?") {
+                cancel()
             }
             .background(alignment: .top) {
                 if case .preview(let draft) = stage {
                     LinearGradient(
-                        colors: [draft.accentColor.opacity(0.25), .clear],
+                        colors: [draft.accentColor.opacity(0.25), draft.accentColor.opacity(0)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -79,158 +71,37 @@ struct ShareView: View {
     private var content: some View {
         switch stage {
         case .reading, .parsing:
-            ParsingIndicator()
+            ParsingIndicator(text: extractedURL ?? payloadText, hasImage: payloadImage != nil)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 64)
 
-        case .preview(let draft):
-            // Same shape as the in-app capture preview: the card wears its
-            // own thumbnail, so no hero image; while editing, the form IS
-            // the preview.
-            if !editing {
-                Label(
-                    draft.isPlace ? "Looks like a place" : "Looks like an event",
-                    systemImage: draft.isPlace ? "mappin.and.ellipse" : "ticket"
-                )
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-                ItemCard(item: draft)
-
-                RemindRow(item: draft)
-            } else {
-                ItemForm(item: draft)
-                    .transition(.opacity)
-            }
-
-            if !saved, draft.isEvent, draft.timeBucket == .past,
-               let day = (draft.endsOn ?? draft.startsOn).flatMap({ DayString.text($0) }) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(
-                        "This happened on \(day). Add it to \(Voice.didGoSection) instead?",
-                        systemImage: "checkmark.seal"
-                    )
-                    .font(.footnote.weight(.medium))
+        case .signedOut:
+            VStack(alignment: .leading, spacing: 14) {
+                Label("Open Can We Go? and sign in", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                Text("The share sheet uses the same sign-in as the app. Nothing is sent anywhere until you are signed in.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-
-                    Button {
-                        draft.status = Item.Status.done
-                        save(draft)
-                    } label: {
-                        Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
-            }
-
-            VStack(spacing: 10) {
                 Button {
-                    save(draft)
+                    Haptics.tap()
+                    if let url = URL(string: "canwego://") {
+                        extensionContext?.open(url) { _ in complete() }
+                    }
                 } label: {
-                    Label(saved ? "Saved" : "Save to library", systemImage: "checkmark")
+                    Label("Open Can We Go?", systemImage: "arrow.up.right")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .contentTransition(.opacity)
                 }
                 .prominentGlass()
                 .controlSize(.large)
-                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
-                .allowsHitTesting(!saved)
-
-                HStack(spacing: 10) {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(.snappy) { editing.toggle() }
-                    } label: {
-                        Label(
-                            editing ? "Show card" : "Edit first",
-                            systemImage: editing ? "rectangle.on.rectangle" : "pencil"
-                        )
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-
-                    // No input stage to fall back to here — the content came
-                    // from the share itself, so discarding closes the sheet.
-                    Button(role: .destructive) {
-                        Haptics.tap()
-                        confirmDiscard = true
-                    } label: {
-                        Label("Discard", systemImage: "trash")
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-                    .confirmationDialog(
-                        "Discard this save?",
-                        isPresented: $confirmDiscard,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Discard", role: .destructive) { cancel() }
-                        Button("Keep editing", role: .cancel) {}
-                    }
-                }
-                .controlSize(.large)
             }
-            .padding(.top, 4)
+            .padding(.vertical, 24)
 
-            Text("It'll appear in the app the next time you open it.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
+        case .preview(let draft):
+            preview(draft)
 
         case .duplicate:
-            VStack(alignment: .leading, spacing: 10) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Already in your library")
-                            .font(.footnote.weight(.semibold))
-                        Text("One of you saved this link before.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "books.vertical")
-                }
-                .foregroundStyle(AppBackground.warning)
-
-                HStack(spacing: 10) {
-                    if let id = SavedURLIndex.id(for: extractedURL),
-                       let url = URL(string: "canwego://item/\(id.uuidString)") {
-                        Button {
-                            Haptics.tap()
-                            extensionContext?.open(url) { _ in complete() }
-                        } label: {
-                            Label("Open it", systemImage: "arrow.up.right")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .prominentGlass()
-                    }
-
-                    Button {
-                        Haptics.tap()
-                        saveAnyway = true
-                        Task { await parse() }
-                    } label: {
-                        Label("Save anyway", systemImage: "plus")
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
-            .padding(.vertical, 24)
+            duplicateBlock
 
         case .failed(let message, let retryText):
             Label(message, systemImage: "exclamationmark.triangle")
@@ -246,23 +117,167 @@ struct ShareView: View {
                 Button {
                     saveRaw(retryText)
                 } label: {
-                    Label(saved ? "Saved" : "Save anyway", systemImage: saved ? "checkmark" : "tray.and.arrow.down")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .contentTransition(.opacity)
+                    SaveMorphLabel("Save anyway", systemImage: "tray.and.arrow.down", saved: saved)
                 }
                 .prominentGlass()
                 .controlSize(.large)
                 .allowsHitTesting(!saved)
             }
-
         }
+    }
+
+    @ViewBuilder
+    private func preview(_ draft: Item) -> some View {
+        if !editing {
+            Label(
+                draft.isPlace ? "Looks like a place" : "Looks like an event",
+                systemImage: draft.isPlace ? "mappin.and.ellipse" : "ticket"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            ItemCard(item: draft)
+
+            RemindRow(item: draft)
+        } else {
+            ItemForm(item: draft)
+                .transition(.opacity)
+        }
+
+        if !saved, draft.isEvent, draft.timeBucket == .past,
+           let day = (draft.endsOn ?? draft.startsOn).flatMap({ DayString.text($0) }) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(
+                    "This happened on \(day). Add it to \(Voice.didGoSection) instead?",
+                    systemImage: "checkmark.seal"
+                )
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+
+                Button {
+                    draft.status = Item.Status.done
+                    save(draft)
+                } label: {
+                    Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+        }
+
+        VStack(spacing: 10) {
+            Button {
+                save(draft)
+            } label: {
+                SaveMorphLabel("Save to library", systemImage: "checkmark", saved: saved)
+            }
+            .prominentGlass()
+            .controlSize(.large)
+            .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+            .allowsHitTesting(!saved)
+
+            HStack(spacing: 10) {
+                Button {
+                    Haptics.tap()
+                    withAnimation(.snappy) { editing.toggle() }
+                } label: {
+                    Label(
+                        editing ? "Show card" : "Edit first",
+                        systemImage: editing ? "rectangle.on.rectangle" : "pencil"
+                    )
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+
+                Button(role: .destructive) {
+                    Haptics.tap()
+                    confirmDiscard = true
+                } label: {
+                    Label("Discard", systemImage: "trash")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .confirmationDialog(
+                    "Discard this save?",
+                    isPresented: $confirmDiscard,
+                    titleVisibility: .visible
+                ) {
+                    Button("Discard", role: .destructive) { cancel() }
+                    Button("Keep editing", role: .cancel) {}
+                }
+            }
+            .controlSize(.large)
+        }
+        .padding(.top, 4)
+
+        Text("It'll appear in the app the next time you open it.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var duplicateBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Already in your library")
+                        .font(.footnote.weight(.semibold))
+                    Text("One of you saved this link before.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "books.vertical")
+            }
+            .foregroundStyle(AppBackground.warning)
+
+            HStack(spacing: 10) {
+                if let id = SavedURLIndex.id(for: extractedURL),
+                   let url = URL(string: "canwego://item/\(id.uuidString)") {
+                    Button {
+                        Haptics.tap()
+                        extensionContext?.open(url) { _ in complete() }
+                    } label: {
+                        Label("Open it", systemImage: "arrow.up.right")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .prominentGlass()
+                }
+
+                Button {
+                    Haptics.tap()
+                    saveAnyway = true
+                    Task { await parse() }
+                } label: {
+                    Label("Save anyway", systemImage: "plus")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 24)
     }
 
     // MARK: - Pipeline
 
     private func run() async {
         _ = HomeStore.shared // home clock for the preview card's time label
+        guard SupabaseAuth.shared.signedIn else {
+            stage = .signedOut
+            return
+        }
         await loadAttachments()
         guard payloadText != nil || payloadImage != nil else {
             stage = .failed("Nothing shareable found.", retryText: nil)
@@ -273,6 +288,9 @@ struct ShareView: View {
             withAnimation(.snappy) { stage = .duplicate }
             return
         }
+        // Straight to the lookup: the whole point of sharing is to get a
+        // card back, not a form. The signed-out gate above still means
+        // nothing leaves the phone for anyone who isn't a member.
         await parse()
     }
 
@@ -281,27 +299,32 @@ struct ShareView: View {
         editing = false
         do {
             let card = try await ParseClient.parse(text: payloadText, imageJPEG: payloadImage)
-            let item = Item()
-            item.kind = card.kind
-            item.title = card.title
-            item.summary = card.summary
-            item.venue = card.venue
-            item.area = card.area
-            item.address = card.address
-            item.category = card.category
-            item.price = card.price
-            item.startsOn = card.starts_on
-            item.endsOn = card.ends_on
-            item.url = card.url ?? extractedURL
-            item.lat = card.lat
-            item.lng = card.lng
-            item.colorHex = card.color
-            item.imageUrl = card.image_url
-            item.source = card.source
+            let item = item(from: card)
             withAnimation(.snappy) { stage = .preview(item) }
         } catch {
             stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
         }
+    }
+
+    private func item(from card: ParseClient.Card) -> Item {
+        let item = Item()
+        item.kind = card.kind
+        item.title = card.title
+        item.summary = card.summary
+        item.venue = card.venue
+        item.area = card.area
+        item.address = card.address
+        item.category = card.category
+        item.price = card.price
+        item.startsOn = card.starts_on
+        item.endsOn = card.ends_on
+        item.url = card.url ?? extractedURL
+        item.lat = card.lat
+        item.lng = card.lng
+        item.colorHex = card.color
+        item.imageUrl = card.image_url
+        item.source = card.source
+        return item
     }
 
     private func loadAttachments() async {
@@ -377,6 +400,10 @@ struct ShareView: View {
     // MARK: - Saving
 
     private func save(_ item: Item) {
+        guard SupabaseAuth.shared.signedIn, let userId = SupabaseAuth.shared.userId else {
+            stage = .signedOut
+            return
+        }
         var pending = SharedInbox.PendingSave(kind: item.kind, title: item.title)
         pending.summary = item.summary
         pending.venue = item.venue
@@ -389,6 +416,7 @@ struct ShareView: View {
         pending.reminderOffsetDays = item.reminderOffsetDays
         pending.reminderAnchor = item.reminderAnchor
         pending.remindAt = item.remindAt
+        pending.remindTime = item.remindTime
         pending.url = item.url
         pending.lat = item.lat
         pending.lng = item.lng
@@ -397,16 +425,24 @@ struct ShareView: View {
         pending.source = item.source
         pending.status = item.status
         pending.allowDuplicate = saveAnyway ? true : nil
+        pending.userId = userId.uuidString
+        pending.groupId = GroupStore.shared.card?.groupId.uuidString
         finish(pending)
     }
 
     private func saveRaw(_ text: String) {
+        guard SupabaseAuth.shared.signedIn, let userId = SupabaseAuth.shared.userId else {
+            stage = .signedOut
+            return
+        }
         var pending = SharedInbox.PendingSave(
             kind: Item.Kind.event,
             title: String(text.prefix(120))
         )
         pending.url = extractedURL
         pending.notes = "Saved from the share sheet, needs a tidy-up."
+        pending.userId = userId.uuidString
+        pending.groupId = GroupStore.shared.card?.groupId.uuidString
         finish(pending)
     }
 

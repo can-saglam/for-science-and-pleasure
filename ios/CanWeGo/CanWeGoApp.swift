@@ -72,6 +72,11 @@ private struct RootGate: View {
         .task {
             if auth.signedIn { await decideOnboarding() }
         }
+        // The first run's theme choice reaches the home-screen icon here,
+        // in the background, where iOS swaps it without the alert.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { ThemeStore.shared.syncAppIconIfPending() }
+        }
         // An invite link. Parked for whichever screen can use it: the
         // first-run's code page (a new install), or the Join sheet.
         .onOpenURL { url in
@@ -202,6 +207,23 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
             await MainActor.run {
                 UIApplication.shared.registerForRemoteNotifications()
             }
+        }
+    }
+
+    /// The first run's "Notify me": raise the system prompt now, over the
+    /// page that explained it, and return once it's answered so the flow
+    /// can finish *after* rather than under it. Ignores a past decline —
+    /// this tap is the person asking.
+    static func requestNow() async {
+        guard SupabaseAuth.shared.signedIn else { return }
+        guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
+        await clearRetiredLocalNotifications()
+        let center = UNUserNotificationCenter.current()
+        if await center.notificationSettings().authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
+        await MainActor.run {
+            UIApplication.shared.registerForRemoteNotifications()
         }
     }
 

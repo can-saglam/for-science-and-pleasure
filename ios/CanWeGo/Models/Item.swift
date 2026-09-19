@@ -46,18 +46,25 @@ final class Item {
     var createdBy: UUID?
     /// Days before the anchor to fire a shared reminder: 7, 3, 1, or 0
     /// (morning of). Nil means no reminder. Always travels with
-    /// `reminderAnchor` and `remindAt`.
+    /// `reminderAnchor` and `remindAt`. A hand-picked reminder stores 0.
     var reminderOffsetDays: Int?
-    /// `starts_on` or `ends_on` — which date the offset is measured from.
+    /// `starts_on` or `ends_on` — which date the offset is measured from —
+    /// or `custom` when the day and time were picked by hand.
     var reminderAnchor: String?
     /// Computed fire day (`yyyy-MM-dd`) on the home calendar. The server
-    /// cron sends at 10:00 that morning.
+    /// cron sends at 10:00 that morning unless `remindTime` says otherwise.
     var remindAt: String?
+    /// Hand-picked fire time (`HH:mm`, home clock). Only with the `custom`
+    /// anchor; nil for the presets, which always go out at 10:00.
+    var remindTime: String?
     /// Manual position in the Places list (long-press drag). Local-only —
     /// never synced, so each of you can keep your own order.
     var sortOrder: Double?
     var createdAt: Date = Date.now
     var updatedAt: Date = Date.now
+    /// Soft delete — hidden in the UI, pushed as `deleted_at`, kept so a
+    /// newer local edit can still win over an older remote tombstone.
+    var deletedAt: Date?
 
     enum Kind {
         static let event = "event"
@@ -140,6 +147,34 @@ enum DayString {
         if day > today { return true }
         if day < today { return false }
         return calendar.component(.hour, from: .now) < 11
+    }
+
+    /// `HH:mm` on the home clock for an instant.
+    static func time(_ date: Date) -> String {
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+    }
+
+    /// Splits an instant into a home-clock day string and `HH:mm`.
+    static func dayAndTime(_ date: Date) -> (day: String, time: String) {
+        (formatter.string(from: date), time(date))
+    }
+
+    /// The instant a `day` + `HH:mm` pair names on the home clock.
+    static func instant(day: String, time: String) -> Date? {
+        guard let midnight = self.date(day) else { return nil }
+        let bits = time.split(separator: ":").compactMap { Int($0) }
+        guard bits.count >= 2 else { return nil }
+        return calendar.date(bySettingHour: bits[0], minute: bits[1], second: 0, of: midnight)
+    }
+
+    /// A day + time as text in the home zone and the device locale
+    /// ("Sat 20 Sep, 18:30").
+    static func text(day: String, time: String) -> String? {
+        guard let d = instant(day: day, time: time) else { return nil }
+        var style: Date.FormatStyle = .dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()
+        style.timeZone = timeZone
+        return d.formatted(style)
     }
 
     /// A saved day as text: rendered in the home zone (so a home midnight
@@ -348,8 +383,30 @@ struct ReminderChoice: Hashable, Identifiable {
 
 extension Item {
     static let reminderOffsets = [7, 3, 1, 0]
+    /// Anchor for a hand-picked day and time.
+    static let customReminderAnchor = "custom"
 
     var hasReminder: Bool { reminderOffsetDays != nil && remindAt != nil }
+
+    /// A hand-picked day and time rather than one of the date presets.
+    var hasCustomReminder: Bool {
+        hasReminder && reminderAnchor == Self.customReminderAnchor && remindTime != nil
+    }
+
+    /// The instant a hand-picked reminder fires, on the home clock.
+    var customReminderDate: Date? {
+        guard hasCustomReminder, let day = remindAt, let time = remindTime else { return nil }
+        return DayString.instant(day: day, time: time)
+    }
+
+    /// Where the picker opens: the reminder already set, or the next
+    /// round hour at least an hour from now.
+    var suggestedCustomReminderDate: Date {
+        if let customReminderDate, customReminderDate > .now { return customReminderDate }
+        let cal = DayString.calendar
+        let inAnHour = Date.now.addingTimeInterval(3600)
+        return cal.date(bySetting: .minute, value: 0, of: inAnHour) ?? inAnHour
+    }
 
     /// Both dates exist and they differ — the menu offers start and close.
     var asksReminderAnchor: Bool {
@@ -393,11 +450,19 @@ extension Item {
         }
     }
 
-    var canRemind: Bool { !isDone && !availableReminderChoices.isEmpty }
+    /// Anything not done can take a hand-picked day and time; dated saves
+    /// also get the presets.
+    var canRemind: Bool { !isDone }
 
     var reminderValueLabel: String {
         guard let offset = reminderOffsetDays, let anchor = reminderAnchor else {
             return "Off"
+        }
+        if anchor == Self.customReminderAnchor {
+            guard let day = remindAt, let time = remindTime,
+                  let text = DayString.text(day: day, time: time)
+            else { return "Off" }
+            return text
         }
         let choice = ReminderChoice(offsetDays: offset, anchor: anchor)
         return asksReminderAnchor ? choice.valueLabel : choice.offsetLabel
@@ -413,18 +478,46 @@ extension Item {
         reminderOffsetDays = offset
         reminderAnchor = anchor
         remindAt = fire
+        remindTime = nil
+    }
+
+    /// A hand-picked instant. Minutes are kept; seconds dropped. Anything
+    /// already past is refused and the reminder cleared.
+    func applyCustomReminder(at date: Date) {
+        guard date > .now else {
+            clearReminder()
+            return
+        }
+        let (day, time) = DayString.dayAndTime(date)
+        reminderOffsetDays = 0
+        reminderAnchor = Self.customReminderAnchor
+        remindAt = day
+        remindTime = time
     }
 
     func clearReminder() {
         reminderOffsetDays = nil
         reminderAnchor = nil
         remindAt = nil
+        remindTime = nil
     }
 
     /// Drop or recompute the reminder after dates change or the item is done.
+    /// A hand-picked reminder ignores the dates; it only goes once it has fired.
     func reconcileReminder() {
         guard hasReminder else { return }
-        if isDone || availableReminderChoices.isEmpty {
+        if isDone {
+            clearReminder()
+            return
+        }
+        if reminderAnchor == Self.customReminderAnchor {
+            guard let fire = customReminderDate, fire > .now else {
+                clearReminder()
+                return
+            }
+            return
+        }
+        if availableReminderChoices.isEmpty {
             clearReminder()
             return
         }

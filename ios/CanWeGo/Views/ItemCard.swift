@@ -198,7 +198,7 @@ struct ItemCard: View {
     /// takes the same shape in a calm green.
     private var badgeFold: Double {
         switch AppBackground.theme {
-        case .wine, .forest: return 0.4
+        case .wine, .forest, .moss: return 0.4
         default: return 0.55
         }
     }
@@ -279,6 +279,14 @@ private struct MeltImage: View {
         }
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// How far the photo drifts sideways across the screen's height: a
+    /// card entering at the bottom shows a touch more of its right edge
+    /// than one leaving at the top. Layout never changes — `visualEffect`
+    /// only moves pixels — so a long list stays as cheap as before.
+    private static let drift: CGFloat = 8
+
     var body: some View {
         ZStack {
             if let sharp, let blurred {
@@ -338,8 +346,21 @@ private struct MeltImage: View {
         image
             .resizable()
             .scaledToFill()
-            .frame(width: 150)
+            // Wider than the melt zone by the drift each way, so the
+            // slide never uncovers an edge.
+            .frame(width: 150 + Self.drift * 2)
             .clipped()
+            .visualEffect { [reduceMotion] content, proxy in
+                content.offset(x: reduceMotion ? 0 : Self.parallax(proxy))
+            }
+    }
+
+    /// −drift at the top of the scroll view, +drift at the bottom.
+    private static func parallax(_ proxy: GeometryProxy) -> CGFloat {
+        guard let viewport = proxy.bounds(of: .scrollView)?.height, viewport > 0 else { return 0 }
+        let mid = proxy.frame(in: .scrollView).midY
+        let t = min(max(mid / viewport, 0), 1) - 0.5
+        return t * drift * 2
     }
 }
 
@@ -377,6 +398,11 @@ struct ItemCardRow: View {
     @State private var celebrate = 0
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
+    @State private var undoBin = UndoBin.shared
+
+    /// Just arrived (saved, shared in, or brought back): the border glows
+    /// in the card's own colour for a couple of seconds.
+    private var landed: Bool { undoBin.landed == item.id }
 
     var body: some View {
         // Haptic fires with the action, not the press state — quick taps in
@@ -386,6 +412,15 @@ struct ItemCardRow: View {
             onOpen()
         } label: {
             ItemCard(item: item, compact: compact)
+                .overlay(
+                    RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous)
+                        .strokeBorder(landingColor, lineWidth: 2)
+                        .opacity(landed ? 1 : 0)
+                )
+                // The glow's radius stays put and only its colour fades, so it
+                // dissolves in place rather than shrinking back into the edge.
+                .shadow(color: landingColor.opacity(landed ? 0.45 : 0), radius: 14)
+                .animation(landed ? .easeOut(duration: 0.35) : .easeInOut(duration: 1.4), value: landed)
         }
         .buttonStyle(PressableCardStyle())
         .cardListRow()
@@ -480,13 +515,17 @@ struct ItemCardRow: View {
         }
     }
 
+    /// The glow: the card's accent pulled toward the ink so it reads on
+    /// every theme, including ones whose base is near the accent.
+    private var landingColor: Color {
+        item.accentColor.mix(with: AppBackground.ink, by: 0.45)
+    }
+
     /// Deletion always leaves a five-second Undo behind (toast in ContentView).
     private func delete() {
         Haptics.tap()
         UndoBin.shared.stash(item.snapshot)
-        SupabaseSync.setDeleted(item.id, true)
-        context.delete(item)
-        try? context.save()
+        item.softDelete()
     }
 }
 
@@ -495,16 +534,28 @@ struct SectionHeader: View {
     let title: String
     var count: Int? = nil
 
+    /// Title and count as fixed shares of the theme ink, not the system
+    /// `.secondary` / `.tertiary` pair: those resolve to a different grey
+    /// per theme, so the count sometimes came out *brighter* than its
+    /// title, or on the darker themes all but vanished. Same 0.72 as the
+    /// header icons; the count always sits a clear step below it.
+    static let titleOpacity = 0.72
+    static let countOpacity = 0.42
+
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
+                .foregroundStyle(AppBackground.ink.opacity(Self.titleOpacity))
             if let count {
+                // Rolls 3 → 2 as a card leaves, instead of flickering.
                 Text("\(count)")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppBackground.ink.opacity(Self.countOpacity))
+                    .monospacedDigit()
+                    .contentTransition(.numericText(countsDown: true))
+                    .animation(.snappy, value: count)
             }
         }
         .font(.footnote.weight(.semibold))
-        .foregroundStyle(.secondary)
         .padding(.leading, 4)
         .padding(.top, 12)
         .frame(maxWidth: .infinity, alignment: .leading)

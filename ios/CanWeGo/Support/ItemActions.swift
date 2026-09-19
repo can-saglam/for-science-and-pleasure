@@ -4,10 +4,30 @@ import SwiftData
 
 // Actions shared by the detail sheet, swipe actions, and context menus.
 extension Item {
+    var isDeleted: Bool { deletedAt != nil }
+
+    /// Who saved or last edited this, for sync salvage and "Added by".
+    func stampAuthor() {
+        let me = SupabaseAuth.shared.userId
+        if createdBy == nil { createdBy = me }
+        updatedBy = me
+        if addedByEmail == nil { addedByEmail = SupabaseAuth.shared.email }
+    }
+
+    func softDelete() {
+        deletedAt = .now
+        updatedAt = .now
+        stampAuthor()
+        try? modelContext?.save()
+        let id = self.id
+        Task { @MainActor in SupabaseSync.setDeleted(id, true) }
+    }
+
     func markDone() {
         status = Item.Status.done
         clearReminder()
         updatedAt = .now
+        stampAuthor()
         try? modelContext?.save()
     }
 
@@ -15,6 +35,7 @@ extension Item {
     func putBack() {
         status = Item.Status.saved
         updatedAt = .now
+        stampAuthor()
         try? modelContext?.save()
     }
 
@@ -27,8 +48,8 @@ extension Item {
     /// the save names no place (an event with only a title).
     var placeQuery: String? {
         guard let place = venue ?? (kind == Item.Kind.place ? title : nil) else { return nil }
-        let city = HomeStore.cached()?.locality ?? "London"
-        return ([place, area].compactMap(\.self) + [city]).joined(separator: ", ")
+        let city = HomeStore.cached()?.locality
+        return ([place, area, city].compactMap(\.self)).joined(separator: ", ")
     }
 
     /// Wherever the user chose to get directions (Settings → Directions).

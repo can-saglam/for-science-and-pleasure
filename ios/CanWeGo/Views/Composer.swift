@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The one way anything gets typed into the app: the field on top,
 /// an attached picture in the middle, and a tool row along the bottom
-/// (gallery and camera on the left, the round send button on the right).
+/// (gallery, camera and — where offered — a blank card on the left, the
+/// round send button on the right).
 /// Shared by the capture sheet and the first-run's save page so they
 /// are the same thing, not two things that look alike.
 ///
@@ -15,6 +16,10 @@ struct Composer: View {
     /// The parent is reading what was sent; the tool row shows the
     /// parsing phrases and the send button spins.
     var busy = false
+    /// Optional third tool after the camera: start a blank card by hand,
+    /// skipping the parser. Nil hides it (the first-run page has no
+    /// manual path).
+    var onManual: (() -> Void)? = nil
     var onSend: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -90,7 +95,7 @@ struct Composer: View {
                 if busy {
                     // The send button is already spinning; the copy alone
                     // says what's happening.
-                    ParsingPhrases()
+                    ParsingPhrases(text: text, hasImage: imageJPEG != nil)
                         .padding(.leading, 6)
                 } else {
                     PhotosPicker(selection: $photoItem, matching: .images) {
@@ -108,6 +113,24 @@ struct Composer: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Take a photo")
+                    }
+
+                    if let onManual {
+                        Button {
+                            Haptics.tap()
+                            onManual()
+                        } label: {
+                            // Worded, unlike its neighbours: the glyph
+                            // alone doesn't say "skip the parser".
+                            Label("Add manually", systemImage: "rectangle.and.pencil.and.ellipsis")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(AppBackground.ink.opacity(0.85))
+                                .padding(.horizontal, 12)
+                                .frame(height: 34)
+                                .background(AppBackground.wash(0.10), in: .capsule)
+                                .contentShape(.capsule)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
 

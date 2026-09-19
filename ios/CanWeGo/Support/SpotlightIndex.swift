@@ -10,7 +10,7 @@ enum SpotlightIndex {
 
     static func sync(items: [Item]) {
         let entries = items
-            .filter { !$0.isDone }
+            .filter { !$0.isDeleted && !$0.isDone }
             .map { item -> CSSearchableItem in
                 let attributes = CSSearchableItemAttributeSet(contentType: .content)
                 attributes.title = item.title

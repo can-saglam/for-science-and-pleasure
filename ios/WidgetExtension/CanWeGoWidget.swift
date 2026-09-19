@@ -87,14 +87,23 @@ struct ThemeSnapshot {
 
     private static func named(_ name: String) -> ThemeSnapshot {
         switch name {
-        case "cream":
-            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#F8F0CA") ?? .white, ink: .black)
+        // Retired; anyone still on it lands on oat, as the app does.
+        case "cream", "oat":
+            ThemeSnapshot(name: "oat", isLight: true, paper: Color.fromHex("#E3DDCF") ?? .white, ink: Color.fromHex("#3E2C14") ?? .black)
         case "forest":
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#323316") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
         case "wine":
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#440015") ?? .black, ink: .white)
         case "ink":
             ThemeSnapshot(name: name, isLight: false, paper: .black, ink: .white)
+        case "cobalt":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#365AA8") ?? .black, ink: Color.fromHex("#FAF8F0") ?? .white)
+        case "moss":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#465A37") ?? .black, ink: Color.fromHex("#FAF8F0") ?? .white)
+        case "umber":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#564A30") ?? .black, ink: Color.fromHex("#EFEED2") ?? .white)
+        case "stone":
+            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#C8CBC4") ?? .white, ink: Color.fromHex("#0D0F0A") ?? .black)
         default:
             ThemeSnapshot(name: "midnight", isLight: false, paper: Color.fromHex("#0A107A") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
         }

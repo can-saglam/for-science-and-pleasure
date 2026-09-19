@@ -11,7 +11,7 @@ Three scripts, no dependencies beyond Python 3 and the Supabase CLI:
 | script | target | what it proves |
 |---|---|---|
 | `rls_battery.py 1a\|1b` | staging | Real users see/write exactly their group; strangers see nothing; triggers stamp `group_id`/`created_by`/`updated_by`; stale-write guard; member cap; dispatcher runs |
-| `function_battery.py` | staging | Every edge function's auth gate and group scoping (feeds, ingest, notify, digest) |
+| `function_battery.py` | staging | Every edge function's auth gate and group scoping (calendar feed, notify, reminders, parse/locate/suggest gates; retired `ingest`/`digest` stay 404) |
 | `stranger_probe.py` | **production-safe** | A fresh account is provisioned into its own personal group and sees *only* that: no items, no other groups/profiles/schedules; blanket UPDATE/DELETE touch only its own row; it can't join, move its membership, mint invites or grant itself Plus; anon gets nothing; `membership_*` RPCs aren't callable by users. Creates and deletes its own user and group |
 | `membership_battery.py [--function]` | staging | 0021 + `group-membership`: provisioning (group, schedule, name, colour), invite lifecycle (ok/expired/revoked/unknown/own, multi-use), 2-free/4-Plus cap incl. the joiner's own Plus, join moving saves with URL dedupe and notes merge, leave with/without copy, feed-token rotation, auto-names and pinning, last-seat race (two threads), client lock-out, "Former member" tombstone; `--function` repeats the flows over HTTP with real JWTs. Creates six throwaway accounts and cleans up |
 | `parse_gate.ts` | **production-safe** (reads only; spends model calls) | Replays a sample of the library's URLs through the *local* extractor with a given home and diffs the cards against what's stored. Run before any prompt change: ship when the diff is noise. `--home "Lisbon\|Portugal\|Europe/Lisbon" --url …` spot-checks another home |
@@ -62,7 +62,7 @@ supabase db push --linked --yes --include-all     # --include-all if later migra
 python3 supabase/tests/rls_battery.py <new-phase>
 
 # 6. Functions, if they changed.
-supabase secrets set INGEST_SECRET=stg-ingest-secret REMINDERS_CRON_SECRET=stg-cron-secret
+supabase secrets set FEED_SECRET=stg-feed-secret REMINDERS_CRON_SECRET=stg-cron-secret
 supabase functions deploy <changed functions> --no-verify-jwt
 python3 supabase/tests/function_battery.py
 

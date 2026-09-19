@@ -89,12 +89,16 @@ const cardSchema = (home: Home) => ({
     area: {
       type: ["string", "null"],
       description:
-        `Neighbourhood or district within its city (for ${home.locality}, the kind of name a local would use, like 'Peckham' or 'South Bank' in London)`,
+        home.locality
+          ? `Neighbourhood or district within its city (for ${home.locality}, the kind of name a local would use)`
+          : "Neighbourhood or district within its city",
     },
     address: {
       type: ["string", "null"],
       description:
-        `Street address. Include the city (and country) when it is not ${home.locality} — e.g. '12 Rue de Rivoli, Paris, France'`,
+        home.locality
+          ? `Street address. Include the city (and country) when it is not ${home.locality} — e.g. '12 Rue de Rivoli, Paris, France'`
+          : "Street address, including city and country",
     },
     category: {
       type: ["string", "null"],
@@ -328,7 +332,7 @@ export async function extractCard(
         `The link is a Google Maps pin${mapsLink.name ? ` for "${mapsLink.name}"` : ""}${
           mapsLink.lat !== null ? ` at ${mapsLink.lat},${mapsLink.lng}` : ""
         }.`,
-        `There is no page content to read. Identify this place from its name and your own knowledge of ${home.locality}: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.`,
+        `There is no page content to read. Identify this place from its name${home.locality ? ` and your own knowledge of ${home.locality}` : ""}: fill in kind (almost always 'place'), area, category, and a one-line summary of what it is.`,
         "Use the web search tool to find this exact place's official website and fill 'website' — the app fetches its photo from there, so a maps save without it stays pictureless.",
         mapsLink.lat === null
           ? "Also search for the place's exact street address so it can be geocoded — the pin coordinates could not be extracted from the link."
@@ -344,7 +348,7 @@ export async function extractCard(
           : "There is no linked page to read.",
         `Use the web search tool to identify this exact event or place — search with ${
           url ? "the names from the URL slug" : "the names you can see in the input"
-        } plus "${home.locality}" — and fill in verified details, especially start/end dates, venue, and price.`,
+        }${home.locality ? ` plus "${home.locality}"` : ""} — and fill in verified details, especially start/end dates, venue, and price.`,
         input.image_base64 ? "Combine that with what the screenshot shows." : "",
         "Also find the official website and fill 'website' — the app fetches the thumbnail photo from it.",
         "If search doesn't confirm a detail, leave it null; never guess.",

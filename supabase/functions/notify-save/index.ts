@@ -39,7 +39,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    const result = await notifyPartnersOfSave(admin(), {
+    const db = admin();
+    const { data: recent } = await db
+      .from("notify_recent")
+      .select("sent_at")
+      .eq("group_id", item.group_id)
+      .eq("item_id", item.id)
+      .eq("actor", caller.userId)
+      .maybeSingle();
+    if (recent?.sent_at && Date.now() - new Date(recent.sent_at).getTime() < 10 * 60 * 1000) {
+      return new Response(JSON.stringify({ sent: 0, skipped: true, reason: "debounced" }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    await db.from("notify_recent").upsert({
+      group_id: item.group_id,
+      item_id: item.id,
+      actor: caller.userId,
+      sent_at: new Date().toISOString(),
+    });
+
+    const result = await notifyPartnersOfSave(db, {
       itemId: item.id,
       title: item.title,
       venue: item.venue,

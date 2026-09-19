@@ -24,7 +24,7 @@ struct UpdateRequiredView: View {
                     .padding(.bottom, 20)
 
                 Text("Time for an update")
-                    .font(.display(26, relativeTo: .title))
+                    .font(.displaySmallBold(30, relativeTo: .title))
                     .foregroundStyle(AppBackground.ink)
                     .padding(.bottom, 10)
 
@@ -36,19 +36,19 @@ struct UpdateRequiredView: View {
 
                 Spacer()
 
-                Button {
-                    if let url = syncStatus.storeURL ?? URL(string: "itms-beta://") {
+                if let url = syncStatus.storeURL {
+                    Button {
                         openURL(url)
+                    } label: {
+                        Text("Update")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
                     }
-                } label: {
-                    Text("Update")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                    .prominentGlass()
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 10)
                 }
-                .prominentGlass()
-                .padding(.horizontal, 28)
-                .padding(.bottom, 10)
 
                 Text("Build \(SupabaseSync.buildNumber)")
                     .font(.caption2)

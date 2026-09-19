@@ -108,6 +108,52 @@ Deno.test("inline style width and ?width= query still work", () => {
   );
 });
 
+Deno.test("density srcset: declared width times the densest entry (Wix)", () => {
+  // Verbatim shape from nunheadarttrail.com — width="319" with 1x/2x only.
+  const tag =
+    `<img fetchpriority="high" sizes="319px" srcSet="https://static.wixstatic.com/media/b3632a_f76d~mv2.jpeg/v1/crop/x_21,y_19,w_759,h_769/fill/w_319,h_323,al_c,q_80,enc_avif,quality_auto/NAT%20Target%20Square.jpeg 1x, https://static.wixstatic.com/media/b3632a_f76d~mv2.jpeg/v1/crop/x_21,y_19,w_759,h_769/fill/w_638,h_646,al_c,q_85,enc_avif,quality_auto/NAT%20Target%20Square.jpeg 2x" src="https://static.wixstatic.com/media/b3632a_f76d~mv2.jpeg/v1/crop/x_21,y_19,w_759,h_769/fill/w_319,h_323,al_c,q_80,enc_avif,quality_auto/NAT%20Target%20Square.jpeg" alt="NAT Target Square.jpeg" width="319" height="323"/>`;
+  assertEquals(largestImageCandidate(tag), {
+    src:
+      "https://static.wixstatic.com/media/b3632a_f76d~mv2.jpeg/v1/crop/x_21,y_19,w_759,h_769/fill/w_638,h_646,al_c,q_85,enc_avif,quality_auto/NAT%20Target%20Square.jpeg",
+    width: 638,
+  });
+  // The 91px Wix logo next to it is still too small at 2x.
+  assertEquals(
+    largestImageCandidate(
+      `<img srcSet="/v1/fill/w_91,h_90/IMG.jpeg 1x, /v1/fill/w_182,h_180/IMG.jpeg 2x" src="/v1/fill/w_91,h_90/IMG.jpeg" width="91">`,
+    ),
+    null,
+  );
+});
+
+Deno.test("density srcset without a declared width falls back to the file's URL", () => {
+  assertEquals(
+    largestImageCandidate(
+      `<img src="/v1/fill/w_400,h_300/p.jpg" srcset="/v1/fill/w_400,h_300/p.jpg 1x, /v1/fill/w_800,h_600/p.jpg 2x">`,
+    ),
+    { src: "/v1/fill/w_800,h_600/p.jpg", width: 800 },
+  );
+  // Nothing says how wide: still skipped, as before.
+  assertEquals(largestImageCandidate(`<img src="/p.jpg" srcset="/p.jpg 1x, /p@2x.jpg 2x">`), null);
+});
+
+Deno.test("a real w descriptor beats a density guess", () => {
+  const tag =
+    `<img width="300" srcset="/a-600.jpg 600w, /a-900.jpg 3x" src="/a.jpg">`;
+  assertEquals(largestImageCandidate(tag), { src: "/a-600.jpg", width: 600 });
+});
+
+Deno.test("Wix transform paths name the width when nothing else does", () => {
+  assertEquals(
+    largestImageCandidate(`<img src="https://static.wixstatic.com/media/x~mv2.jpg/v1/fill/w_1200,h_800,al_c/x.jpg">`),
+    { src: "https://static.wixstatic.com/media/x~mv2.jpg/v1/fill/w_1200,h_800,al_c/x.jpg", width: 1200 },
+  );
+  assertEquals(
+    largestImageCandidate(`<img src="https://static.wixstatic.com/media/x~mv2.jpg/v1/fit/w_320,h_200/x.jpg">`),
+    null,
+  );
+});
+
 Deno.test("Wikipedia queries skip short and placeholder names", () => {
   assertEquals(wikipediaQueries({ title: "Kin", venue: null }), []);
   assertEquals(wikipediaQueries({ title: "New item", venue: "X" }), []);

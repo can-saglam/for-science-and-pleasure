@@ -55,18 +55,8 @@ struct JoinSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .appBackground(AppBackground.sheet)
-            .sheetTitle("Join a group")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
+            .sheetTitle("Join a group") {
+                dismiss()
             }
             .disabled(joining)
         }
@@ -281,7 +271,10 @@ struct JoinSheet: View {
                 throw MembershipError(message: "Couldn\u{2019}t sync your latest edits. Try again once you\u{2019}re back online.")
             }
             _ = try await group.join(code: code, keepCopy: keepCopy)
-            _ = await SupabaseSync.replaceLibrary(context: context)
+            let landed = await SupabaseSync.replaceLibrary(context: context)
+            guard landed else {
+                throw MembershipError(message: "You're in the group, but this phone couldn't refresh the library. Try again once you're online.")
+            }
             Haptics.success()
             joinedName = preview?.name ?? group.card?.name ?? "the group"
         } catch {

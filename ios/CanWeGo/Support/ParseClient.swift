@@ -40,17 +40,16 @@ enum ParseClient {
 
     private struct Secrets {
         let supabaseURL: URL
-        let ingestSecret: String
 
         static let shared: Secrets? = {
-            guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
-                  let data = try? Data(contentsOf: url),
-                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
-                  let dict = plist as? [String: String],
-                  let base = dict["SUPABASE_URL"].flatMap(URL.init(string:)),
-                  let secret = dict["INGEST_SECRET"]
-            else { return nil }
-            return Secrets(supabaseURL: base, ingestSecret: secret)
+            if let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+               let data = try? Data(contentsOf: url),
+               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+               let dict = plist as? [String: String],
+               let base = dict["SUPABASE_URL"].flatMap(URL.init(string:)) {
+                return Secrets(supabaseURL: base)
+            }
+            return Secrets(supabaseURL: SupabaseAuth.baseURL)
         }()
     }
 
@@ -122,12 +121,8 @@ enum ParseClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 120 // web-search fallback can take a while
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(secrets.ingestSecret, forHTTPHeaderField: "x-ingest-secret")
-        // The session token is what tells the server which group — and so
-        // which home city — to parse for. Without it, the server assumes London.
-        if let jwt = try? await SupabaseAuth.shared.validToken() {
-            request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-        }
+        let jwt = try await SupabaseAuth.shared.validToken()
+        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -138,6 +133,39 @@ enum ParseClient {
         }
         struct Envelope: Decodable { let card: Card }
         return try JSONDecoder().decode(Envelope.self, from: data).card
+    }
+
+    // MARK: - Starters (first-run chips for the home city)
+
+    struct Starter: Decodable, Hashable, Identifiable {
+        let title: String
+        let url: String
+        let kind: String
+        var id: String { url }
+    }
+
+    /// Three real things to go to in `locality`, for the first-run's save
+    /// page. Cached per city on the server, so a hit is instant; a miss
+    /// runs a web search and can take a while — callers prefetch.
+    static func starters(locality: String, country: String) async throws -> [Starter] {
+        guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
+
+        var request = URLRequest(url: secrets.supabaseURL.appending(path: "functions/v1/starters"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 90
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let jwt = try await SupabaseAuth.shared.validToken()
+        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(["locality": locality, "country": country])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
+            throw ParseError.server(message ?? "Starters failed (\(status)).", status: status)
+        }
+        struct Envelope: Decodable { let starters: [Starter] }
+        return try JSONDecoder().decode(Envelope.self, from: data).starters
     }
 
     // MARK: - Locate (find missing locations)
@@ -183,10 +211,8 @@ enum ParseClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 120 // model + geocoding take a while
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(secrets.ingestSecret, forHTTPHeaderField: "x-ingest-secret")
-        if let jwt = try? await SupabaseAuth.shared.validToken() {
-            request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-        }
+        let jwt = try await SupabaseAuth.shared.validToken()
+        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(["items": items.map(LocateItemPayload.init)])
 
         let (data, response) = try await URLSession.shared.data(for: request)

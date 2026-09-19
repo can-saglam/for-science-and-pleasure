@@ -26,9 +26,19 @@ export const LONDON: Home = {
   lng: -0.1278,
 };
 
+/** City-neutral home: London timezone for the clock only. */
+export const UNSET: Home = {
+  locality: "",
+  country: "",
+  timezone: "Europe/London",
+  lat: null,
+  lng: null,
+};
+
 /** "London, United Kingdom" — how the prompts name the place. */
 export function homeLabel(home: Home): string {
-  return `${home.locality}, ${home.country}`;
+  if (!home.locality) return "the city named on the page";
+  return home.country ? `${home.locality}, ${home.country}` : home.locality;
 }
 
 /** Today's date (YYYY-MM-DD) on the home clock, not the server's. */
@@ -91,6 +101,7 @@ export function namesCity(address: string, home: Home): boolean {
  * Paris address into London.
  */
 export function geocodeQuery(address: string, home: Home): string {
+  if (!home.locality) return address;
   return namesCity(address, home) ? address : `${address}, ${homeLabel(home)}`;
 }
 
@@ -130,24 +141,28 @@ interface GroupHomeRow {
   home_lng: number | null;
 }
 
-/** Row → Home, filling anything unset from London. */
+/** Row → Home. Unnamed stays city-neutral; only the clock falls back to London. */
 export function homeFromRow(row: GroupHomeRow | null | undefined): Home {
-  if (!row) return LONDON;
-  // A named home without coordinates stays coordinate-less rather than
-  // borrowing London's; an unnamed one is London through and through.
+  if (!row) return { ...UNSET };
   const named = Boolean(row.home_locality?.trim());
+  if (!named) {
+    return {
+      ...UNSET,
+      timezone: row.home_timezone?.trim() || UNSET.timezone,
+    };
+  }
   return {
-    locality: row.home_locality?.trim() || LONDON.locality,
-    country: row.home_country?.trim() || LONDON.country,
+    locality: row.home_locality!.trim(),
+    country: row.home_country?.trim() || "",
     timezone: row.home_timezone?.trim() || LONDON.timezone,
-    lat: row.home_lat ?? (named ? null : LONDON.lat),
-    lng: row.home_lng ?? (named ? null : LONDON.lng),
+    lat: row.home_lat ?? null,
+    lng: row.home_lng ?? null,
   };
 }
 
-/** The home of `groupId`; London when the group has none or can't be read. */
+/** The home of `groupId`; city-neutral when the group has none. */
 export async function groupHome(db: SupabaseClient, groupId: string | null): Promise<Home> {
-  if (!groupId) return LONDON;
+  if (!groupId) return { ...UNSET };
   const { data } = await db
     .from("groups")
     .select("home_locality, home_country, home_timezone, home_lat, home_lng")

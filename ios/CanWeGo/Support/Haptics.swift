@@ -15,4 +15,10 @@ enum Haptics {
     static func success() {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
+
+    /// Something physical settling back into place — a card landing.
+    /// Intensity follows how hard it comes down, 0…1.
+    static func settle(_ intensity: CGFloat = 0.8) {
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: min(max(intensity, 0.2), 1))
+    }
 }

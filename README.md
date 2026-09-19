@@ -22,9 +22,10 @@ writes are now also guarded server-side (`0013_stale_write_guard.sql`).
   week, plus what's simply on.
 - **We Did Go** — the journal of done items and *Missed* events, grouped by
   month.
-- **Remind** — one opt-in reminder per dated save, shared with the group.
-  Fires at 10:00 in the home city (a week / 3 days / 1 day / morning of
-  start or close) and opens the card.
+- **Remind** — one opt-in reminder per save, shared with the group. Dated
+  events offer presets that fire at 10:00 in the home city (a week / 3 days
+  / 1 day / morning of start or close); any save, places included, can take
+  a hand-picked day and time instead. Tapping the push opens the card.
 - **Widget** — home-screen widget rotating through saved events, hourly.
 - **Live sync** — changes appear on both phones via Supabase; duplicate URLs
   are deduped on capture.
@@ -36,23 +37,38 @@ writes are now also guarded server-side (`0013_stale_write_guard.sql`).
 - Supabase project `gvewzvcvmeztqyfwkgwa` (London) — Postgres + email OTP
   auth + edge functions. Membership is allow-listed in `public.members`;
   anyone else who signs in sees nothing (RLS).
-- Edge functions include `parse` (authenticated, used by the app), `ingest`
-  (secret-header endpoint for shares), `locate` (proposes venue/area/
-  coordinates for saves missing them, applied only after in-app
-  confirmation), `send-reminders` (shared per-event Remind at 10:00 home
-  time), and `digest` (Shortcut pull of a weekend summary).
-  Claude and push credentials are stored as Supabase secrets.
+- Edge functions: `parse` and `locate` (used by the app; `locate` proposes
+  venue/area/coordinates for saves missing them, applied only after in-app
+  confirmation), `suggest`, `notify-save`, `group-membership`,
+  `delete-account`, `send-reminders` (shared Remind pushes: presets at 10:00
+  home time, hand-picked times as they come round), and `calendar` (the ICS
+  feed). Claude and push credentials are stored as Supabase secrets.
+- The only ways in are the app and its share extension, both with a
+  signed-in session. The old Shortcut write path (`ingest`) and the
+  Sunday digest pull (`digest`) were removed in September 2026; proper
+  App Intents / Shortcuts actions are a later phase.
+
+## Calendar subscription
+
+One shared feed keeps opening/closing markers inside Google Calendar
+automatically, no per-item exporting:
+
+- Feed URL: `https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/calendar?key=`*(your group's feed token)*
+- Google Calendar (on the web at calendar.google.com): Settings → *Add
+  calendar* → *From URL* → paste the feed URL. It then syncs to the Google
+  Calendar app on every phone signed into that account (Google refreshes
+  external feeds every few hours).
 
 ## Development
 
-Secrets (DB password, ingest/feed secrets, keys) live in `.supabase.env` (not
-in git). Supabase CLI is linked: `supabase db push`, `supabase functions
+Secrets (DB password, feed secret, keys) live in `.supabase.env` (not in
+git). Supabase CLI is linked: `supabase db push`, `supabase functions
 deploy`, `supabase config push`.
 
-- `INGEST_SECRET` — secret header for `/functions/v1/ingest` only.
-- `FEED_SECRET` — optional dedicated key for `/calendar` and `/digest` URL
-  feeds. Until it is set, those endpoints still accept `INGEST_SECRET` so
-  existing calendar subscriptions keep working.
+- `FEED_SECRET` — dedicated key for the `/calendar` feed of the founding
+  group. Per-group feeds use each group's `feed_token`.
+  Parse, locate, suggest, notify-save, group-membership and delete-account
+  require a signed-in user JWT.
 
 ## Adding a member
 

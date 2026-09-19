@@ -6,5 +6,9 @@
 	<array>
 		<string>group.com.cansaglam.CanWeGo</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)group.com.cansaglam.CanWeGo</string>
+	</array>
 </dict>
 </plist>

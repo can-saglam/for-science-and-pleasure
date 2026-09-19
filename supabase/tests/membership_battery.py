@@ -84,12 +84,13 @@ def group_row(gid):
     return b[0] if b else None
 
 def items_in(gid):
-    s, b = svc(f"/rest/v1/items?group_id=eq.{gid}&deleted_at=is.null&select=id,title,url,notes,created_by,remind_at&order=created_at")
+    s, b = svc(f"/rest/v1/items?group_id=eq.{gid}&deleted_at=is.null&select=id,title,url,notes,created_by,remind_at,starts_on,image_url&order=created_at")
     return b
 
-def add_item(gid, uid, title, url=None, notes=None):
+def add_item(gid, uid, title, url=None, notes=None, **extra):
     row = {"id": str(uuid.uuid4()), "kind": "place", "status": "saved", "title": title, "url": url, "notes": notes,
            "source": "app", "group_id": gid, "created_by": uid, "updated_by": uid}
+    row.update(extra)
     s, b = svc("/rest/v1/items", "POST", [row], prefer="return=minimal")
     assert s == 201, (s, b)
     return row["id"]
@@ -142,7 +143,8 @@ try:
     # ------------------------------------------------------------ join moves saves, dedupes by URL
     add_item(g_ann, ann, "Ann's cafe", "https://www.example.com/cafe/", notes="Ann's note")
     add_item(g_ann, ann, "Ann only", "https://example.com/only")
-    add_item(g_bob, bob, "Bob's cafe", "http://example.com/cafe", notes="Bob's note")
+    add_item(g_bob, bob, "Bob's cafe", "http://example.com/cafe", notes="Bob's note",
+             starts_on="2026-10-01", remind_at="2026-09-24", image_url="https://example.com/cafe.jpg")
     add_item(g_bob, bob, "Bob only")
     j = fn(f"public.membership_join('{bob}', '{code_ann}', false)")
     check("bob joins ann", j.get("joined") is True and j.get("moved") == 1, str(j))
@@ -152,6 +154,7 @@ try:
     check("saves moved in, twin kept (3 items, not 4)", titles == ["Ann only", "Ann's cafe", "Bob only"], str(titles))
     twin = [i for i in got if i["title"] == "Ann's cafe"][0]
     check("twin gained the joiner's notes", twin["notes"] == "Ann's note\n\nBob's note", repr(twin["notes"]))
+    check("twin gained joiner dates/reminder/image", twin.get("starts_on") == "2026-10-01" and twin.get("remind_at") == "2026-09-24" and twin.get("image_url") == "https://example.com/cafe.jpg", repr(twin))
     check("moved row keeps its author", [i for i in got if i["title"] == "Bob only"][0]["created_by"] == bob)
     check("group renamed itself", group_row(g_ann)["name"] == "Ann & Bob", group_row(g_ann)["name"])
     s, b = svc(f"/rest/v1/profiles?user_id=eq.{bob}&select=avatar_colour")

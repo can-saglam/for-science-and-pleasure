@@ -1,9 +1,8 @@
 {
   "images" : [
     {
-      "filename" : "IconPreviewCream.png",
-      "idiom" : "universal",
-      "scale" : "3x"
+      "filename" : "SampleOpenHouse.jpg",
+      "idiom" : "universal"
     }
   ],
   "info" : {

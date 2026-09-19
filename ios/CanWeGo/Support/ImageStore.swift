@@ -112,6 +112,17 @@ enum ImageStore {
         }
     }
 
+    /// Hand a bundled image to the cache under a made-up URL, memory only:
+    /// the onboarding's sample cards wear real photos through the same
+    /// melt as every other card, with nothing ever fetched or written.
+    static func seed(_ image: UIImage, for url: URL) {
+        guard cached(url) == nil else { return }
+        store(image, key: key(url, .card))
+        if let blurred = melted(image) {
+            store(blurred, key: "\(url.absoluteString)|melt" as NSString)
+        }
+    }
+
     /// Drop memory and disk for a URL we're no longer showing.
     static func evict(_ url: URL) {
         memory.removeObject(forKey: key(url, .card))

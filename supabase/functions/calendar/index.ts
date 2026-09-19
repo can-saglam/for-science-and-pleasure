@@ -1,7 +1,7 @@
 // calendar: subscribable ICS feed of the shared library. Add it once to
 // Google/Apple Calendar and opening/closing markers stay in sync automatically.
-// Auth via ?key= (calendar apps need URL-embedded auth). Prefer FEED_SECRET;
-// falls back to INGEST_SECRET until FEED_SECRET is configured.
+// Auth via ?key= (calendar apps need URL-embedded auth): the group's
+// feed_token, or FEED_SECRET for the founding group.
 import { admin, groupForFeedKey } from "../_shared/groups.ts";
 import { groupHome } from "../_shared/home.ts";
 

@@ -1,16 +1,22 @@
-// send-reminders: one APNs per dated save whose remind_at is today, to
-// every device in the group (including whoever set it).
+// send-reminders: one APNs per save whose remind_at is today, to every
+// device in the group (including whoever set it).
 //
-// pg_cron runs dispatch_reminders() every 15 minutes. For each group whose
-// home clock is inside 10:00–10:59 it POSTs here with {group_id}. This
-// function re-checks the window, dedups with reminder_runs (item_id,
-// remind_at), and fans out. Without a group_id (manual runs) it does every
-// group. `at` overrides the clock (tests). `force` bypasses the window and
-// the run table so a real morning send is unaffected.
+// pg_cron runs dispatch_reminders() every 15 minutes. It POSTs here with
+// {group_id} for each group whose home clock is inside 10:00–10:59 (the
+// presets) or that has a hand-picked remind_time already past. This
+// function re-checks both, dedups with reminder_runs (item_id, remind_at),
+// and fans out. Without a group_id (manual runs) it does every group. `at`
+// overrides the clock (tests). `force` bypasses the windows and the run
+// table so a real send is unaffected.
 import { apnsConfigured, sendApnsAlert } from "../_shared/apns.ts";
 import { admin, groupTokens } from "../_shared/groups.ts";
 import { groupHome, homeToday } from "../_shared/home.ts";
-import { reminderBody } from "../_shared/reminders.ts";
+import {
+  CUSTOM_REMINDER_TITLE,
+  customReminderBody,
+  customTimeDue,
+  reminderBody,
+} from "../_shared/reminders.ts";
 import { isMorningHour, localClock } from "../_shared/schedule.ts";
 
 type GroupResult =
@@ -20,12 +26,15 @@ type GroupResult =
 
 interface DueItem {
   id: string;
+  kind: string;
   title: string;
   starts_on: string | null;
   ends_on: string | null;
   reminder_offset_days: number;
   reminder_anchor: string;
   remind_at: string;
+  /** HH:MM[:SS] on the home clock; null for the 10:00 presets. */
+  remind_time: string | null;
 }
 
 async function runGroup(
@@ -36,22 +45,28 @@ async function runGroup(
 ): Promise<GroupResult> {
   const home = await groupHome(supabase, groupId);
   const clock = localClock(home.timezone, at);
-  if (!force && !isMorningHour(clock)) {
-    return { group_id: groupId, skipped: true, reason: "outside schedule" };
-  }
+  const morning = isMorningHour(clock);
 
   const today = homeToday(home, at);
 
   const { data: rows, error: itemsError } = await supabase
     .from("items")
-    .select("id, title, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_at")
+    .select("id, kind, title, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_at, remind_time")
     .eq("group_id", groupId)
     .eq("remind_at", today)
     .eq("status", "saved")
     .is("deleted_at", null);
   if (itemsError) throw itemsError;
 
-  const due = (rows ?? []) as DueItem[];
+  // Presets wait for the 10:00 hour; hand-picked times fire once the home
+  // clock has passed them (reminder_runs stops a second send).
+  const due = ((rows ?? []) as DueItem[]).filter((item) =>
+    force || (item.remind_time == null ? morning : customTimeDue(item.remind_time, clock))
+  );
+  if (!force && !morning && due.length === 0) {
+    return { group_id: groupId, skipped: true, reason: "outside schedule" };
+  }
+
   let items = 0;
   let apnsSent = 0;
   let apnsGone = 0;
@@ -87,16 +102,15 @@ async function runGroup(
     }
 
     items++;
-    const body = reminderBody(
-      item.reminder_offset_days,
-      item.reminder_anchor,
-      item.starts_on,
-      item.ends_on,
-    );
+    const custom = item.reminder_anchor === "custom";
+    const body = custom
+      ? customReminderBody(item.kind, item.title, item.remind_at, item.starts_on, item.ends_on)
+      : reminderBody(item.reminder_offset_days, item.reminder_anchor, item.starts_on, item.ends_on);
+    const pushTitle = custom ? CUSTOM_REMINDER_TITLE : item.title;
 
     try {
       for (const token of tokens) {
-        const result = await sendApnsAlert(token, body, item.title, { itemID: item.id });
+        const result = await sendApnsAlert(token, body, pushTitle, { itemID: item.id }, groupId);
         if (result === "sent") apnsSent++;
         else if (result === "gone") {
           apnsGone++;

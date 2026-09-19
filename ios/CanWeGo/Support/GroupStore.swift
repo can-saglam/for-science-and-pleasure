@@ -133,12 +133,18 @@ final class GroupStore {
 
     // MARK: - Actions
 
-    func refresh() async {
-        guard SupabaseAuth.shared.signedIn else { return }
-        if let fresh = try? await call(["action": "card"], as: GroupCard.self) {
+    @discardableResult
+    func refresh() async -> Bool {
+        guard SupabaseAuth.shared.signedIn else { return false }
+        do {
+            let fresh = try await call(["action": "card"], as: GroupCard.self)
             store(fresh)
+            loaded = true
+            return true
+        } catch {
+            loaded = true
+            return false
         }
-        loaded = true
     }
 
     struct InviteResult: Decodable, Identifiable {
