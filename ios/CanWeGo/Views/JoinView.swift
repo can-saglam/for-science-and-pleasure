@@ -92,7 +92,8 @@ struct JoinSheet: View {
 
     private var field: some View {
         VStack(spacing: 12) {
-            TextField("KV7-P2M", text: $draft)
+            TextField("", text: $draft, prompt: AppBackground.fieldPrompt("KV7-P2M"))
+                .foregroundStyle(AppBackground.ink)
                 .font(.system(size: 32, weight: .bold, design: .rounded))
                 .multilineTextAlignment(.center)
                 .textInputAutocapitalization(.characters)

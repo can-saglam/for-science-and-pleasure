@@ -122,8 +122,11 @@ struct LibraryView: View {
             .map(\.label)
     }
 
-    private var visible: [Item] {
-        let list = base.filter(matches)
+    private var visible: [Item] { Self.ordered(base.filter(matches), kind: kind) }
+
+    /// The active list's order. Static so launch can warm photos in the
+    /// same order the list will ask for them.
+    static func ordered(_ list: [Item], kind: String) -> [Item] {
         // Places respect a hand-arranged order first (long-press drag);
         // anything never moved falls back to the closing-soon sort below.
         if kind == Item.Kind.place {
@@ -141,7 +144,7 @@ struct LibraryView: View {
 
     // Swift's sort is not stable, so ties need an explicit tie-break or
     // equal items shuffle every time the list recomputes (e.g. on filter).
-    private func closesSooner(_ a: Item, _ b: Item) -> Bool {
+    private static func closesSooner(_ a: Item, _ b: Item) -> Bool {
         switch (a.daysUntilClose, b.daysUntilClose) {
         case let (x?, y?) where x != y: return x < y
         case (_?, nil): return true
@@ -152,74 +155,61 @@ struct LibraryView: View {
 
     /// The universal tie-break: newest save first, with the id as a final
     /// arbiter so two items can never compare equal and trade places.
-    private func newerFirst(_ a: Item, _ b: Item) -> Bool {
+    private static func newerFirst(_ a: Item, _ b: Item) -> Bool {
         a.createdAt != b.createdAt
             ? a.createdAt > b.createdAt
             : a.id.uuidString < b.id.uuidString
     }
 
+    private func newerFirst(_ a: Item, _ b: Item) -> Bool { Self.newerFirst(a, b) }
+
     // MARK: - Event urgency sections (the old This Week, folded in)
 
-    /// Only the truly urgent lead the page: three days or fewer to act.
-    private var lastChance: [Item] {
-        visible.filter {
+    private var eventSections: [(String, [Item])] { Self.eventSections(visible) }
+
+    /// `visible` (already in `ordered` order) split into the Events page's
+    /// sections, in page order.
+    static func eventSections(_ visible: [Item]) -> [(String, [Item])] {
+        // "This week" means through Sunday, not a rolling seven days: on a
+        // Thursday, a gig next Thursday is 7 days away but it is next week.
+        let weekEnd = DayString.endOfThisWeek()
+        let byStart: (Item, Item) -> Bool = {
+            ($0.startsOn ?? "") != ($1.startsOn ?? "")
+                ? ($0.startsOn ?? "") < ($1.startsOn ?? "")
+                : newerFirst($0, $1)
+        }
+        // Only the truly urgent lead the page: three days or fewer to act.
+        let lastChance = visible.filter {
             !$0.isOneDay && ($0.daysUntilClose ?? 99) <= 3 && $0.timeBucket == .lastChance
         }
-    }
-
-    /// Running with the end in sight (within three weeks) — but not urgent,
-    /// so it reads after this week's happenings, not before.
-    private var closingSoon: [Item] {
-        visible.filter {
-            guard !$0.isOneDay, $0.timeBucket == .now || $0.timeBucket == .lastChance
-            else { return false }
-            return (4...21).contains($0.daysUntilClose ?? 99)
-        }
-    }
-
-    /// The last day of the current calendar week (Sunday), as a day string.
-    /// "This week" means through Sunday, not a rolling seven days: on a
-    /// Thursday, a gig next Thursday is 7 days away but it is next week.
-    private var weekEnd: String { DayString.endOfThisWeek() }
-
-    /// One-offs and openings woven together, chronological: an exhibition
-    /// opening Thursday is as much "this week" as a gig on Friday.
-    private var happeningThisWeek: [Item] {
-        visible
+        // One-offs and openings woven together, chronological: an
+        // exhibition opening Thursday is as much "this week" as a gig on
+        // Friday.
+        let happeningThisWeek = visible
             .filter {
                 guard let start = $0.startsOn, let away = $0.daysUntilStart,
                       away >= 0, start <= weekEnd
                 else { return false }
                 return $0.isOneDay || $0.timeBucket == .upcoming
             }
-            .sorted {
-                ($0.startsOn ?? "") != ($1.startsOn ?? "")
-                    ? ($0.startsOn ?? "") < ($1.startsOn ?? "")
-                    : newerFirst($0, $1)
-            }
-    }
-
-    /// Running with no imminent end, or undated — simply on.
-    private var onNow: [Item] {
-        visible.filter {
+            .sorted(by: byStart)
+        // Running with the end in sight (within three weeks), but not
+        // urgent, so it reads after this week's happenings, not before.
+        let closingSoon = visible.filter {
+            guard !$0.isOneDay, $0.timeBucket == .now || $0.timeBucket == .lastChance
+            else { return false }
+            return (4...21).contains($0.daysUntilClose ?? 99)
+        }
+        // Running with no imminent end, or undated: simply on.
+        let onNow = visible.filter {
             ($0.timeBucket == .now && ($0.daysUntilClose ?? 99) > 21)
                 || $0.timeBucket == .undated
         }
-    }
-
-    /// Starts after this week ends — the far horizon.
-    private var comingUp: [Item] {
-        visible
+        // Starts after this week ends: the far horizon.
+        let comingUp = visible
             .filter { $0.timeBucket == .upcoming && ($0.startsOn ?? "") > weekEnd }
-            .sorted {
-                ($0.startsOn ?? "") != ($1.startsOn ?? "")
-                    ? ($0.startsOn ?? "") < ($1.startsOn ?? "")
-                    : newerFirst($0, $1)
-            }
-    }
-
-    private var eventSections: [(String, [Item])] {
-        [
+            .sorted(by: byStart)
+        return [
             ("Last chance", lastChance),
             ("Happening this week", happeningThisWeek),
             ("Closing soon", closingSoon),
@@ -347,9 +337,16 @@ struct LibraryView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Haptics.tap()
-                            withAnimation(.snappy) {
-                                searchOpen.toggle()
-                                if !searchOpen { query = "" }
+                            if searchOpen {
+                                // Opening the field relayouts the bar, and
+                                // the same tap is delivered again. Ignore
+                                // that echo so the field isn't closed by
+                                // the gesture that opened it.
+                                guard Date.now.timeIntervalSince(searchOpenedAt) > 0.45 else { return }
+                                closeSearch()
+                            } else {
+                                searchOpenedAt = .now
+                                withAnimation(.snappy) { searchOpen = true }
                             }
                         } label: {
                             headerIcon("magnifyingglass")
@@ -424,7 +421,8 @@ struct LibraryView: View {
             Image(systemName: "magnifyingglass")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            TextField("Search your saves", text: $query)
+            TextField("", text: $query, prompt: AppBackground.fieldPrompt("Search your saves"))
+                .foregroundStyle(AppBackground.ink)
                 .focused($searchFocused)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
@@ -590,11 +588,14 @@ struct LibraryView: View {
                 chipRow
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
+                    // Full-bleed row, 20pt padding inside the scroller, so
+                    // the first chip still lines up with the cards and the
+                    // scroll view can clip instead of spilling.
                     .listRowInsets(.init(
                         top: 5,
-                        leading: 20,
+                        leading: 0,
                         bottom: kind == Item.Kind.place ? 16 : 0,
-                        trailing: 20
+                        trailing: 0
                     ))
             }
 
@@ -684,17 +685,19 @@ struct LibraryView: View {
             if searchOpen { closeSearch() }
             withAnimation(.snappy) { scrollPosition.scrollTo(edge: .top) }
         }
-        // Scrolling is a way out of search: the keyboard drops right away,
-        // and an untouched (empty) field slides off entirely. The grace
-        // period skips the offset jump caused by the field's own inset
-        // appearing, which would otherwise close it the moment it opened.
-        .scrollDismissesKeyboard(.immediately)
-        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { old, new in
-            guard searchOpen, query.isEmpty,
-                  Date.now.timeIntervalSince(searchOpenedAt) > 0.6,
-                  abs(new - old) > 12
+        // A finger drag leaves search. The field's own inset and the
+        // keyboard both move the content offset, and that used to count
+        // as a scroll and close the field the moment it opened. Only a
+        // real drag (the interacting phase) counts.
+        .scrollDismissesKeyboard(.interactively)
+        .onScrollPhaseChange { _, phase in
+            guard searchOpen, query.isEmpty, phase == .interacting,
+                  Date.now.timeIntervalSince(searchOpenedAt) > 0.45
             else { return }
-            withAnimation(.snappy) { searchOpen = false }
+            withAnimation(.snappy) {
+                searchOpen = false
+                query = ""
+            }
         }
         // Snug under the header — the chip row's own insets are enough air.
         .contentMargins(.top, 0, for: .scrollContent)
@@ -994,11 +997,11 @@ private struct ChipRow: View {
                 }
             }
             .padding(.vertical, 2)
+            .padding(.horizontal, 20)
         }
-        // Chips run straight off the screen edge — no fade. The glass
-        // capsules are brighter than the papers, so any dissolve into the
-        // page read as a smudge; a clean cut hints at more just as well.
-        .scrollClipDisabled()
+        // Clipped. An unclipped horizontal scroller inside the list makes
+        // the row's draw rect spill into the cards above and below, and
+        // the list remeasures that on every drag.
     }
 
     private func chip(_ label: String, isOn: Bool, toggle: @escaping () -> Void) -> some View {

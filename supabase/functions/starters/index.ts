@@ -1,8 +1,8 @@
 // starters: three real things to go to in a city, for the first-run's
-// save page. Body: { locality, country }. One web-search model call per
-// city, cached in starter_cache for two weeks; a cache hit costs nothing
-// and returns at once. Authenticated (member JWT) — every account has a
-// group from sign-up, so a brand new person qualifies.
+// save page. Body: { locality, country }. Cache first; on a miss, a
+// knowledge-only model call (no web search — search is what timed out
+// and came back empty). If that fails too: curated city list, then a
+// stale cache. Authenticated (member JWT).
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
@@ -10,6 +10,9 @@ import { consumeQuota } from "../_shared/quota.ts";
 import {
   STARTER_COUNT,
   type Starter,
+  chooseStarters,
+  fallbackStarters,
+  readModelStarters,
   shapeStarters,
   starterFresh,
   starterKey,
@@ -20,12 +23,12 @@ const STARTERS_SCHEMA = {
   properties: {
     starters: {
       type: "array",
-      description: `${STARTER_COUNT} to 5 candidates`,
+      description: `Exactly ${STARTER_COUNT} places`,
       items: {
         type: "object",
         properties: {
-          title: { type: "string", description: "The venue or event's own short name, under 40 characters" },
-          url: { type: "string", description: "The venue or event's OWN official https page" },
+          title: { type: "string", description: "The place's own short name, under 40 characters" },
+          url: { type: "string", description: "That place's own official https website" },
           kind: { type: "string", enum: ["event", "place"] },
         },
         required: ["title", "url", "kind"],
@@ -44,6 +47,29 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+async function fromKnowledge(locality: string, country: string): Promise<Starter[]> {
+  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const response = await anthropic.messages.create({
+    // No web search: a schema-only call finishes in a couple of seconds
+    // and doesn't blow the edge worker's budget. Famous official sites
+    // are in the model's knowledge; search was the path that came back empty.
+    model: "claude-sonnet-5",
+    max_tokens: 1024,
+    output_config: { format: { type: "json_schema", schema: STARTERS_SCHEMA } },
+    messages: [{
+      role: "user",
+      content:
+        `Name ${STARTER_COUNT} real, well-known places in ${locality}, ${country} that someone would go to. ` +
+        `Need one restaurant, café or bar; one gallery, museum, music venue or cinema; and one more of either. ` +
+        `Each url MUST be that place's own official https website — a domain you are sure exists. ` +
+        `Never google, maps, tripadvisor, timeout, wikipedia, instagram, facebook, eventbrite, dice, songkick, or a city tourism portal. ` +
+        `If you are not sure of a domain, pick a better-known place whose official site you are sure of. ` +
+        `Titles are the place's own short name, in the local spelling.`,
+    }],
+  });
+  return shapeStarters(readModelStarters(response.content));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -59,45 +85,27 @@ Deno.serve(async (req) => {
 
     const db = admin();
     const key = starterKey(locality, country);
+    const fallback = fallbackStarters(locality, country);
     const { data: cached } = await db
       .from("starter_cache")
       .select("payload, fetched_at")
       .eq("key", key)
       .maybeSingle();
-    if (cached && starterFresh(cached.fetched_at)) {
-      return json({ starters: shapeStarters(cached.payload), cached: true });
+    const stale = cached ? shapeStarters(cached.payload) : [];
+    if (cached && starterFresh(cached.fetched_at) && stale.length > 0) {
+      return json({ starters: stale, cached: true });
     }
 
-    // A miss costs a model call: count it against the same daily cap as
-    // day plans, so a scripted client can't run up the bill city by city.
-    if (!await consumeQuota(db, caller.userId, "suggest")) {
-      return json({ error: "daily limit reached" }, 429);
+    let shaped: Starter[] = [];
+    if (await consumeQuota(db, caller.userId, "suggest")) {
+      try {
+        shaped = await fromKnowledge(locality, country);
+      } catch (error) {
+        console.error("starters model", error);
+      }
     }
 
-    const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
-    const today = new Date().toISOString().slice(0, 10);
-    const response = await anthropic.messages.create({
-      // Sonnet with search: quick enough for the edge worker's budget.
-      model: "claude-sonnet-5",
-      max_tokens: 2048,
-      output_config: { format: { type: "json_schema", schema: STARTERS_SCHEMA } },
-      tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 }],
-      messages: [{
-        role: "user",
-        content:
-          `Someone has just moved to, or lives in, ${locality}, ${country}. Today is ${today}. ` +
-          `Suggest ${STARTER_COUNT} to 5 well-known, currently open things they might want to go to there, ` +
-          `mixing kinds: one exhibition, show or festival that is on now or opening within two months (kind "event"), ` +
-          `one much-loved restaurant, café or bar (kind "place"), and one landmark venue — a gallery, museum, music venue or independent cinema (kind "place"). ` +
-          `Each must be a specific, real place or event in ${locality} with its OWN official website page (the venue's or event's own domain — never a listings, ticketing, review, map or social site). ` +
-          `Prefer places with a strong following among locals over tourist traps. Titles are the thing's own name, in the local spelling.`,
-      }],
-    });
-
-    const textBlock = [...response.content].reverse().find((b) => b.type === "text");
-    const raw = textBlock && textBlock.type === "text" ? JSON.parse(textBlock.text) : { starters: [] };
-    const starters: Starter[] = shapeStarters(raw);
-
+    const starters = chooseStarters(shaped, fallback, stale);
     if (starters.length > 0) {
       await db.from("starter_cache").upsert({
         key,

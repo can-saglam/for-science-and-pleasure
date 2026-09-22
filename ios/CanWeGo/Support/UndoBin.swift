@@ -149,23 +149,39 @@ final class UndoBin {
     func undoSave(in context: ModelContext) {
         guard let saved else { return }
         let id = saved.id
-        let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
-        if let item = try? context.fetch(fetch).first {
-            stash(item.snapshot)
-            item.softDelete()
+        if let item = Self.fetch(id, in: context) {
+            finishUndoSave(item)
+            return
         }
+        // A save that just landed can miss the first fetch. Leave the
+        // toast up and try once more, so Undo doesn't vanish as a no-op.
+        Task { @MainActor in
+            guard self.saved?.id == id else { return }
+            if let item = Self.fetch(id, in: context) {
+                finishUndoSave(item)
+            }
+        }
+    }
+
+    @MainActor
+    private func finishUndoSave(_ item: Item) {
+        stash(item.snapshot)
+        item.softDelete()
         savedExpiry?.cancel()
-        self.saved = nil
+        saved = nil
+    }
+
+    private static func fetch(_ id: UUID, in context: ModelContext) -> Item? {
+        let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
+        return try? context.fetch(fetch).first
     }
 
     func undoDone(in context: ModelContext) {
         guard let done else { return }
         let id = done.id
-        let fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
-        if let item = try? context.fetch(fetch).first {
-            item.putBack()
-            land(item.id)
-        }
+        guard let item = Self.fetch(id, in: context) else { return }
+        item.putBack()
+        land(item.id)
         doneExpiry?.cancel()
         self.done = nil
     }

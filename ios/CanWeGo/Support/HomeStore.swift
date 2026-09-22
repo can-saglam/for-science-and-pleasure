@@ -144,7 +144,7 @@ final class HomeStore {
                   let row = try JSONDecoder().decode([Row].self, from: data).first
             else { return }
             let named = row.home_locality?.trimmingCharacters(in: .whitespaces).nilIfEmpty
-            isSet = named != nil
+            if isSet != (named != nil) { isSet = named != nil }
             // Anything the group hasn't set falls back to London, same as
             // the server's homeFromRow(). The cache only keeps a real home
             // so a fresh account on this phone doesn't inherit the last one.

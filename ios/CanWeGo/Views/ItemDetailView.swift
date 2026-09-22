@@ -290,6 +290,7 @@ struct ItemDetailView: View {
             } label: {
                 HStack {
                     Label("Fetch data again", systemImage: "arrow.clockwise")
+                        .foregroundStyle(AppBackground.ink)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
@@ -540,9 +541,10 @@ struct ItemDetailView: View {
                     } label: {
                         Label("Put back", systemImage: "arrow.uturn.backward")
                             .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppBackground.onProminent)
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glass)
+                    .prominentGlass()
 
                     Button(role: .destructive) {
                         Haptics.tap()
@@ -552,9 +554,10 @@ struct ItemDetailView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                             .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glass)
+                    .destructiveGlass()
                 } else if !item.isDone || done {
                     Button(action: confirmWent) {
                         // For something that's already over, the plain label
@@ -581,6 +584,13 @@ struct ItemDetailView: View {
                             try await item.addToCalendar()
                             Haptics.success()
                             withAnimation(.snappy) { calendarState = .added }
+                            // The label confirms, then comes back. Deleting
+                            // the event in Calendar has to be able to add
+                            // it again, so this never stays disabled.
+                            try? await Task.sleep(for: .seconds(1.6))
+                            if calendarState == .added {
+                                withAnimation(.snappy) { calendarState = .idle }
+                            }
                         } catch {
                             withAnimation(.snappy) { calendarState = .failed }
                         }
@@ -591,10 +601,10 @@ struct ItemDetailView: View {
                         systemImage: calendarState == .added ? "checkmark" : "calendar.badge.plus"
                     )
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppBackground.ink)
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glass)
-                .disabled(calendarState == .added)
             }
 
             if calendarState == .failed {

@@ -54,10 +54,11 @@ enum OnboardingGate {
 ///
 /// The look is not a question: a fresh install takes a theme from the
 /// system appearance, and the page that shows the first real card offers
-/// a row of swatches to repaint it. Joining a group is not a question
-/// either unless there's a reason to ask — an invite link, or a tap on
-/// "Joining someone?" — and a join swaps the first-save page for a look
-/// at what the group already has.
+/// a row of swatches to repaint it. The first question after sign-in is
+/// who it's for: just them, or with someone. Only "with someone" leads to
+/// the code, framed as whether one of them has already started; an
+/// invite link skips the question and opens on the code. A join swaps
+/// the first-save page for a look at what the group already has.
 ///
 /// Someone who already has an account never sees a page past sign-in:
 /// the moment the session lands and the card says name and home are on
@@ -82,8 +83,8 @@ struct OnboardingView: View {
     @State private var themes = ThemeStore.shared
     @State private var auth = SupabaseAuth.shared
 
-    enum Page: String, Hashable { case welcome, home, name, code, save, joined, notify }
-    @State private var pages: [Page] = [.welcome, .name, .home, .save, .notify]
+    enum Page: String, Hashable { case welcome, together, home, name, code, save, joined, notify }
+    @State private var pages: [Page] = [.welcome, .together, .name, .home, .save, .notify]
     @State private var index = 0
 
     // Sign in (the welcome page is the front door when there's no session)
@@ -97,7 +98,13 @@ struct OnboardingView: View {
     // Name
     @State private var name = ""
 
+    // Together
+    private enum Together: String { case solo, someone }
+    @State private var together: Together?
+
     // Code
+    private enum CodeChoice: String { case haveCode, first }
+    @State private var codeChoice: CodeChoice?
     @State private var codeDraft = ""
     @State private var codePreview: GroupStore.JoinPreview?
     @State private var lookingUp = false
@@ -126,6 +133,7 @@ struct OnboardingView: View {
     @State private var starters: [ParseClient.Starter] = []
     @State private var startersTask: Task<Void, Never>?
     @State private var startersFor: String?
+    @State private var startersLoading = false
 
     // Joined
     @State private var groupCards: [Item] = []
@@ -173,6 +181,9 @@ struct OnboardingView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .scrollIndicators(.hidden)
+                // The front door is a single screen. The later pages still
+                // scroll, so a keyboard can get out of the way.
+                .scrollDisabled(page == .welcome)
             }
             .safeAreaPadding(.bottom, page == .welcome ? 0 : 84)
 
@@ -408,15 +419,19 @@ struct OnboardingView: View {
             return Forward(title: "Get started", disabled: needsSignIn || unreachable, run: advance)
         case .joined:
             return Forward(run: advance)
+        case .together:
+            if together == nil { return Forward(disabled: true, run: {}) }
+            return Forward(title: "Continue", run: advance)
         case .name:
             return Forward(disabled: trimmedName.isEmpty, run: commitName)
         case .code:
             if joined { return Forward(run: advance) }
-            if let p = codePreview, p.canJoin {
+            if codeChoice == .haveCode, let p = codePreview, p.canJoin {
                 // The card above already names the group; keep the pill short.
                 return Forward(title: "Join") { Task { await join() } }
             }
-            return Forward(run: advance)
+            if codeChoice == .first { return Forward(title: "Continue", run: advance) }
+            return Forward(disabled: true, run: {})
         case .home:
             if let picked, homeVariant != .finding {
                 // The headline or the ticked row already names the city.
@@ -452,6 +467,7 @@ struct OnboardingView: View {
     private var pageBody: some View {
         switch page {
         case .welcome: welcomePage
+        case .together: togetherPage
         case .name: namePage
         case .code: codePage
         case .home: homePage
@@ -526,14 +542,15 @@ struct OnboardingView: View {
         }
     }
 
-    @ViewBuilder
+    /// Always two lines tall, so an error arriving under centered content
+    /// doesn't shove the page upward. Empty, it's invisible.
     private var noteLine: some View {
-        if let note {
-            Text(note)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        Text(note ?? " ")
+            .font(.footnote)
+            .foregroundStyle(note == nil ? Color.clear : AppBackground.warning)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .topLeading)
+            .accessibilityHidden(note == nil)
     }
 
     // MARK: Welcome
@@ -559,7 +576,7 @@ struct OnboardingView: View {
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if needsSignIn || unreachable || signingIn || preview {
+            if needsSignIn || unreachable || signingIn || preview || auth.signedIn {
                 signInBlock
                     .padding(.top, 12)
             }
@@ -760,6 +777,24 @@ struct OnboardingView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(height: 50)
+            } else if auth.signedIn, !preview {
+                // A relaunch after sign-in used to hide Apple's button
+                // and leave no way off this page. Continue picks up
+                // the first unanswered question.
+                Button {
+                    Haptics.tap()
+                    Task {
+                        signingIn = true
+                        await signedInFromFrontDoor()
+                        signingIn = false
+                    }
+                } label: {
+                    Text("Continue")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .buttonStyle(.glass)
             } else {
                 SignInWithAppleButton(.continue) { request in
                     nonce = AppleSignIn.makeNonce()
@@ -841,11 +876,11 @@ struct OnboardingView: View {
         // is never the name page).
         withAnimation(ease) {
             pages = pageOrder()
-            // They came by invite link: joining is the point, so the code
-            // page leads (and the group's home then answers that page).
-            if let code = JoinGate.pendingCode, let i = pages.firstIndex(of: .code) {
-                pages.remove(at: i)
-                pages.insert(.code, at: min(1, pages.count))
+            // They came by invite link: `pageOrder` put the code page first,
+            // already answered, with the group looked up.
+            if let code = JoinGate.pendingCode {
+                together = .someone
+                codeChoice = .haveCode
                 codeDraft = JoinSheet.formatTyping(code)
                 Task { await lookup(code) }
             }
@@ -864,14 +899,16 @@ struct OnboardingView: View {
             lede("First name is plenty. It's how you show up on the things you save: “Added by \(trimmedName.isEmpty ? "you" : trimmedName)”.")
 
             slab {
-                TextField("Your first name", text: $name)
+                TextField("", text: $name, prompt: AppBackground.fieldPrompt("Your first name"))
                     .font(.title3)
                     .textInputAutocapitalization(.words)
                     .autocorrectionDisabled()
                     .submitLabel(.done)
                     .focused($focus, equals: .name)
+                    .foregroundStyle(AppBackground.ink)
                     .onSubmit(commitName)
                     .onChange(of: name) { _, new in
+                        note = nil
                         if new.unicodeScalars.count > 24 {
                             name = String(String.UnicodeScalarView(new.unicodeScalars.prefix(24)))
                         }
@@ -885,16 +922,18 @@ struct OnboardingView: View {
     }
 
     private func commitName() {
-        guard !trimmedName.isEmpty else { return }
+        guard !trimmedName.isEmpty, !busy else { return }
         if preview { advance(); return }
         busy = true
+        note = nil
         Task {
+            // Always unlocks, including when the request is cancelled, so
+            // a failed attempt can't leave the forward button dead.
+            defer { busy = false }
             if let error = await members.setDisplayName(trimmedName) {
                 note = error
-                busy = false
                 return
             }
-            busy = false
             advance()
         }
     }
@@ -924,21 +963,129 @@ struct OnboardingView: View {
         .padding(.top, 4)
     }
 
+    // MARK: Together
+
+    private var togetherPage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            headline("Just you, or\nwith someone?")
+            lede("Either works, and you can change it later in Settings.")
+
+            choiceTile("person.fill", "Just me",
+                       "Your own library of things you want to go to.",
+                       selected: together == .solo) { chooseTogether(.solo) }
+                .disabled(joined)
+            choiceTile("person.2.fill", "With someone",
+                       "A partner, a friend, housemates: one shared library you all add to.",
+                       selected: together == .someone) { chooseTogether(.someone) }
+        }
+    }
+
+    /// One answer to a page's question: a glass slab with a radio mark.
+    /// Picking only selects; the bottom bar's Continue turns the page.
+    private func choiceTile(
+        _ icon: String, _ title: String, _ detail: String,
+        selected: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                row(icon, title, detail)
+                Spacer(minLength: 0)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(AppBackground.ink.opacity(selected ? 1 : 0.4))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            selected ? .regular.tint(AppBackground.accent.opacity(0.3)).interactive() : .regular.interactive(),
+            in: .rect(cornerRadius: 18)
+        )
+        .disabled(frozen)
+        .animation(ease, value: selected)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// "With someone" puts the code page next; "Just me" takes it out.
+    private func chooseTogether(_ choice: Together) {
+        withAnimation(ease) {
+            together = choice
+            if choice == .someone {
+                if !pages.contains(.code), let i = pages.firstIndex(of: .together) {
+                    pages.insert(.code, at: i + 1)
+                }
+            } else if let i = pages.firstIndex(of: .code) {
+                pages.remove(at: i)
+            }
+        }
+    }
+
     // MARK: Code
 
     private var codePage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            headline("Got their code?")
-            lede("Join them and you share one library: everyone sees and edits everything. No code to hand? Carry on and invite people later from Settings.")
+            headline("Has one of you\nalready started?")
+            lede("One of you starts the library, then invites the other with a code from Settings. After that it's shared: you both see, add and edit everything.")
 
+            choiceTile("envelope.open.fill", "Yes, they sent me a code",
+                       "Type or paste it in. Codes look like KV7-P2M.",
+                       selected: codeChoice == .haveCode, action: pickHaveCode)
+                .disabled(joined)
+
+            if codeChoice == .haveCode {
+                codeEntry
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if !joined {
+                choiceTile("sparkles", "No, I'll start it",
+                           "Set up your library now, then invite them from Settings when you're ready.",
+                           selected: codeChoice == .first, action: pickFirst)
+            }
+
+            noteLine
+        }
+        .animation(ease, value: codePreview?.status)
+        .animation(ease, value: codeChoice)
+    }
+
+    private func pickHaveCode() {
+        note = nil
+        codeChoice = .haveCode
+        refreshOffers()
+        if codeDraft.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { focus = .code }
+        }
+    }
+
+    private func pickFirst() {
+        focus = nil
+        note = nil
+        codeChoice = .first
+    }
+
+    /// The field, the paste offer and the group it opens — shown once
+    /// they've said they have a code.
+    private var codeEntry: some View {
+        VStack(alignment: .leading, spacing: 18) {
             slab {
                 // Formatting happens in the binding's setter, in the same
                 // pass as the keystroke, so fast typing never lands on a
                 // draft that's about to be rewritten (and lose a letter).
-                TextField("KV7-P2M", text: Binding(
-                    get: { codeDraft },
-                    set: { codeDraft = JoinSheet.formatTyping($0) }
-                ))
+                TextField(
+                    "",
+                    text: Binding(
+                        get: { codeDraft },
+                        set: { codeDraft = JoinSheet.formatTyping($0) }
+                    ),
+                    prompt: AppBackground.fieldPrompt("KV7-P2M")
+                )
                     .accessibilityLabel("Invite code")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .monospacedDigit()
@@ -946,6 +1093,7 @@ struct OnboardingView: View {
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                     .keyboardType(.asciiCapable)
+                    .foregroundStyle(AppBackground.ink)
                     .focused($focus, equals: .code)
                     .padding(.vertical, 16)
                     .overlay(alignment: .trailing) {
@@ -976,42 +1124,31 @@ struct OnboardingView: View {
             if preview, codePreview != nil, !joined {
                 lede("Preview: any code opens Joyce's library. Nothing is joined for real.")
             }
-
-            noteLine
         }
-        .animation(ease, value: codePreview?.status)
     }
 
     private func codePreviewCard(_ p: GroupStore.JoinPreview) -> some View {
         slab {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(p.name ?? "Their library")
-                        .font(.displaySmallBold(24, relativeTo: .title3))
-                    Spacer()
-                    if let home = p.homeLocality {
-                        Label(home, systemImage: "house")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center) {
+                    Text(joined ? "You're in with" : "You'll be joining")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    if let home = p.homeLocality, !home.isEmpty {
+                        homeBadge(home)
                     }
                 }
+                // One row per person: a group holds at most four, so the
+                // list never outgrows the card.
                 if let members = p.members, !members.isEmpty {
-                    HStack(spacing: 8) {
-                        HStack(spacing: -8) {
-                            ForEach(members.prefix(4)) { m in
-                                Text(m.initial)
-                                    .font(.footnote.weight(.bold))
-                                    .foregroundStyle(AvatarColour.initial(m.avatarColour))
-                                    .frame(width: 30, height: 30)
-                                    .background(AvatarColour.color(m.avatarColour), in: .circle)
-                                    .overlay(Circle().stroke(AppBackground.base, lineWidth: 2))
+                    VStack(spacing: 0) {
+                        ForEach(Array(members.prefix(4).enumerated()), id: \.offset) { i, m in
+                            if i > 0 {
+                                Divider().overlay(AppBackground.wash(0.10)).padding(.leading, 50)
                             }
+                            memberRow(m, invitedYou: m.displayName != nil && m.displayName == p.inviter)
                         }
-                        .accessibilityHidden(true)
-                        Text(members.map(\.name).joined(separator: ", "))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
                 }
                 if joined {
@@ -1026,6 +1163,53 @@ struct OnboardingView: View {
             }
             .padding(16)
         }
+    }
+
+    private func memberRow(_ m: GroupStore.JoinPreview.PreviewMember, invitedYou: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(m.initial)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AvatarColour.initial(m.avatarColour))
+                .frame(width: 38, height: 38)
+                .background(AvatarColour.color(m.avatarColour), in: .circle)
+                .accessibilityHidden(true)
+            Text(m.name)
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if invitedYou {
+                Text("Invited you")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(AppBackground.wash(0.08), in: .capsule)
+            }
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The group's home as a small pill: an ink disc with the house cut
+    /// out of it, then the city.
+    private func homeBadge(_ city: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "house.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(AppBackground.base)
+                .frame(width: 20, height: 20)
+                .background(AppBackground.ink, in: .circle)
+            Text(city)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 11)
+        .padding(.vertical, 4)
+        .background(AppBackground.wash(0.08), in: .capsule)
+        .overlay(Capsule().strokeBorder(AppBackground.wash(0.14), lineWidth: 0.5))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Home: \(city)")
     }
 
     private func codeTyped(_ raw: String) {
@@ -1047,7 +1231,7 @@ struct OnboardingView: View {
         homeLocality: "London",
         capacity: 2,
         isPlus: false,
-        members: [.init(displayName: "Joyce", avatarColour: "#C24B5A")]
+        members: [.init(displayName: "Joyce", avatarColour: "coral")]
     )
 
     private func lookup(_ code: String) async {
@@ -1192,8 +1376,9 @@ struct OnboardingView: View {
             case .manual:
                 slab {
                     HStack(spacing: 10) {
-                        TextField("City", text: $cityDraft)
+                        TextField("", text: $cityDraft, prompt: AppBackground.fieldPrompt("City"))
                             .font(.title3)
+                            .foregroundStyle(AppBackground.ink)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .submitLabel(.search)
@@ -1293,6 +1478,9 @@ struct OnboardingView: View {
         note = nil
         frame(home)
         focus = nil
+        // Start the city search now, not on "Set as home" — a cold miss
+        // is a model call and the name page is the wait.
+        fetchStarters(for: home)
     }
 
     private func frame(_ home: HomeStore.Home) {
@@ -1322,11 +1510,9 @@ struct OnboardingView: View {
         await reverse(loc)
         // A late guess only lands if they haven't started typing.
         guard let first = matches.first, picked == nil, cityDraft.isEmpty else { return }
-        picked = first
-        wider = HomeStore.widerCity(for: first)
+        pick(first)
         guessed = true
         manualHome = false
-        frame(first)
     }
 
     @State private var guessSlow = false
@@ -1437,16 +1623,22 @@ struct OnboardingView: View {
     }
 
     /// Ask the server for the city's three chips now, so they're on the
-    /// save page by the time it comes up. One fetch per city; a change
-    /// of mind on the home page refetches.
+    /// save page by the time it comes up. One in-flight fetch per city;
+    /// an empty result (cold miss still running, or a failed call) is
+    /// retried when the save page appears.
     private func fetchStarters(for home: HomeStore.Home) {
-        let key = "\(home.locality)|\(home.country)"
-        guard startersFor != key else { return }
+        let country = home.country.isEmpty ? home.locality : home.country
+        let key = "\(home.locality)|\(country)"
+        if startersFor == key, startersLoading || !starters.isEmpty { return }
         startersFor = key
         starters = []
+        startersLoading = true
         startersTask?.cancel()
         startersTask = Task {
-            let found = try? await ParseClient.starters(locality: home.locality, country: home.country)
+            defer {
+                if !Task.isCancelled, startersFor == key { startersLoading = false }
+            }
+            let found = try? await ParseClient.starters(locality: home.locality, country: country)
             guard !Task.isCancelled, startersFor == key else { return }
             withAnimation(ease) { starters = found ?? [] }
         }
@@ -1454,12 +1646,54 @@ struct OnboardingView: View {
 
     // MARK: First save
 
-    /// London answers at once while the server's chips are still on their
-    /// way — and is the fallback if they never arrive.
-    private static let londonStarters: [ParseClient.Starter] = [
-        .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place"),
-        .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place"),
-        .init(title: "Roundhouse", url: "https://www.roundhouse.org.uk", kind: "place"),
+    /// Instant chips while the server answers — and the fallback if it
+    /// doesn't. Same cities as `_shared/starters.ts`.
+    private static let cityStarters: [String: [ParseClient.Starter]] = [
+        "london": [
+            .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place"),
+            .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place"),
+            .init(title: "Roundhouse", url: "https://www.roundhouse.org.uk", kind: "place"),
+        ],
+        "singapore": [
+            .init(title: "National Gallery", url: "https://www.nationalgallery.sg", kind: "place"),
+            .init(title: "Atlas", url: "https://www.atlasbar.sg", kind: "place"),
+            .init(title: "The Projector", url: "https://theprojector.sg", kind: "place"),
+        ],
+        "lisbon": [
+            .init(title: "MAAT", url: "https://www.maat.pt", kind: "place"),
+            .init(title: "Cervejaria Ramiro", url: "https://www.cervejariaramiro.pt", kind: "place"),
+            .init(title: "Lux Frágil", url: "https://www.luxfragil.com", kind: "place"),
+        ],
+        "paris": [
+            .init(title: "Musée d'Orsay", url: "https://www.musee-orsay.fr", kind: "place"),
+            .init(title: "Septime", url: "https://www.septime-charonne.fr", kind: "place"),
+            .init(title: "Centre Pompidou", url: "https://www.centrepompidou.fr", kind: "place"),
+        ],
+        "new york": [
+            .init(title: "MoMA", url: "https://www.moma.org", kind: "place"),
+            .init(title: "Katz's Delicatessen", url: "https://www.katzsdelicatessen.com", kind: "place"),
+            .init(title: "Film Forum", url: "https://www.filmforum.org", kind: "place"),
+        ],
+        "tokyo": [
+            .init(title: "Mori Art Museum", url: "https://www.mori.art.museum", kind: "place"),
+            .init(title: "teamLab Planets", url: "https://www.teamlab.art/e/planets/", kind: "place"),
+            .init(title: "Unit", url: "https://www.unit-tokyo.com", kind: "place"),
+        ],
+        "hong kong": [
+            .init(title: "M+", url: "https://www.mplus.org.hk", kind: "place"),
+            .init(title: "Yardbird", url: "https://www.yardbirdrestaurant.com", kind: "place"),
+            .init(title: "Broadway Cinematheque", url: "https://www.cinema.com.hk", kind: "place"),
+        ],
+        "san francisco": [
+            .init(title: "SFMOMA", url: "https://www.sfmoma.org", kind: "place"),
+            .init(title: "Zuni Café", url: "https://zunicafe.com", kind: "place"),
+            .init(title: "Roxie Theater", url: "https://roxie.com", kind: "place"),
+        ],
+        "los angeles": [
+            .init(title: "The Broad", url: "https://www.thebroad.org", kind: "place"),
+            .init(title: "République", url: "https://republiquela.com", kind: "place"),
+            .init(title: "New Beverly Cinema", url: "https://thenewbev.com", kind: "place"),
+        ],
     ]
 
     /// Only a home that was actually chosen counts; `HomeStore.home` falls
@@ -1469,22 +1703,35 @@ struct OnboardingView: View {
         picked ?? (HomeStore.shared.isSet ? HomeStore.shared.home : nil)
     }
 
-    private var homeIsLondon: Bool {
-        chosenHome?.locality.compare("London", options: .caseInsensitive) == .orderedSame
-    }
-
-    /// The chips: the city's own from the server, London's built-in set
-    /// while those load (or if they fail), nothing when there's no home.
+    /// The chips: the city's own from the server, then the built-in set
+    /// for that city (so Singapore isn't a blank wait), nothing if we
+    /// have no home and no fallback.
     private var starterChips: [ParseClient.Starter] {
         if !starters.isEmpty { return starters }
-        return homeIsLondon ? Self.londonStarters : []
+        return Self.fallbackStarters(for: chosenHome)
+    }
+
+    private static func fallbackStarters(for home: HomeStore.Home?) -> [ParseClient.Starter] {
+        guard let home else { return [] }
+        let aliases = [
+            "new york city": "new york", "nyc": "new york",
+            "sf": "san francisco", "la": "los angeles",
+            "republic of singapore": "singapore",
+        ]
+        let city = aliases[home.locality.lowercased()] ?? home.locality.lowercased()
+        let country = aliases[home.country.lowercased()] ?? home.country.lowercased()
+        if let chips = cityStarters[city] { return chips }
+        if ["singapore", "hong kong", "monaco"].contains(country) {
+            return cityStarters[country] ?? []
+        }
+        return []
     }
 
     /// The city the chips are actually about — the one they were fetched
     /// for, which can differ from a guess that landed since.
     private var starterCity: String? {
         if !starters.isEmpty { return startersFor?.split(separator: "|").first.map(String.init) }
-        return homeIsLondon ? "London" : nil
+        return chosenHome?.locality
     }
 
     private var savePage: some View {
@@ -1492,7 +1739,7 @@ struct OnboardingView: View {
             if let parsed {
                 headline("There it is.")
                 lede("A real save. Everything you add lands in the library looking like this.")
-                ItemCard(item: parsed, meta: "Added by \(displayName)")
+                ItemCard(item: parsed)
                 quiet("Try another") {
                     self.parsed = nil
                     linkDraft = ""
@@ -1521,39 +1768,43 @@ struct OnboardingView: View {
                         startParse()
                     }
 
-                    if linkDraft.isEmpty, linkImage == nil, !starterChips.isEmpty,
-                       let city = starterCity {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Or try one of these in \(city)")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            ScrollView(.horizontal) {
-                                HStack(spacing: 8) {
-                                    ForEach(starterChips) { s in
-                                        Button {
-                                            Haptics.tap()
-                                            linkDraft = s.url
-                                            startParse()
-                                        } label: {
-                                            Label(s.title, systemImage: s.kind == "event" ? "ticket" : "mappin.and.ellipse")
-                                                .font(.footnote.weight(.medium))
-                                                .lineLimit(1)
+                    if linkDraft.isEmpty, linkImage == nil {
+                        if !starterChips.isEmpty, let city = starterCity {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Or try one of these in \(city)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                ScrollView(.horizontal) {
+                                    HStack(spacing: 8) {
+                                        ForEach(starterChips) { s in
+                                            Button {
+                                                Haptics.tap()
+                                                linkDraft = s.url
+                                                startParse()
+                                            } label: {
+                                                Label(s.title, systemImage: s.kind == "event" ? "ticket" : "mappin.and.ellipse")
+                                                    .font(.footnote.weight(.medium))
+                                                    .lineLimit(1)
+                                            }
+                                            .buttonStyle(.glass)
                                         }
-                                        .buttonStyle(.glass)
                                     }
                                 }
+                                .scrollIndicators(.hidden)
+                                .scrollClipDisabled()
                             }
-                            .scrollIndicators(.hidden)
-                            .scrollClipDisabled()
+                            .transition(.opacity)
+                        } else if startersLoading, let city = chosenHome?.locality {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("Looking up a few things in \(city)…")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .transition(.opacity)
                         }
-                        .transition(.opacity)
                     }
 
-                    // Joining isn't asked of everyone; this is the door
-                    // for the person who has a code and wasn't sent a link.
-                    if !joined, !pages.contains(.code) {
-                        quiet("Joining someone? Enter their code") { openCodePage() }
-                    }
                     // The share-sheet lesson isn't here: it arrives as a
                     // tip in the library on the second launch (ShareTip).
                 }
@@ -1564,18 +1815,10 @@ struct OnboardingView: View {
         .animation(ease, value: parsing)
         .animation(ease, value: parsed?.id)
         .animation(ease, value: starterChips)
-    }
-
-    /// Puts the code page in front of this one and turns to it. Forward
-    /// from there comes back here; back goes to whatever was before.
-    private func openCodePage() {
-        note = nil
-        focus = nil
-        withAnimation(ease) {
-            if !pages.contains(.code) { pages.insert(.code, at: index) }
-            index = pages.firstIndex(of: .code) ?? index
+        .animation(ease, value: startersLoading)
+        .onAppear {
+            if let home = chosenHome { fetchStarters(for: home) }
         }
-        refreshOffers()
     }
 
     /// The card, forming. Sits exactly where the field was and where the
@@ -1797,7 +2040,9 @@ struct OnboardingView: View {
     private func takeInviteCode(_ code: String) {
         codeDraft = JoinSheet.formatTyping(code)
         guard !needsSignIn else { return }
-        // A link is the one signal that puts the code page in the run.
+        // A link answers both questions: with someone, and they've started.
+        together = .someone
+        codeChoice = .haveCode
         if !pages.contains(.code) {
             withAnimation(ease) { pages.insert(.code, at: min(max(index, 1), pages.count)) }
         }
@@ -1812,6 +2057,8 @@ struct OnboardingView: View {
         if preview { originalTheme = themes.current }
         if !preview, let code = JoinGate.pendingCode {
             codeDraft = JoinSheet.formatTyping(code)
+            together = .someone
+            codeChoice = .haveCode
         }
         if !preview, let uid = SupabaseAuth.shared.userId, let existing = members.name(forUser: uid) {
             name = existing
@@ -1826,6 +2073,12 @@ struct OnboardingView: View {
            let i = pages.firstIndex(where: { $0.rawValue == raw }) {
             index = i
         }
+        // Preview of the code page answered: `CWG_ONBOARDING_CODE=KV7P2M`.
+        if preview, let raw = ProcessInfo.processInfo.environment["CWG_ONBOARDING_CODE"] {
+            together = .someone
+            codeChoice = .haveCode
+            codeDraft = JoinSheet.formatTyping(raw)
+        }
         // Preview of the joined page: pretend the code was accepted.
         if preview, ProcessInfo.processInfo.environment["CWG_ONBOARDING_PAGE"] == "joined" {
             codePreview = Self.previewInvite
@@ -1835,6 +2088,11 @@ struct OnboardingView: View {
         }
         // Signed in but never finished: pick up where it left off.
         if !preview, auth.signedIn { restoreResume() }
+        // Signed in but still on welcome (no resume, or a failed first
+        // pull): don't leave them with only the legal links.
+        if !preview, auth.signedIn, page == .welcome {
+            Task { await signedInFromFrontDoor() }
+        }
         if locationAllowed, pages.contains(.home) {
             Task { await guessHome() }
         }
@@ -1851,24 +2109,34 @@ struct OnboardingView: View {
         [.authorizedWhenInUse, .authorizedAlways].contains(LocationStore.shared.authorization)
     }
 
-    /// Home leads the questions when it can be guessed; pages the account
-    /// already answers are dropped (never in preview, which shows them all).
-    /// The code page is in only when there's a reason: an invite link, or
-    /// the preview (which shows every page).
+    /// Who it's for comes first: joining someone brings their home and
+    /// their saves, which answer two of the pages after it. Home leads the
+    /// rest when it can be guessed; pages the account already answers are
+    /// dropped (never in preview, which shows them all). An invite link
+    /// skips the question and opens on the code.
     private func pageOrder() -> [Page] {
         var order: [Page] = locationAllowed
             ? [.welcome, .home, .name, .save, .notify]
             : [.welcome, .name, .home, .save, .notify]
-        if preview || JoinGate.pendingCode != nil {
-            // After the name; before home when home is still a question,
-            // so the group's home can answer it.
-            order.insert(.code, at: locationAllowed ? 3 : 2)
+        if preview {
+            order.insert(contentsOf: [.together, .code], at: 1)
+        } else if JoinGate.pendingCode != nil {
+            order.insert(.code, at: 1)
+        } else if !alreadyShared {
+            order.insert(.together, at: 1)
+            if together == .someone { order.insert(.code, at: 2) }
         }
         if !preview {
             if OnboardingGate.hasName { order.removeAll { $0 == .name } }
             if OnboardingGate.hasHome { order.removeAll { $0 == .home } }
         }
         return order
+    }
+
+    /// Already in a group with someone (joined from another device mid-run):
+    /// the question has been answered.
+    private var alreadyShared: Bool {
+        (group.card?.members.count ?? 0) > 1
     }
 
     // MARK: Resume
@@ -1881,6 +2149,8 @@ struct OnboardingView: View {
         var codeDraft: String
         var cityDraft: String
         var linkDraft: String
+        var together: String?
+        var codeChoice: String?
     }
 
     private var resumeKey: String? {
@@ -1894,7 +2164,8 @@ struct OnboardingView: View {
     private func saveResume() {
         guard !preview, let key = resumeKey, page != .welcome else { return }
         let state = Resume(page: page.rawValue, name: name, codeDraft: codeDraft,
-                           cityDraft: cityDraft, linkDraft: linkDraft)
+                           cityDraft: cityDraft, linkDraft: linkDraft,
+                           together: together?.rawValue, codeChoice: codeChoice?.rawValue)
         if let data = try? JSONEncoder().encode(state) {
             resumeDefaults.set(data, forKey: key)
         }
@@ -1909,9 +2180,16 @@ struct OnboardingView: View {
         if name.isEmpty { name = state.name }
         cityDraft = state.cityDraft
         linkDraft = state.linkDraft
+        together = state.together.flatMap(Together.init(rawValue:))
+        codeChoice = state.codeChoice.flatMap(CodeChoice.init(rawValue:))
         if !state.codeDraft.isEmpty {
             codeDraft = state.codeDraft
-            if !pages.contains(.code) { pages.insert(.code, at: min(1, pages.count)) }
+            together = .someone
+            if codeChoice == nil { codeChoice = .haveCode }
+        }
+        if together == .someone, !pages.contains(.code) {
+            let after = pages.firstIndex(of: .together).map { $0 + 1 } ?? min(1, pages.count)
+            pages.insert(.code, at: after)
         }
         // The page may have been answered since (a second device): then
         // land on the first one still open rather than a page that's gone.

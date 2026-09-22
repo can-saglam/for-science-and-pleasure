@@ -267,10 +267,12 @@ struct ContentView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 72)
             .accessibilityElement(children: .contain)
+            // Scoped to the toasts: on the whole tree these animated
+            // whatever else changed in the same update, list rows included.
+            .animation(reduceMotion ? nil : .snappy, value: undoBin.saved?.id)
+            .animation(reduceMotion ? nil : .snappy, value: undoBin.deleted?.id)
+            .animation(reduceMotion ? nil : .snappy, value: undoBin.done?.id)
         }
-        .animation(reduceMotion ? nil : .snappy, value: undoBin.saved?.id)
-        .animation(reduceMotion ? nil : .snappy, value: undoBin.deleted?.id)
-        .animation(reduceMotion ? nil : .snappy, value: undoBin.done?.id)
         .onChange(of: undoBin.saved?.id) { _, id in
             if id != nil { announceUndo("Saved. Undo available.") }
         }
@@ -288,51 +290,12 @@ struct ContentView: View {
         // curtain covers a store that belongs to another account until the
         // sync engine has replaced it.
         .overlay {
-            if SupabaseAuth.shared.signedIn, !syncStatus.hasSyncedOnce,
-               items.isEmpty || group.libraryIsForeign {
-                if syncStatus.syncing {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .controlSize(.large)
-                            .tint(AppBackground.ink)
-                        Text("Pulling your shared library…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background { ThemeFill(color: AppBackground.base) }
-                    .transition(.opacity)
-                } else if let problem = syncStatus.problem {
-                    VStack(spacing: 14) {
-                        Image(systemName: problem.status == 0 ? "wifi.slash" : "exclamationmark.icloud")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                        Text("Couldn't load your library")
-                            .font(.headline)
-                        Text(problem.message)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                        Button {
-                            Haptics.tap()
-                            Task { await SupabaseSync.sync(context: context) }
-                        } label: {
-                            Text("Retry")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12)
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.large)
-                        .padding(.top, 4)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background { ThemeFill(color: AppBackground.base) }
-                    .transition(.opacity)
-                }
-            }
+            ZStack { firstPullCurtain }
+                // Only the curtain eases. On the whole tree this animated
+                // everything a sync start or finish landed with: pulled
+                // rows, and thumbnails arriving in cards.
+                .animation(.snappy, value: syncStatus.syncing)
         }
-        .animation(.snappy, value: syncStatus.syncing)
         // Controls pick up the theme's accent; the selected tab, toolbar
         // buttons, and links all shift with it.
         .tint(AppBackground.accent)
@@ -355,6 +318,53 @@ struct ContentView: View {
         // table after a short debounce.
         .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
             SupabaseSync.schedule(context: context)
+        }
+    }
+
+    @ViewBuilder
+    private var firstPullCurtain: some View {
+        if SupabaseAuth.shared.signedIn, !syncStatus.hasSyncedOnce,
+           items.isEmpty || group.libraryIsForeign {
+            if syncStatus.syncing {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(AppBackground.ink)
+                    Text("Pulling your shared library…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { ThemeFill(color: AppBackground.base) }
+                .transition(.opacity)
+            } else if let problem = syncStatus.problem {
+                VStack(spacing: 14) {
+                    Image(systemName: problem.status == 0 ? "wifi.slash" : "exclamationmark.icloud")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                    Text("Couldn't load your library")
+                        .font(.headline)
+                    Text(problem.message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Button {
+                        Haptics.tap()
+                        Task { await SupabaseSync.sync(context: context) }
+                    } label: {
+                        Text("Retry")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 12)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { ThemeFill(color: AppBackground.base) }
+                .transition(.opacity)
+            }
         }
     }
 
@@ -469,18 +479,22 @@ struct ContentView: View {
         .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
     }
 
-    /// The first screenful of images, roughly in the order the lists show
-    /// them: urgent events first (the events tab is the landing page), then
-    /// places. Everything past this loads lazily on scroll.
-    private var prewarmURLs: [URL] {
-        let active = items.filter { !$0.isDeleted && !$0.isDone }
-        let events = active.filter(\.isEvent)
-            .sorted { ($0.daysUntilClose ?? .max) < ($1.daysUntilClose ?? .max) }
-        let places = active.filter(\.isPlace)
+    /// The first few screenfuls of images, in the exact order the lists
+    /// show them: the Events page (the landing tab) section by section,
+    /// then Places. A card-tier photo and its quarter-size melt are ~1 MB,
+    /// so this stays well inside the cache; the rest loads as it scrolls in.
+    private var prewarmURLs: [URL] { Self.prewarmURLs(items) }
+
+    static func prewarmURLs(_ items: [Item]) -> [URL] {
+        let active = items.filter { !$0.isDeleted && !$0.isDone && !$0.isMissed }
+        let events = LibraryView.eventSections(
+            LibraryView.ordered(active.filter(\.isEvent), kind: Item.Kind.event)
+        ).flatMap(\.1)
+        let places = LibraryView.ordered(active.filter(\.isPlace), kind: Item.Kind.place)
         return Array(
             (events + places)
                 .compactMap { $0.imageUrl.flatMap(URL.init(string:)) }
-                .prefix(16)
+                .prefix(40)
         )
     }
 

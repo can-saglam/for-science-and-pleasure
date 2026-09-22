@@ -49,8 +49,10 @@ export interface ParsedCard {
 }
 
 /// Thrown when the input is a search, not a save — "modern art museums in
-/// London", "good ramen", "gigs this weekend". Nothing is stored; the
-/// caller shows the message and asks for something more specific.
+/// London", "good ramen", "gigs this weekend". A named venue plus "latest
+/// exhibition" is a save (the hero show still open), not this error.
+/// Nothing is stored; the caller shows the message and asks for something
+/// more specific.
 export class VagueInputError extends Error {
   constructor() {
     super(
@@ -72,7 +74,7 @@ const cardSchema = (home: Home) => ({
     is_specific: {
       type: "boolean",
       description:
-        "true only if the user's input points at one particular, real, named event or place (a venue, an exhibition, a restaurant, a gig). false when it is a category, a list, or a search-style request — 'modern art museums in London', 'good brunch spots', 'things to do this weekend' — even if web search turned up candidates; never pick one to stand in for a vague request.",
+        "true if the user's input points at one particular, real, named event or place (a venue, an exhibition, a restaurant, a gig). Also true when they name one venue or institution and ask for its current, latest, or highlighted exhibition or show — that is a save: resolve it to the exhibition the venue's own site is currently featuring that is still open today. A postponed, cancelled, or already-closed show is not that. false when it is a category, a list, or an unbounded search that names no particular place — 'modern art museums in London', 'good brunch spots', 'things to do this weekend', 'exhibitions in Singapore' — even if web search turned up candidates; never pick one museum or gig to stand in for a request that named no venue.",
     },
     kind: {
       type: "string",
@@ -307,7 +309,7 @@ export async function extractCard(
     `The user lives in ${where}: assume that city when the source doesn't say where something is, and read prices, dates and place names with that in mind. But trust the source — if it clearly places the event or venue somewhere else, keep it there (with the city in the address); never move it home.`,
     "Resolve relative or partial dates to absolute YYYY-MM-DD dates (if a month is named without a year, assume the next occurrence from today).",
     "If a field is genuinely unknown, use null — do not guess venues, prices, or dates.",
-    "If the input doesn't name one particular event or place — it's a category, a list, or a search-style request — set is_specific to false and fill the rest as best you can; do not choose a candidate to stand in for it.",
+    "If the input is a category, a list, or a search that names no particular venue — 'modern art museums in London', 'gigs this weekend' — set is_specific to false and do not choose a candidate to stand in for it. If they name one venue and ask for the current, latest, or highlighted exhibition or show there, that is specific: set is_specific true and fill the card for a special exhibition the venue's own website currently lists as on. Source of truth is the official 'ongoing' / 'what's on' list, not a highlights carousel, yearly lineup, TimeOut page, or news of a planned show. The show must still be open today (started on or before today, not yet closed); postponed, cancelled, or 404 pages do not count. If they said 'latest' or 'newest', pick the most recently opened special exhibition that is still open; otherwise pick the first special exhibition on that official list. Prefer that over a permanent collection. Fill website with that exhibition's own page on the venue's domain, not the venue homepage. Do not refuse it as a search.",
     "Fill 'website' with the official homepage of the event or place (the venue's own site — never an aggregator, social media, Reddit, or a maps link). If you used web search and its results name or link the official site, use that; leave null only when no official site turns up.",
   ];
   if (text) parts.push(`User's saved input:\n${text}`);
@@ -349,6 +351,7 @@ export async function extractCard(
         `Use the web search tool to identify this exact event or place — search with ${
           url ? "the names from the URL slug" : "the names you can see in the input"
         }${home.locality ? ` plus "${home.locality}"` : ""} — and fill in verified details, especially start/end dates, venue, and price.`,
+        "If they asked for the current or latest exhibition at a named venue, open that venue's own homepage or what's-on / ongoing-exhibitions list (not a listings site). Pick the most recently opened special exhibition still open today if they said 'latest' or 'newest', otherwise the first special exhibition on that list. Confirm the official exhibition page is live and the dates include today; fill website with that page. Save the show (kind 'event'), not the venue as a place and not a postponed, cancelled, or closed one.",
         input.image_base64 ? "Combine that with what the screenshot shows." : "",
         "Also find the official website and fill 'website' — the app fetches the thumbnail photo from it.",
         "If search doesn't confirm a detail, leave it null; never guess.",

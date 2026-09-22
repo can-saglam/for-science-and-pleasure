@@ -279,14 +279,6 @@ private struct MeltImage: View {
         }
     }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// How far the photo drifts sideways across the screen's height: a
-    /// card entering at the bottom shows a touch more of its right edge
-    /// than one leaving at the top. Layout never changes — `visualEffect`
-    /// only moves pixels — so a long list stays as cheap as before.
-    private static let drift: CGFloat = 8
-
     var body: some View {
         ZStack {
             if let sharp, let blurred {
@@ -336,9 +328,15 @@ private struct MeltImage: View {
         .task(id: url) {
             guard loaded != url else { return }
             guard let pair = await ImageStore.meltPair(url) else { return }
-            sharp = pair.sharp
-            blurred = pair.blurred
-            loaded = url
+            // Never animated, whatever transaction it lands in: a late photo
+            // just appears, it doesn't fade or grow in.
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) {
+                sharp = pair.sharp
+                blurred = pair.blurred
+                loaded = url
+            }
         }
     }
 
@@ -346,26 +344,29 @@ private struct MeltImage: View {
         image
             .resizable()
             .scaledToFill()
-            // Wider than the melt zone by the drift each way, so the
-            // slide never uncovers an edge.
-            .frame(width: 150 + Self.drift * 2)
+            .frame(width: 150)
             .clipped()
-            .visualEffect { [reduceMotion] content, proxy in
-                content.offset(x: reduceMotion ? 0 : Self.parallax(proxy))
-            }
     }
+}
 
-    /// −drift at the top of the scroll view, +drift at the bottom.
-    private static func parallax(_ proxy: GeometryProxy) -> CGFloat {
-        guard let viewport = proxy.bounds(of: .scrollView)?.height, viewport > 0 else { return 0 }
-        let mid = proxy.frame(in: .scrollView).midY
-        let t = min(max(mid / viewport, 0), 1) - 0.5
-        return t * drift * 2
+/// The "just saved" halo. Absent entirely when off, so a long list
+/// doesn't carry a shadow pass on every card.
+private struct LandingGlow: ViewModifier {
+    var active: Bool
+    var color: Color
+
+    func body(content: Content) -> some View {
+        if active {
+            content.shadow(color: color.opacity(0.45), radius: 14)
+        } else {
+            content
+        }
     }
 }
 
 /// Things-style tactility: cards settle slightly under the finger,
-/// with a soft haptic tick on touch-down.
+/// with a soft haptic tick on touch-down. Used on the map peek, not in
+/// the scrolling list — there the press spring fights the drag.
 struct PressableCardStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -417,12 +418,16 @@ struct ItemCardRow: View {
                         .strokeBorder(landingColor, lineWidth: 2)
                         .opacity(landed ? 1 : 0)
                 )
-                // The glow's radius stays put and only its colour fades, so it
-                // dissolves in place rather than shrinking back into the edge.
-                .shadow(color: landingColor.opacity(landed ? 0.45 : 0), radius: 14)
+                // A shadow on every row, even a fully transparent one, is a
+                // GPU pass per card per frame — a slow drag hitches. Only
+                // the card that just landed pays for it.
+                .modifier(LandingGlow(active: landed, color: landingColor))
                 .animation(landed ? .easeOut(duration: 0.35) : .easeInOut(duration: 1.4), value: landed)
         }
-        .buttonStyle(PressableCardStyle())
+        // `.borderless` lets the list own the drag. A custom press style
+        // claims the touch, springs the card, then gives up once the
+        // gesture is a scroll — that fight is the jitter on a casual drag.
+        .buttonStyle(.borderless)
         .cardListRow()
         // The swipe gestures, spoken: VoiceOver's rotor gets the same three
         // actions a sighted thumb has.

@@ -74,9 +74,11 @@ enum AppleSignIn {
         if let apple = error as? ASAuthorizationError {
             switch apple.code {
             case .unknown:
-                // What Apple returns when the device has no Apple Account
-                // signed in (the system sheet has already said so).
-                return "Sign in to your Apple Account in Settings first, then try again."
+                // Apple uses this one code for two different blocks: no
+                // Apple Account on the device, or an account that is
+                // signed in but still has "Update Apple Account Settings"
+                // waiting. The system sheet has already said which.
+                return "Apple couldn't start the sign-in. Finish any Apple Account update in Settings, then try again."
             case .notInteractive:
                 return "Sign in with Apple needs the screen. Please try again."
             default:

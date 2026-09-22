@@ -49,9 +49,12 @@ final class MembersStore {
         }
         guard let rows: [Row] = await fetch(table: "profiles", select: "user_id,display_name"),
               !rows.isEmpty else { return }
-        namesByUser = Dictionary(
-            uniqueKeysWithValues: rows.map { ($0.user_id.uuidString.lowercased(), $0.display_name ?? "") }
+        let fresh = Dictionary(
+            rows.map { ($0.user_id.uuidString.lowercased(), $0.display_name ?? "") },
+            uniquingKeysWith: { first, _ in first }
         )
+        guard fresh != namesByUser else { return }
+        namesByUser = fresh
         (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).set(namesByUser, forKey: Self.profilesCacheKey)
     }
 
@@ -114,6 +117,7 @@ final class MembersStore {
         write.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         write.setValue("application/json", forHTTPHeaderField: "Content-Type")
         write.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        write.timeoutInterval = 15
         write.httpBody = try? JSONSerialization.data(withJSONObject: ["user_id": key, "display_name": name])
         guard let (_, response) = try? await URLSession.shared.data(for: write),
               (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return offline }

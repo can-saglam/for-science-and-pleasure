@@ -146,13 +146,22 @@ enum ParseClient {
 
     /// Three real things to go to in `locality`, for the first-run's save
     /// page. Cached per city on the server, so a hit is instant; a miss
-    /// runs a web search and can take a while — callers prefetch.
+    /// is a short knowledge-only model call. One retry on a drop.
     static func starters(locality: String, country: String) async throws -> [Starter] {
+        do {
+            return try await startersOnce(locality: locality, country: country)
+        } catch let error where isTransient(error) {
+            try? await Task.sleep(for: .seconds(1))
+            return try await startersOnce(locality: locality, country: country)
+        }
+    }
+
+    private static func startersOnce(locality: String, country: String) async throws -> [Starter] {
         guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
 
         var request = URLRequest(url: secrets.supabaseURL.appending(path: "functions/v1/starters"))
         request.httpMethod = "POST"
-        request.timeoutInterval = 90
+        request.timeoutInterval = 25
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let jwt = try await SupabaseAuth.shared.validToken()
         request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")

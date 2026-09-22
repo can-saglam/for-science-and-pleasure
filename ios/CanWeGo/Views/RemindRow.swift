@@ -20,7 +20,7 @@ struct RemindRow: View {
     private var offersPresets: Bool { !item.availableReminderChoices.isEmpty }
 
     var body: some View {
-        if item.canRemind || item.hasReminder {
+        if item.canRemind {
             // The chip lives outside the Menu label. SwiftUI fades a
             // Menu's own label while the popover is up, and that used
             // to take the whole control with it.
@@ -63,16 +63,7 @@ struct RemindRow: View {
                         chooseCustom(picked)
                     }
                 }
-                .onAppear {
-                    guard persist, item.hasReminder else { return }
-                    let before = item.remindAt
-                    item.reconcileReminder()
-                    if item.remindAt != before {
-                        item.updatedAt = .now
-                        item.stampAuthor()
-                        try? context.save()
-                    }
-                }
+                .onAppear(perform: tidyPersistedReminder)
                 .onChange(of: item.startsOn) { _, _ in
                     guard !persist else { return }
                     item.reconcileReminder()
@@ -87,6 +78,23 @@ struct RemindRow: View {
                 notificationFootnote
             }
             }
+        } else if persist, item.hasReminder {
+            // Ended events don't offer Remind, but a leftover one should
+            // still be dropped the moment the card is opened.
+            Color.clear
+                .frame(width: 0, height: 0)
+                .onAppear(perform: tidyPersistedReminder)
+        }
+    }
+
+    private func tidyPersistedReminder() {
+        guard persist, item.hasReminder else { return }
+        let before = item.remindAt
+        item.reconcileReminder()
+        if item.remindAt != before {
+            item.updatedAt = .now
+            item.stampAuthor()
+            try? context.save()
         }
     }
 

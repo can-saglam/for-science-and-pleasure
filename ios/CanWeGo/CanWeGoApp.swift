@@ -47,6 +47,7 @@ struct CanWeGoApp: App {
 /// CWG_SKIP_AUTH keeps automated screenshot runs on local demo data.
 private struct RootGate: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var context
     @State private var auth = SupabaseAuth.shared
     @State private var phase: Phase = .checking
 
@@ -114,7 +115,9 @@ private struct RootGate: View {
         } else {
             ZStack {
                 ThemeFill(color: AppBackground.base)
-                ProgressView()
+                // Usually gone within a few frames (photos warming, the
+                // card check); the spinner is only for a real wait.
+                DelayedSpinner()
             }
             .appColorScheme()
         }
@@ -126,6 +129,7 @@ private struct RootGate: View {
     /// on screen, so this never drops to the spinner in between.
     private func decideOnboarding() async {
         if OnboardingGate.isComplete {
+            await warmFirstScreen()
             phase = .ready
             await refreshMembership()
             if !OnboardingGate.isComplete { phase = .onboard }
@@ -152,6 +156,14 @@ private struct RootGate: View {
     /// than the session being restored at launch.
     @State private var cameFromFrontDoor = false
 
+    /// The first screenful of photos, from disk into memory, before the
+    /// library is shown, so its cards come up with them instead of a few
+    /// frames later. Capped: a slow disk never holds the app back for long.
+    private func warmFirstScreen() async {
+        let items = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        await ImageStore.warm(Array(ContentView.prewarmURLs(items).prefix(8)), within: .milliseconds(400))
+    }
+
     private func refreshMembership() async {
         await GroupStore.shared.refresh()
         await MembersStore.shared.refresh()
@@ -174,6 +186,19 @@ private struct RootGate: View {
                     PushRegistrar.register()
                     ThemeStore.shared.applyInterfaceStyle()
                 }
+            }
+    }
+}
+
+private struct DelayedSpinner: View {
+    @State private var shown = false
+
+    var body: some View {
+        ProgressView()
+            .opacity(shown ? 1 : 0)
+            .task {
+                try? await Task.sleep(for: .milliseconds(600))
+                shown = true
             }
     }
 }

@@ -242,12 +242,14 @@ enum SupabaseSync {
             // A row the server refused on its own merits is set aside
             // (see `upsert`) so it can't hold everything else hostage — but
             // it stays visible in Settings until the item is edited again.
-            SyncStatus.shared.problem = quarantineProblem(context: context)
+            let problem = quarantineProblem(context: context)
+            if SyncStatus.shared.problem != problem { SyncStatus.shared.problem = problem }
             if foreign { await rebuildDerived(context: context) }
         } catch {
             // Offline is routine and the next trigger retries — but keep
             // the reason visible instead of failing silently.
-            SyncStatus.shared.problem = SyncProblem(error)
+            let problem = SyncProblem(error)
+            if SyncStatus.shared.problem != problem { SyncStatus.shared.problem = problem }
         }
     }
 
@@ -324,9 +326,10 @@ enum SupabaseSync {
                   let config = try JSONDecoder().decode([AppConfig].self, from: data).first
             else { return true }
             let raw = config.store_url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            SyncStatus.shared.storeURL = raw.isEmpty || raw.hasPrefix("itms") ? nil : URL(string: raw)
+            let store = raw.isEmpty || raw.hasPrefix("itms") ? nil : URL(string: raw)
+            if SyncStatus.shared.storeURL != store { SyncStatus.shared.storeURL = store }
             let current = buildNumber >= config.min_build
-            SyncStatus.shared.updateRequired = !current
+            if SyncStatus.shared.updateRequired == current { SyncStatus.shared.updateRequired = !current }
             return current
         } catch {
             return true
@@ -411,22 +414,18 @@ enum SupabaseSync {
     }
 
     /// Postgres timestamps come back with fractional seconds; sometimes not.
-    private static let isoFractional: ISO8601DateFormatter = {
+    /// ISO8601DateFormatter is thread-safe; the pull decodes off the main actor.
+    nonisolated(unsafe) private static let isoFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
-    private static let isoPlain = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let isoPlain = ISO8601DateFormatter()
 
-    private static var decoder: JSONDecoder {
+    nonisolated private static var decoder: JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
-            var s = try decoder.singleValueContainer().decode(String.self)
-            // Postgres may emit microseconds; ISO8601DateFormatter only
-            // reliably takes milliseconds. Trim the fraction to 3 digits.
-            if let range = s.range(of: #"\.\d{4,}"#, options: .regularExpression) {
-                s = s.replacingCharacters(in: range, with: String(s[range].prefix(4)))
-            }
+            let s = trimmedFraction(try decoder.singleValueContainer().decode(String.self))
             if let date = isoFractional.date(from: s) ?? isoPlain.date(from: s) {
                 return date
             }
@@ -436,6 +435,27 @@ enum SupabaseSync {
             ))
         }
         return d
+    }
+
+    /// Postgres may emit microseconds; ISO8601DateFormatter only reliably
+    /// takes milliseconds. Cuts the fraction to 3 digits.
+    nonisolated private static func trimmedFraction(_ s: String) -> String {
+        guard let dot = s.firstIndex(of: ".") else { return s }
+        let digitsStart = s.index(after: dot)
+        let digitsEnd = s[digitsStart...].firstIndex { !$0.isASCII || !$0.isNumber } ?? s.endIndex
+        guard s.distance(from: digitsStart, to: digitsEnd) > 3 else { return s }
+        let keep = s.index(digitsStart, offsetBy: 3)
+        return String(s[..<keep]) + s[digitsEnd...]
+    }
+
+    private struct LenientRow: Decodable {
+        let row: Row?
+        init(from decoder: Decoder) { row = try? Row(from: decoder) }
+    }
+
+    /// One pull page, decoded off the main actor.
+    nonisolated private static func decodePage(_ data: Data) throws -> [Row] {
+        try decoder.decode([LenientRow].self, from: data).compactMap(\.row)
     }
 
     private static var encoder: JSONEncoder {
@@ -525,8 +545,16 @@ enum SupabaseSync {
     /// notify-save to ping the other member's devices (never our own).
     static func announceSave(_ item: Item) async {
         guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
+        // Undone before the request left: don't put it back.
+        if item.isDeleted { return }
         do {
             try await upsert(rows: [row(from: item)])
+            // Undone while the upsert was in flight. That write can land
+            // after the delete and resurrect the save, so put the delete back.
+            if item.isDeleted {
+                setDeleted(item.id, true)
+                return
+            }
             var request = try await request(path: "functions/v1/notify-save")
             request.httpMethod = "POST"
             request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -603,11 +631,9 @@ enum SupabaseSync {
                     status: status
                 )
             }
-            struct Lenient: Decodable {
-                let row: Row?
-                init(from decoder: Decoder) { row = try? Row(from: decoder) }
-            }
-            let page = try decoder.decode([Lenient].self, from: data).compactMap(\.row)
+            let page = try await Task.detached(priority: .userInitiated) {
+                try decodePage(data)
+            }.value
             rows.append(contentsOf: page)
 
             let range = http?.value(forHTTPHeaderField: "Content-Range")

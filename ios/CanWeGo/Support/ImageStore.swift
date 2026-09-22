@@ -1,6 +1,7 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CryptoKit
+import os
 import SwiftUI
 
 /// Disk-backed image cache in the App Group container, shared by the app
@@ -76,26 +77,105 @@ enum ImageStore {
         memory.object(forKey: "\(url.absoluteString)|melt" as NSString)
     }
 
-    /// Bulk-loads disk images into memory off the main thread, sequentially,
-    /// so cards born moments later get synchronous memory hits — the calm of
-    /// the old blocking reads without ever touching the main thread. Called
-    /// at launch (and after syncs) with the first screenful the lists show;
-    /// everything further down loads lazily as it scrolls in.
+    /// Bulk-loads disk images into memory off the main thread, a few at a
+    /// time in list order, so cards born moments later get synchronous
+    /// memory hits and draw with their photo in the same frame. Called on
+    /// every foreground (iOS empties the memory cache in the background)
+    /// and after syncs. Disk only: a miss here is left for the card's own
+    /// fetch, never the network.
     static func prewarm(_ urls: [URL]) {
         Task.detached(priority: .userInitiated) {
-            for url in urls {
-                guard cached(url) == nil else { continue }
-                guard let data = try? Data(contentsOf: file(for: url)),
-                      let image = await decoded(data, maxSide: Variant.card.maxSide)
-                else { continue }
-                store(image, key: key(url, .card))
-                // The melt underlay bakes here too, so the first cards
-                // arrive whole instead of sharpening-then-blurring.
-                if let blurred = melted(image) {
-                    store(blurred, key: "\(url.absoluteString)|melt" as NSString)
+            await withTaskGroup(of: Void.self) { group in
+                var next = urls.makeIterator()
+                func add() -> Bool {
+                    guard let url = next.next() else { return false }
+                    group.addTask { _ = await load(url, variant: .card, network: false) }
+                    return true
                 }
+                for _ in 0..<3 where add() {}
+                while await group.next() != nil { _ = add() }
             }
         }
+    }
+
+    /// Warms `urls` and returns once every one that's on disk is in memory,
+    /// or at `limit`, whichever comes first. For the moment before the
+    /// library is first shown: a card only draws with its photo in the
+    /// same frame if the photo is already decoded.
+    static func warm(_ urls: [URL], within limit: Duration) async {
+        let fm = FileManager.default
+        let onDisk = urls.filter { cached($0) == nil && fm.fileExists(atPath: file(for: $0).path()) }
+        guard !onDisk.isEmpty else { return }
+        prewarm(onDisk)
+        let deadline = ContinuousClock.now + limit
+        while ContinuousClock.now < deadline, !onDisk.allSatisfy({ cached($0) != nil }) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// Loads already under way, keyed like the memory cache, so a card
+    /// appearing mid-prewarm waits on the same decode instead of starting
+    /// its own.
+    private struct Load {
+        let task: Task<UIImage?, Never>
+        let network: Bool
+    }
+
+    private static let inflight = OSAllocatedUnfairLock(initialState: [String: Load]())
+
+    private static func load(_ url: URL, variant: Variant, network: Bool = true) async -> UIImage? {
+        if let hit = cached(url, variant: variant) { return hit }
+        let k = key(url, variant) as String
+        let load = inflight.withLock { running -> Load in
+            if let load = running[k] { return load }
+            let load = Load(
+                task: Task.detached(priority: .userInitiated) {
+                    await loadUncached(url, variant: variant, network: network)
+                },
+                network: network
+            )
+            running[k] = load
+            return load
+        }
+        let image = await load.task.value
+        inflight.withLock { running in
+            if running[k]?.task == load.task { running[k] = nil }
+        }
+        // Joined a disk-only prewarm that found nothing: this caller may
+        // still go to the network.
+        if image == nil, network, !load.network {
+            return await loadUncached(url, variant: variant, network: true)
+        }
+        return image
+    }
+
+    /// Disk, then (if allowed) network; decoded to the tier and stored. The
+    /// card tier bakes its melt underlay in the same pass, so a card never
+    /// shows sharp-then-blurred.
+    private static func loadUncached(_ url: URL, variant: Variant, network: Bool) async -> UIImage? {
+        var image: UIImage?
+        if let data = try? Data(contentsOf: file(for: url)) {
+            image = await decoded(data, maxSide: variant.maxSide)
+        } else if network {
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+            let status = (response as? HTTPURLResponse)?.statusCode
+            if let status, [404, 410].contains(status) {
+                setDead(url, true)
+                return nil
+            }
+            guard status.map({ (200 ..< 300).contains($0) }) ?? true,
+                  let fresh = await decoded(data, maxSide: variant.maxSide)
+            else { return nil }
+            try? data.write(to: file(for: url), options: .atomic)
+            setDead(url, false)
+            image = fresh
+        }
+        guard let image else { return nil }
+        if variant == .card, cachedMelt(url) == nil, let blurred = melted(image) {
+            store(blurred, key: "\(url.absoluteString)|melt" as NSString)
+        }
+        store(image, key: key(url, variant))
+        return image
     }
 
     /// Cache-first fetch; disk and network misses resolve off the main
@@ -134,34 +214,12 @@ enum ImageStore {
     static func fetch(_ url: URL, variant: Variant = .card) async -> UIImage? {
         if let hit = cached(url, variant: variant) { return hit }
         _ = pruneOnce
-        // Detached on purpose: `.task` on a view inherits the MainActor, so
-        // without the hop even "async" disk reads and decodes run on main.
-        let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
-            if let data = try? Data(contentsOf: file(for: url)) {
-                return await decoded(data, maxSide: variant.maxSide)
-            }
-            guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
-            let status = (response as? HTTPURLResponse)?.statusCode
-            if let status, [404, 410].contains(status) {
-                setDead(url, true)
-                return nil
-            }
-            guard status.map({ (200 ..< 300).contains($0) }) ?? true,
-                  let image = await decoded(data, maxSide: variant.maxSide)
-            else { return nil }
-            try? data.write(to: file(for: url), options: .atomic)
-            setDead(url, false)
-            return image
-        }.value
-        if let image {
-            store(image, key: key(url, variant))
-        }
-        return image
+        return await load(url, variant: variant)
     }
 
     /// The card image and its pre-blurred melt underlay, together. Baking
-    /// the blur once here (instead of a live `.blur` on every card) takes
-    /// the heaviest per-frame GPU pass out of scrolling entirely.
+    /// the blur once (instead of a live `.blur` on every card) takes the
+    /// heaviest per-frame GPU pass out of scrolling entirely.
     static func meltPair(_ url: URL) async -> (sharp: UIImage, blurred: UIImage)? {
         guard let sharp = await fetch(url, variant: .card) else { return nil }
         if let blurred = cachedMelt(url) { return (sharp, blurred) }
@@ -174,24 +232,31 @@ enum ImageStore {
     }
 
     /// Gaussian-blurred copy for the melt underlay, computed once per image.
-    /// Matches the old live `.blur(radius: 10, opaque: true)` look: radius
-    /// scales with the image so the softness is the same at any size.
+    /// Blurred pixels carry no detail, so it's baked at a quarter of the
+    /// card's resolution (a sixteenth of the work and memory) and stretched
+    /// back when drawn. Matches the old live `.blur(radius: 10, opaque:
+    /// true)`: the radius scales with the image so the softness is the same.
     private static func melted(_ image: UIImage) -> UIImage? {
         guard let cg = image.cgImage else { return nil }
-        let input = CIImage(cgImage: cg)
+        let factor: CGFloat = 0.25
+        let input = CIImage(cgImage: cg).transformed(by: CGAffineTransform(scaleX: factor, y: factor))
+        let extent = input.extent.integral
         // Cards draw ~150 pt wide from this image: 10 pt of display blur is
         // radius ≈ 10 × (imageWidth / 150) in image pixels.
-        let radius = 10 * input.extent.width / 150
+        let radius = 10 * extent.width / 150
         let filter = CIFilter.gaussianBlur()
         filter.inputImage = input.clampedToExtent()
         filter.radius = Float(radius)
-        guard let output = filter.outputImage?.cropped(to: input.extent),
-              let rendered = meltContext.createCGImage(output, from: input.extent)
+        guard let output = filter.outputImage?.cropped(to: extent),
+              let rendered = meltContext.createCGImage(output, from: extent)
         else { return nil }
-        return UIImage(cgImage: rendered, scale: image.scale, orientation: image.imageOrientation)
+        return UIImage(cgImage: rendered, scale: image.scale * factor, orientation: image.imageOrientation)
     }
 
-    private static let meltContext = CIContext(options: [.cacheIntermediates: false])
+    /// On the CPU: at a quarter size each blur is a fraction of a
+    /// millisecond, and it never queues behind (or competes with) the GPU
+    /// work of drawing the list.
+    private static let meltContext = CIContext(options: [.cacheIntermediates: false, .useSoftwareRenderer: true])
 
     /// Decode fully (no lazy decompression at render time) and cap the
     /// pixel size to the tier: og:images are routinely 2000 px wide but a
@@ -303,11 +368,16 @@ struct CachedImage<Content: View>: View {
             // re-renders the card (and its whole gradient melt), and rows
             // re-run this task each time scrolling brings them back.
             guard loaded != url else { return }
-            if let image = await ImageStore.fetch(url, variant: variant) {
-                phase = .success(Image(uiImage: image))
-                loaded = url
-            } else if loaded == nil {
-                phase = .failure
+            let image = await ImageStore.fetch(url, variant: variant)
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) {
+                if let image {
+                    phase = .success(Image(uiImage: image))
+                    loaded = url
+                } else if loaded == nil {
+                    phase = .failure
+                }
             }
         }
     }

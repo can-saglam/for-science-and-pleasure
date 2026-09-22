@@ -324,6 +324,25 @@ final class ThemeStore {
         #endif
     }
 
+    /// The theme pick cross-fades the window. Changing the icon in the
+    /// middle of that fade makes iOS lay out its "icon changed" alert
+    /// against a window that's still mid-transition, and the icon in
+    /// the alert lands with the wrong padding. Wait until the fade is done.
+    func syncAppIconWhenSettled() {
+        #if !APP_EXTENSION
+        iconSyncItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.syncAppIcon()
+        }
+        iconSyncItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: item)
+        #endif
+    }
+
+    #if !APP_EXTENSION
+    private var iconSyncItem: DispatchWorkItem?
+    #endif
+
     /// Has a theme ever been chosen on this device? False on a fresh
     /// install, when the first run picks one from the system appearance.
     var hasStoredChoice: Bool { defaults?.string(forKey: "appTheme") != nil }
@@ -367,6 +386,11 @@ enum AppBackground {
 
     /// Logo and primary marks — cream on midnight and forest, dark on the papers, white elsewhere.
     static var ink: Color { theme.ink }
+
+    /// Placeholder ink. The system grey disappears into the paper themes.
+    static func fieldPrompt(_ title: String) -> Text {
+        Text(title).foregroundStyle(ink.opacity(0.72))
+    }
 
     /// Label on a white (or near-white) prominent glass pill.
     /// The papers print their ink; dark themes print the page colour.
@@ -496,6 +520,12 @@ extension View {
     func prominentGlass() -> some View {
         modifier(ProminentGlassModifier())
     }
+
+    /// Solid destructive pill. Plain `.glass` on a delete action renders
+    /// the label in the placeholder grey, which reads as a dead control.
+    func destructiveGlass() -> some View {
+        modifier(DestructiveGlassModifier())
+    }
 }
 
 private struct ProminentGlassModifier: ViewModifier {
@@ -506,6 +536,17 @@ private struct ProminentGlassModifier: ViewModifier {
             .buttonStyle(.glassProminent)
             .tint(isEnabled ? Color.white : AppBackground.wash(0.10))
             .foregroundStyle(isEnabled ? AppBackground.onProminent : AppBackground.ink.opacity(0.5))
+    }
+}
+
+private struct DestructiveGlassModifier: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.glassProminent)
+            .tint(isEnabled ? AppBackground.destructive : AppBackground.wash(0.10))
+            .foregroundStyle(isEnabled ? Color.white : AppBackground.ink.opacity(0.5))
     }
 }
 

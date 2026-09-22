@@ -139,10 +139,10 @@ final class GroupStore {
         do {
             let fresh = try await call(["action": "card"], as: GroupCard.self)
             store(fresh)
-            loaded = true
+            if !loaded { loaded = true }
             return true
         } catch {
-            loaded = true
+            if !loaded { loaded = true }
             return false
         }
     }
@@ -286,7 +286,10 @@ final class GroupStore {
 
     // MARK: - Plumbing
 
+    /// Launch fetches the card three times over. An unchanged card must not
+    /// be re-assigned: every write redraws each screen that reads it.
     private func store(_ fresh: GroupCard) {
+        guard fresh != card else { return }
         card = fresh
         if let data = try? Self.encoder.encode(fresh) { Self.defaults.set(data, forKey: Self.cacheKey) }
     }

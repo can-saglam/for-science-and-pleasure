@@ -240,6 +240,7 @@ struct CaptureView: View {
                 } label: {
                     Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.ink)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glass)

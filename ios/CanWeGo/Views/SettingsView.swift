@@ -302,7 +302,8 @@ struct SettingsView: View {
                 LegalSheet(page: page)
             }
             .alert("Type DELETE to confirm", isPresented: $showDeleteConfirm) {
-                TextField("DELETE", text: $deletePhrase)
+                TextField("", text: $deletePhrase, prompt: AppBackground.fieldPrompt("DELETE"))
+                    .foregroundStyle(AppBackground.ink)
                     .textInputAutocapitalization(.characters)
                 Button("Delete account", role: .destructive) {
                     Task { await deleteAccount() }
@@ -376,7 +377,7 @@ struct SettingsView: View {
             get: { themes.current },
             set: { new in
                 themes.select(new)
-                syncAppIcon()
+                themes.syncAppIconWhenSettled()
             }
         )
     }

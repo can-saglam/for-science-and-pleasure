@@ -247,6 +247,7 @@ final class SupabaseAuth {
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
+        request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.httpBody = try JSONEncoder().encode(body)

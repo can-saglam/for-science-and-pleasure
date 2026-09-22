@@ -50,6 +50,7 @@ struct Composer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("", text: $text, axis: .vertical)
+                .foregroundStyle(AppBackground.ink)
                 .lineLimit(3...8)
                 .textFieldStyle(.plain)
                 .focused($focused)
@@ -57,7 +58,7 @@ struct Composer: View {
                 .background(alignment: .topLeading) {
                     if text.isEmpty {
                         Text(Self.prompts[tickerIndex % Self.prompts.count])
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.ink.opacity(0.72))
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
                             .id(tickerIndex)

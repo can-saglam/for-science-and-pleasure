@@ -98,6 +98,7 @@ final class GroupUI {
 struct GroupSection: View {
     @Bindable var ui: GroupUI
     @State private var group = GroupStore.shared
+    @State private var editingHome = false
     @Environment(\.modelContext) private var context
 
     private var me: UUID? { SupabaseAuth.shared.userId }
@@ -125,6 +126,9 @@ struct GroupSection: View {
             }
             .listRowBackground(SettingsView.rowBackground)
             .disabled(ui.leaving)
+            .sheet(isPresented: $editingHome) {
+                HomeCitySheet()
+            }
         }
     }
 
@@ -136,15 +140,25 @@ struct GroupSection: View {
             memberRow(member)
         }
 
-        if let home = card.homeLocality, !home.isEmpty {
-            LabeledContent {
-                Text(home)
-            } label: {
-                SettingsRow(title: "City", icon: "building.2.fill")
+        Button {
+            Haptics.tap()
+            editingHome = true
+        } label: {
+            if let home = card.homeLocality, !home.isEmpty {
+                LabeledContent {
+                    Text(home)
+                } label: {
+                    SettingsRow(title: "City", icon: "building.2.fill")
+                }
+            } else {
+                HStack {
+                    SettingsRow(title: "Set a home city", icon: "building.2.fill")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppBackground.ink.opacity(0.45))
+                }
             }
-        } else if !HomeStore.shared.isSet {
-            SettingsRow(title: "Set a home city", icon: "building.2.fill")
-                .foregroundStyle(.secondary)
         }
 
         // One call to action, always present until the group is at four.

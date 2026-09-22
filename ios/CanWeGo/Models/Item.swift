@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftData
 import SwiftUI
 
@@ -100,6 +101,70 @@ enum DayString {
         timeZone = zone
         calendar = homeCalendar(zone)
         formatter = homeFormatter(zone)
+        cache.withLock { $0 = Cache() }
+    }
+
+    /// The lists sort and bucket every card by these on each redraw, so
+    /// they must stay cheap: a `DateFormatter` round trip is ~80 µs, and
+    /// thousands of them per redraw stalled scrolling. Day differences are
+    /// arithmetic on the civil date, "today" is worked out once per home
+    /// day, and parsed midnights are remembered per string.
+    private struct Cache {
+        var today: (string: String, day: Int, weekEnd: String, until: Date)?
+        var midnights: [String: Date] = [:]
+    }
+
+    private static let cache = OSAllocatedUnfairLock(initialState: Cache())
+
+    /// Days since 1970-01-01 for a strict `yyyy-MM-dd`, without a
+    /// formatter. Nil for anything else.
+    static func dayNumber(_ s: String) -> Int? {
+        let u = Array(s.utf8)
+        guard u.count == 10, u[4] == 45, u[7] == 45 else { return nil }
+        func digits(_ r: Range<Int>) -> Int? {
+            var n = 0
+            for i in r {
+                let d = Int(u[i]) - 48
+                guard (0...9).contains(d) else { return nil }
+                n = n * 10 + d
+            }
+            return n
+        }
+        guard let y = digits(0..<4), let m = digits(5..<7), let d = digits(8..<10),
+              (1...12).contains(m), d >= 1, d <= daysIn(month: m, year: y)
+        else { return nil }
+        // Howard Hinnant's days_from_civil.
+        let yy = m <= 2 ? y - 1 : y
+        let era = (yy >= 0 ? yy : yy - 399) / 400
+        let yoe = yy - era * 400
+        let mp = (m + 9) % 12
+        let doy = (153 * mp + 2) / 5 + d - 1
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+        return era * 146_097 + doe - 719_468
+    }
+
+    private static func daysIn(month m: Int, year y: Int) -> Int {
+        switch m {
+        case 2: (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 ? 29 : 28
+        case 4, 6, 9, 11: 30
+        default: 31
+        }
+    }
+
+    private static func currentDay() -> (string: String, day: Int, weekEnd: String) {
+        let now = Date.now
+        if let hit = cache.withLock({ $0.today }), now < hit.until {
+            return (hit.string, hit.day, hit.weekEnd)
+        }
+        let string = formatter.string(from: now)
+        let midnight = calendar.startOfDay(for: now)
+        let until = calendar.date(byAdding: .day, value: 1, to: midnight) ?? now.addingTimeInterval(60)
+        let dow = calendar.component(.weekday, from: midnight) // 1 = Sunday
+        let sunday = calendar.date(byAdding: .day, value: (8 - dow) % 7, to: midnight) ?? midnight
+        let weekEnd = formatter.string(from: sunday)
+        let day = dayNumber(string) ?? 0
+        cache.withLock { $0.today = (string, day, weekEnd, until) }
+        return (string, day, weekEnd)
     }
 
     private static func homeCalendar(_ zone: TimeZone) -> Calendar {
@@ -118,18 +183,29 @@ enum DayString {
     }
 
     static func today() -> String {
-        formatter.string(from: .now)
+        currentDay().string
     }
 
     /// Midnight of `s` on the home clock.
     static func date(_ s: String) -> Date? {
-        formatter.date(from: s)
+        if let hit = cache.withLock({ $0.midnights[s] }) { return hit }
+        guard let parsed = formatter.date(from: s) else { return nil }
+        cache.withLock { $0.midnights[s] = parsed }
+        return parsed
     }
 
     /// Whole days from `from` to `to` (negative when `to` is in the past).
     static func daysBetween(_ from: String, _ to: String) -> Int? {
+        if let a = dayNumber(from), let b = dayNumber(to) { return b - a }
         guard let a = date(from), let b = date(to) else { return nil }
         return calendar.dateComponents([.day], from: a, to: b).day
+    }
+
+    /// Whole days from today to `day`: the hot path behind every card's
+    /// bucket and label.
+    static func daysFromToday(_ day: String) -> Int? {
+        if let b = dayNumber(day) { return b - currentDay().day }
+        return daysBetween(today(), day)
     }
 
     /// `day` shifted by `days` on the home calendar.
@@ -195,10 +271,7 @@ enum DayString {
     /// Sunday of the current home week, as a day string. "This week" means
     /// through Sunday, not a rolling seven days.
     static func endOfThisWeek() -> String {
-        let today = calendar.startOfDay(for: .now)
-        let dow = calendar.component(.weekday, from: today) // 1 = Sunday
-        let sunday = calendar.date(byAdding: .day, value: (8 - dow) % 7, to: today)!
-        return formatter.string(from: sunday)
+        currentDay().weekEnd
     }
 }
 
@@ -261,12 +334,12 @@ extension Item {
 
     var daysUntilStart: Int? {
         guard let s = startsOn else { return nil }
-        return DayString.daysBetween(DayString.today(), s)
+        return DayString.daysFromToday(s)
     }
 
     var daysUntilClose: Int? {
         guard let e = endsOn else { return nil }
-        return DayString.daysBetween(DayString.today(), e)
+        return DayString.daysFromToday(e)
     }
 
     var timeBucket: TimeBucket {
@@ -450,9 +523,10 @@ extension Item {
         }
     }
 
-    /// Anything not done can take a hand-picked day and time; dated saves
-    /// also get the presets.
-    var canRemind: Bool { !isDone }
+    /// Anything still ahead can take a hand-picked day and time; dated
+    /// saves also get the presets. An event that has already ended has
+    /// nothing left to be reminded of.
+    var canRemind: Bool { !isDone && timeBucket != .past }
 
     var reminderValueLabel: String {
         guard let offset = reminderOffsetDays, let anchor = reminderAnchor else {
@@ -506,7 +580,7 @@ extension Item {
     /// A hand-picked reminder ignores the dates; it only goes once it has fired.
     func reconcileReminder() {
         guard hasReminder else { return }
-        if isDone {
+        if isDone || timeBucket == .past {
             clearReminder()
             return
         }

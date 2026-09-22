@@ -13,23 +13,14 @@ enum LegalPage: String, Identifiable {
     }
 
     var bodyText: String {
-        switch self {
-        case .privacy:
-            Bundle.main.url(forResource: "PRIVACY", withExtension: "md")
-                .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
-                ?? """
-                Can We Go? stores the cards you save and who is in your group.
-                We do not sell that. Publish the full policy and this screen
-                will show it. Draft: docs/PRIVACY.md in the repo.
-                """
-        case .terms:
-            Bundle.main.url(forResource: "TERMS", withExtension: "md")
-                .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
-                ?? """
-                You are responsible for what you save and who you invite.
-                Draft: docs/TERMS.md in the repo.
-                """
+        let name = self == .privacy ? "PRIVACY" : "TERMS"
+        if let url = Bundle.main.url(forResource: name, withExtension: "md"),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            return text
         }
+        return self == .privacy
+            ? "Can We Go? stores the cards you save and who is in your group. We do not sell that or run ads."
+            : "You are responsible for what you save and who you invite."
     }
 }
 
@@ -37,10 +28,16 @@ struct LegalSheet: View {
     let page: LegalPage
     @Environment(\.dismiss) private var dismiss
 
+    private var rendered: AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: page.bodyText, options: options))
+            ?? AttributedString(page.bodyText)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(page.bodyText)
+                Text(rendered)
                     .font(.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)

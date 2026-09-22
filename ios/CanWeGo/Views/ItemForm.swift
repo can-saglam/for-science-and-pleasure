@@ -44,8 +44,14 @@ struct ItemForm: View {
                 HStack(alignment: .top, spacing: 10) {
                     fieldIcon("note.text")
                         .padding(.top, 3)
-                    TextField("Notes", text: optional($item.notes), axis: .vertical)
-                        .lineLimit(2...5)
+                    TextField(
+                        "",
+                        text: optional($item.notes),
+                        prompt: AppBackground.fieldPrompt("Notes"),
+                        axis: .vertical
+                    )
+                    .foregroundStyle(AppBackground.ink)
+                    .lineLimit(2...5)
                 }
                 .padding(12)
                 .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
@@ -69,7 +75,8 @@ struct ItemForm: View {
     private func field(_ label: String, icon: String, text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             fieldIcon(icon)
-            TextField(label, text: text)
+            TextField("", text: text, prompt: AppBackground.fieldPrompt(label))
+                .foregroundStyle(AppBackground.ink)
         }
         .padding(12)
         .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))

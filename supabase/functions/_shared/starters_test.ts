@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
-import { shapeStarters, starterFresh, starterKey } from "./starters.ts";
+import { chooseStarters, fallbackStarters, readModelStarters, shapeStarters, starterFresh, starterKey } from "./starters.ts";
+
 
 Deno.test("starter key folds case and whitespace", () => {
   assertEquals(starterKey(" Lisbon ", "Portugal"), "lisbon|portugal");
@@ -35,4 +36,32 @@ Deno.test("shape: garbage in, empty out", () => {
   assertEquals(shapeStarters(null), []);
   assertEquals(shapeStarters({ starters: "nope" }), []);
   assertEquals(shapeStarters({ starters: [{ title: "x", url: "not a url" }] }), []);
+});
+
+Deno.test("fallback: city, alias, and city-state country", () => {
+  assertEquals(fallbackStarters("Singapore", "Singapore").length, 3);
+  assertEquals(fallbackStarters("Jurong", "Singapore")[0].title, "National Gallery");
+  assertEquals(fallbackStarters("NYC", "United States")[0].title, "MoMA");
+  assertEquals(fallbackStarters("Lisbon", "Portugal").length, 3);
+  assertEquals(fallbackStarters("Springfield", "United States"), []);
+});
+
+Deno.test("chooseStarters prefers model, then fallback, then stale", () => {
+  const model = [{ title: "A", url: "https://a.example/", kind: "place" as const }];
+  const fallback = [{ title: "B", url: "https://b.example/", kind: "place" as const }];
+  const stale = [{ title: "C", url: "https://c.example/", kind: "place" as const }];
+  assertEquals(chooseStarters(model, fallback, stale), model);
+  assertEquals(chooseStarters([], fallback, stale), fallback);
+  assertEquals(chooseStarters([], [], stale), stale);
+  assertEquals(chooseStarters([], [], []), []);
+});
+
+Deno.test("readModelStarters takes the last text block and strips chatter", () => {
+  const raw = readModelStarters([
+    { type: "text", text: "searching…" },
+    { type: "text", text: '```json\n{"starters":[{"title":"X","url":"https://x.sg","kind":"place"}]}\n```' },
+  ]);
+  assertEquals(shapeStarters(raw), [
+    { title: "X", url: "https://x.sg/", kind: "place" },
+  ]);
 });
