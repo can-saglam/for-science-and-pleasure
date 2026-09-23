@@ -97,6 +97,16 @@ struct ContentView: View {
     @State private var undoBin = UndoBin.shared
     @State private var syncStatus = SyncStatus.shared
     @State private var group = GroupStore.shared
+    /// A share-sheet save is waiting on a full category. CWG_PAYWALL
+    /// (screenshot runs) opens it straight away: `browse`, `seats`, or a
+    /// category.
+    @State private var inboxPaywall: PlusReason? = ProcessInfo.processInfo.environment["CWG_PAYWALL"].map {
+        switch $0 {
+        case "browse": .browsing
+        case "seats": .seats
+        default: .category($0)
+        }
+    }
     /// An item summoned from outside the lists: a tapped reminder
     /// notification or a Spotlight result.
     @State private var deepLinked: Item?
@@ -151,6 +161,9 @@ struct ContentView: View {
                 Color.clear
             }
         }
+        // iOS 27 folds the search tab into the bar as a third item unless
+        // the bar is told selecting it is how search starts.
+        .tabViewSearchActivation(.searchTabSelection)
         // Step 2 of the Add tap: the state really did change to 2, so
         // SwiftUI now pushes the old tab back to the tab bar controller.
         .onChange(of: tab) { old, new in
@@ -167,6 +180,14 @@ struct ContentView: View {
         .background { plusButtonProbe }
         .sheet(isPresented: $captureOpen) {
             CaptureView()
+        }
+        .sheet(item: $inboxPaywall) { reason in
+            PlusPaywall(
+                reason: reason,
+                note: "Your share is waiting on this phone. It\u{2019}ll land by itself once there\u{2019}s room."
+            ) {
+                drainInbox()
+            }
         }
         // The kill switch. Server-driven; CWG_FORCE_UPDATE only exists so
         // automated runs can photograph the screen without touching the
@@ -375,9 +396,43 @@ struct ContentView: View {
         if let pending = ItemGate.pending {
             openItem(pending)
         }
+        let claimedURLs = drainInbox()
+        let listed = items.filter { !$0.isDeleted }
+        SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
+        SpotlightIndex.sync(items: listed)
+        // Fill the in-memory image cache from disk before the cards
+        // need it — off the main thread, so the launch animation never
+        // competes with a dozen JPEG decodes. Only the first screenful:
+        // warming the whole library once held every decoded image in
+        // RAM at once, and the rest loads lazily as it scrolls in.
+        ImageStore.prewarm(prewarmURLs)
+        // Backfill runs after the pull, not before — on a fresh install
+        // the library is empty until the first sync lands.
+        Task {
+            await SupabaseSync.sync(context: context)
+            // Anything new the pull brought in warms up too.
+            ImageStore.prewarm(prewarmURLs)
+            await ThumbnailBackfill.run(context: context)
+            // The widget's snapshot rebuilds after the pull, so it
+            // rotates through the freshest library.
+            WidgetStore.sync(items: items.filter { !$0.isDeleted })
+            CategoryCap.publish(items)
+        }
+        Task { await MembersStore.shared.refresh() }
+        Task { await GroupStore.shared.refresh() }
+        // Home first: it's the clock every time label below is read on.
+        Task { await HomeStore.shared.refresh() }
+    }
+
+    /// Brings the share extension's saves in. One that would overflow a
+    /// full free category stays parked: the paywall asks once, and it
+    /// lands by itself as soon as there's room (or Plus).
+    @discardableResult
+    private func drainInbox() -> [String] {
         let existing = Set(items.compactMap { $0.url.map(SavedURLIndex.normalize) })
         var claimed: [Item] = []
         var claimedURLs: [String] = []
+        var parked: [(file: String, category: String)] = []
         // A foreign library is about to be replaced — leave the files
         // so they can land once this account's store is in place.
         if !group.libraryIsForeign {
@@ -389,6 +444,10 @@ struct ContentView: View {
                     continue
                 }
                 let item = Item(pending: save)
+                if !item.isDone, let full = CategoryCap.overflow(item, context: context) {
+                    parked.append((claim.file.lastPathComponent, full))
+                    continue
+                }
                 item.addedByEmail = SupabaseAuth.shared.email
                 if item.createdBy == nil { item.createdBy = SupabaseAuth.shared.userId }
                 item.updatedBy = SupabaseAuth.shared.userId
@@ -413,31 +472,17 @@ struct ContentView: View {
                 for item in claimed { await SupabaseSync.announceSave(item) }
             }
         }
-        let listed = items.filter { !$0.isDeleted }
-        SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
-        SpotlightIndex.sync(items: listed)
-        // Fill the in-memory image cache from disk before the cards
-        // need it — off the main thread, so the launch animation never
-        // competes with a dozen JPEG decodes. Only the first screenful:
-        // warming the whole library once held every decoded image in
-        // RAM at once, and the rest loads lazily as it scrolls in.
-        ImageStore.prewarm(prewarmURLs)
-        // Backfill runs after the pull, not before — on a fresh install
-        // the library is empty until the first sync lands.
-        Task {
-            await SupabaseSync.sync(context: context)
-            // Anything new the pull brought in warms up too.
-            ImageStore.prewarm(prewarmURLs)
-            await ThumbnailBackfill.run(context: context)
-            // The widget's snapshot rebuilds after the pull, so it
-            // rotates through the freshest library.
-            WidgetStore.sync(items: items.filter { !$0.isDeleted })
+        let asked = Set(Self.parkedDefaults.stringArray(forKey: Self.parkedKey) ?? [])
+        if let fresh = parked.first(where: { !asked.contains($0.file) }), !captureOpen {
+            Self.parkedDefaults.set(parked.map(\.file), forKey: Self.parkedKey)
+            inboxPaywall = .category(fresh.category)
         }
-        Task { await MembersStore.shared.refresh() }
-        Task { await GroupStore.shared.refresh() }
-        // Home first: it's the clock every time label below is read on.
-        Task { await HomeStore.shared.refresh() }
+        return claimedURLs
     }
+
+    /// Parked saves the paywall has already asked about, by inbox file.
+    private static let parkedKey = "inboxParkedAsked"
+    private static var parkedDefaults: UserDefaults { UserDefaults(suiteName: SharedInbox.groupID) ?? .standard }
 
     /// A card landing on the other tab: go there, so the glow is seen.
     private func followLanding(_ id: UUID?) {

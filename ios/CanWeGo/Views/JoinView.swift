@@ -74,7 +74,7 @@ struct JoinSheet: View {
             preview = nil
             note = nil
         }
-        .sheet(isPresented: $showPlus) { PlusSheet() }
+        .sheet(isPresented: $showPlus) { PlusPaywall(reason: .seats) }
         .alert(
             "You\u{2019}ve joined \(joinedName ?? "the group")",
             isPresented: Binding(

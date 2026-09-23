@@ -16,6 +16,19 @@ Deno.test("og:image still wins over everything else", () => {
   assertEquals(heroImageFromHtml(html, PAGE), "https://example.org/social.jpg");
 });
 
+Deno.test("og:image entities are decoded and a Next.js image proxy is unwrapped (Eventbrite)", () => {
+  const html = `<meta property="og:image" content="https://www.eventbrite.co.uk/e/_next/image?url=https%3A%2F%2Fimg.evbuc.com%2Fhttps%253A%252F%252Fcdn.evbuc.com%252Fimages%252F1185684115%252F1304179817133%252F1%252Foriginal.20260529-083700%3Fcrop%3Dfocalpoint%26w%3D940&amp;w=940&amp;q=75" data-next-head=""/>`;
+  assertEquals(
+    heroImageFromHtml(html, "https://www.eventbrite.co.uk/e/big-finish-day-tickets-1988169832489"),
+    "https://img.evbuc.com/https%3A%2F%2Fcdn.evbuc.com%2Fimages%2F1185684115%2F1304179817133%2F1%2Foriginal.20260529-083700?crop=focalpoint&w=940",
+  );
+});
+
+Deno.test("a relative Next.js proxy resolves against the page", () => {
+  const html = `<meta property="og:image" content="/_next/image?url=%2Fposters%2Fshow.jpg&amp;w=1200&amp;q=75">`;
+  assertEquals(heroImageFromHtml(html, PAGE), "https://example.org/posters/show.jpg");
+});
+
 Deno.test("JSON-LD image is used when there are no social tags (Bermondsey)", () => {
   const html = `
     <script type="application/ld+json">

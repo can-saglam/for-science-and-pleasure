@@ -23,6 +23,7 @@ struct ItemDetailView: View {
     @State private var fetchNote: String?
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
+    @State private var paywall: PlusReason?
 
     private enum CalendarState {
         case idle, added, failed
@@ -193,6 +194,7 @@ struct ItemDetailView: View {
             ActivitySheet(items: [card.image])
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $paywall) { PlusPaywall(reason: $0) { item.putBack() } }
         // The edit form needs the room, so entering edit expands the sheet.
         .onChange(of: editing) { _, isEditing in
             if isEditing { detent = .large }
@@ -537,7 +539,11 @@ struct ItemDetailView: View {
                 if item.isDone && !done {
                     Button {
                         Haptics.tap()
-                        item.putBack()
+                        if let full = CategoryCap.overflow(item, context: context) {
+                            paywall = .category(full)
+                        } else {
+                            item.putBack()
+                        }
                     } label: {
                         Label("Put back", systemImage: "arrow.uturn.backward")
                             .font(.subheadline.weight(.semibold))

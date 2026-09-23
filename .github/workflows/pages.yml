@@ -1,0 +1,53 @@
+name: Pages
+
+# The privacy policy and terms live in the app bundle; the site publishes
+# those same files so the two can never disagree.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - ios/CanWeGo/Resources/PRIVACY.md
+      - ios/CanWeGo/Resources/TERMS.md
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp -R docs/. site/
+          for pair in "privacy:PRIVACY:Privacy Policy" "terms:TERMS:Terms of Use"; do
+            IFS=: read -r slug file title <<< "$pair"
+            mkdir -p "site/$slug"
+            { printf -- '---\nlayout: default\ntitle: %s\n---\n\n' "$title"; cat "ios/CanWeGo/Resources/$file.md"; } > "site/$slug/index.md"
+          done
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,12 +1,16 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { CAPS, consumeQuota, type QuotaKind } from "./quota.ts";
+import { consumeQuota, DAILY } from "./quota.ts";
 
-function stub(existing: Record<string, number> | null, onWrite: (op: string, row: unknown) => void) {
+/** A fake client: `usage` is today's usage_daily row, `plus` whether the
+ * entitlements count comes back non-zero. */
+function stub(usage: Record<string, number> | null, plus: boolean, onWrite: (op: string, row: unknown) => void) {
   return {
-    from() {
+    from(table: string) {
       const q = {
         select() { return q; },
         eq() { return q; },
+        in() { return q; },
+        or() { return Promise.resolve({ count: plus ? 1 : 0 }); },
         update(row: unknown) {
           onWrite("update", row);
           return { eq() { return q; } };
@@ -16,7 +20,10 @@ function stub(existing: Record<string, number> | null, onWrite: (op: string, row
           return Promise.resolve({ error: null });
         },
         maybeSingle() {
-          return Promise.resolve({ data: existing });
+          return Promise.resolve({ data: table === "usage_daily" ? usage : { group_id: "g1" } });
+        },
+        then(resolve: (v: unknown) => void) {
+          resolve({ data: [{ user_id: "u1" }, { user_id: "u2" }] });
         },
       };
       return q;
@@ -24,37 +31,38 @@ function stub(existing: Record<string, number> | null, onWrite: (op: string, row
   } as never;
 }
 
-Deno.test("caps stay in the tens for parse/locate and a handful for suggest", () => {
-  assertEquals(CAPS.parse, 40);
-  assertEquals(CAPS.locate, 40);
-  assertEquals(CAPS.suggest, 8);
+Deno.test("ten a day free, fifty with Plus", () => {
+  assertEquals(DAILY.free, 10);
+  assertEquals(DAILY.plus, 50);
 });
 
-Deno.test("consumeQuota inserts the first use of the day", async () => {
+Deno.test("first use of the day inserts a row", async () => {
   let wrote: unknown;
-  const ok = await consumeQuota(stub(null, (_op, row) => { wrote = row; }), "u1", "parse");
+  const ok = await consumeQuota(stub(null, false, (_op, row) => { wrote = row; }), "u1", "parse");
   assertEquals(ok, true);
   assertEquals((wrote as { parse: number }).parse, 1);
 });
 
-Deno.test("consumeQuota refuses when the cap is already hit", async () => {
+Deno.test("kinds share one allowance", async () => {
   const writes: string[] = [];
-  const ok = await consumeQuota(
-    stub({ parse: 40, locate: 0, suggest: 0 }, (op) => writes.push(op)),
-    "u1",
-    "parse",
-  );
+  const ok = await consumeQuota(stub({ parse: 6, locate: 1, suggest: 3 }, false, (op) => writes.push(op)), "u1", "parse");
   assertEquals(ok, false);
   assertEquals(writes, []);
 });
 
-Deno.test("consumeQuota increments a kind under the cap", async () => {
+Deno.test("under the free allowance increments only its own kind", async () => {
   let wrote: unknown;
-  const ok = await consumeQuota(
-    stub({ parse: 3, locate: 0, suggest: 0 }, (_op, row) => { wrote = row; }),
-    "u1",
-    "parse" as QuotaKind,
-  );
+  const ok = await consumeQuota(stub({ parse: 3, locate: 0, suggest: 1 }, false, (_op, row) => { wrote = row; }), "u1", "suggest");
   assertEquals(ok, true);
-  assertEquals((wrote as { parse: number }).parse, 4);
+  assertEquals(wrote, { suggest: 2 });
+});
+
+Deno.test("Plus keeps going past ten", async () => {
+  const ok = await consumeQuota(stub({ parse: 10, locate: 0, suggest: 0 }, true, () => {}), "u1", "parse");
+  assertEquals(ok, true);
+});
+
+Deno.test("Plus stops at fifty", async () => {
+  const ok = await consumeQuota(stub({ parse: 45, locate: 0, suggest: 5 }, true, () => {}), "u1", "parse");
+  assertEquals(ok, false);
 });

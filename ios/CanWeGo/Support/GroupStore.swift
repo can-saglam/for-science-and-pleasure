@@ -221,7 +221,7 @@ final class GroupStore {
             case "full":
                 return "This group already has four people, the most a group can hold."
             case "plus_required":
-                return "Free groups have two seats. Plus, coming soon, opens two more."
+                return "Free groups have two seats. Plus opens two more."
             default:
                 return "Something went wrong. Please try again."
             }
@@ -358,7 +358,7 @@ final class GroupStore {
     /// The function's outcome codes, in sentences.
     private static func wording(_ code: String) -> String {
         switch code {
-        case "plus_required": return "Free groups have two seats. Plus, coming soon, opens two more."
+        case "plus_required": return "Free groups have two seats. Plus opens two more."
         case "full": return "This group already has four people, the most a group can hold."
         case "already_solo": return "You\u{2019}re the only one left in this group. It\u{2019}s already yours, so there\u{2019}s nothing to leave."
         case "no_group": return "Couldn\u{2019}t find your group. Try again in a moment."

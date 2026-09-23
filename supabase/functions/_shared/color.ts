@@ -138,11 +138,8 @@ export function ogImageFromHtml(html: string, pageUrl: string): string | null {
   for (const key of wanted) {
     const value = found.get(key);
     if (value) {
-      try {
-        return httpsOnly(new URL(value.trim(), pageUrl).toString());
-      } catch {
-        continue;
-      }
+      const url = imageUrl(value, pageUrl);
+      if (url) return url;
     }
   }
   return null;
@@ -152,6 +149,30 @@ export function ogImageFromHtml(html: string, pageUrl: string): string | null {
 // http:// og:image URLs. Modern CDNs all serve https.
 function httpsOnly(url: string): string {
   return url.replace(/^http:\/\//i, "https://");
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/// An image URL as written in the page, made fetchable: HTML entities
+/// decoded (Eventbrite's proxy 400s on a literal `&amp;`), resolved against
+/// the page, and a Next.js `/_next/image?url=` proxy unwrapped to the image
+/// it resizes — the proxy only serves the widths the site whitelisted.
+function imageUrl(raw: string, pageUrl: string): string | null {
+  try {
+    let url = new URL(decodeEntities(raw.trim()), pageUrl);
+    const inner = url.pathname.endsWith("/_next/image") ? url.searchParams.get("url") : null;
+    if (inner) url = new URL(inner, url);
+    return httpsOnly(url.toString());
+  } catch {
+    return null;
+  }
 }
 
 // JSON-LD "image" values come as a string, an array, or an ImageObject.
@@ -205,11 +226,8 @@ export function heroImageFromHtml(html: string, pageUrl: string): string | null 
   }
   // Stable: ties keep document order.
   for (const { url } of ld.sort((a, b) => a.rank - b.rank)) {
-    try {
-      return httpsOnly(new URL(url, pageUrl).toString());
-    } catch {
-      continue;
-    }
+    const resolved = imageUrl(url, pageUrl);
+    if (resolved) return resolved;
   }
 
   let best: { src: string; width: number } | null = null;
@@ -218,14 +236,7 @@ export function heroImageFromHtml(html: string, pageUrl: string): string | null 
     if (!candidate) continue;
     if (!best || candidate.width > best.width) best = candidate;
   }
-  if (best) {
-    try {
-      return httpsOnly(new URL(best.src.replace(/&amp;/g, "&"), pageUrl).toString());
-    } catch {
-      return null;
-    }
-  }
-  return null;
+  return best ? imageUrl(best.src, pageUrl) : null;
 }
 
 /// Page chrome never makes a good thumbnail.

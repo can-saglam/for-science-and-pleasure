@@ -68,15 +68,20 @@ private struct RootGate: View {
             } else {
                 cameFromFrontDoor = true
                 Task { await decideOnboarding() }
+                Task { await PlusStore.shared.reconcile() }
             }
         }
         .task {
+            // Before anything else can buy: StoreKit delivers renewals and
+            // purchases from other devices to whoever is listening.
+            PlusStore.shared.start()
             if auth.signedIn { await decideOnboarding() }
         }
         // The first run's theme choice reaches the home-screen icon here,
         // in the background, where iOS swaps it without the alert.
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { old, phase in
             if phase == .background { ThemeStore.shared.syncAppIconIfPending() }
+            if phase == .active, old == .background { Task { await PlusStore.shared.reconcile() } }
         }
         // An invite link. Parked for whichever screen can use it: the
         // first-run's code page (a new install), or the Join sheet.

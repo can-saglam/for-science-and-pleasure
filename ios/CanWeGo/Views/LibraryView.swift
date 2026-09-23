@@ -950,6 +950,7 @@ struct LibraryView: View {
     private var chipRow: some View {
         ChipRow(
             categories: categories,
+            capCounts: CategoryCap.applies ? CategoryCap.tally(items) : [:],
             areas: areas,
             category: $category,
             area: $area
@@ -964,6 +965,9 @@ struct LibraryView: View {
 /// not the whole page (sections, sorts and all) behind it.
 private struct ChipRow: View {
     let categories: [String]
+    /// Free groups only: active saves per category key, for the "3/4"
+    /// shown once a category is one away from the cap.
+    let capCounts: [String: Int]
     let areas: [String]
     @Binding var category: String?
     @Binding var area: String?
@@ -978,7 +982,7 @@ private struct ChipRow: View {
             HStack(spacing: 8) {
                 if categories.count > 1 {
                     ForEach(categories, id: \.self) { c in
-                        chip(Item.categoryLabel(c), isOn: category == c) {
+                        chip(Item.categoryLabel(c), isOn: category == c, cap: capCounts[CategoryCap.key(c)]) {
                             category = category == c ? nil : c
                         }
                     }
@@ -1004,15 +1008,24 @@ private struct ChipRow: View {
         // the list remeasures that on every drag.
     }
 
-    private func chip(_ label: String, isOn: Bool, toggle: @escaping () -> Void) -> some View {
-        Button {
+    private func chip(_ label: String, isOn: Bool, cap: Int? = nil, toggle: @escaping () -> Void) -> some View {
+        let shown = cap.flatMap { $0 >= CategoryCap.limit - 1 ? min($0, CategoryCap.limit) : nil }
+        return Button {
             Haptics.selection()
             withAnimation(.snappy) { toggle() }
         } label: {
-            Text(label)
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
+            HStack(spacing: 5) {
+                Text(label)
+                if let shown {
+                    Text("\(shown)/\(CategoryCap.limit)")
+                        .monospacedDigit()
+                        .opacity(0.6)
+                        .accessibilityLabel("\(shown) of \(CategoryCap.limit)")
+                }
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])

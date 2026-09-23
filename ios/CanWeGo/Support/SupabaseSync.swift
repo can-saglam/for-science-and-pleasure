@@ -132,6 +132,7 @@ enum SupabaseSync {
         SavedURLIndex.rebuild(from: fresh)
         SpotlightIndex.sync(items: fresh)
         WidgetStore.sync(items: fresh)
+        CategoryCap.publish(fresh)
         await MembersStore.shared.refresh()
         await HomeStore.shared.refresh()
     }
@@ -291,6 +292,13 @@ enum SupabaseSync {
         guard let first = stuck.first else { return nil }
         let title = first.title.isEmpty ? "One save" : "“\(first.title)”"
         let more = stuck.count > 1 ? " and \(stuck.count - 1) more" : ""
+        // The category cap trigger: someone else took the last slot first.
+        if rejectedDetail?.contains("category_full") == true, let category = first.category {
+            return SyncProblem(
+                message: "\(title)\(more) is only on this phone: \(CategoryCap.plural(category)) is full on the free plan. Plus removes the limit.",
+                detail: rejectedDetail
+            )
+        }
         return SyncProblem(
             message: "\(title)\(more) couldn't be synced. Editing it will retry.",
             detail: rejectedDetail

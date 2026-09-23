@@ -218,10 +218,23 @@ struct ShareView: View {
         }
         .padding(.top, 4)
 
-        Text("It'll appear in the app the next time you open it.")
+        // The app holds a save that would overflow a full free category in
+        // the inbox and asks about Plus when it opens; nothing is lost.
+        if !draft.isDone, draft.timeBucket != .past, CategoryCap.lastKnownFull(draft.category),
+           let category = draft.category {
+            Label(
+                "\(CategoryCap.plural(category)) is full on the free plan. This will wait in your inbox; open Can We Go? to finish.",
+                systemImage: "tray.full"
+            )
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text("It'll appear in the app the next time you open it.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+        }
     }
 
     private var duplicateBlock: some View {

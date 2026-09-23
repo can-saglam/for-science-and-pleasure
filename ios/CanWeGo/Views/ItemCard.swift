@@ -397,6 +397,7 @@ struct ItemCardRow: View {
 
     @Environment(\.modelContext) private var context
     @State private var celebrate = 0
+    @State private var paywall: PlusReason?
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
     @State private var undoBin = UndoBin.shared
@@ -434,7 +435,7 @@ struct ItemCardRow: View {
         .accessibilityHint("Opens the details")
         .accessibilityAction(named: item.isDone ? "Put back" : Voice.didGo) {
             if item.isDone {
-                item.putBack()
+                putBack()
             } else {
                 celebrate += 1
                 item.markDone()
@@ -449,7 +450,7 @@ struct ItemCardRow: View {
             if item.isDone {
                 Button {
                     Haptics.tap()
-                    item.putBack()
+                    putBack()
                 } label: {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
@@ -477,7 +478,7 @@ struct ItemCardRow: View {
             if item.isDone {
                 Button {
                     Haptics.tap()
-                    item.putBack()
+                    putBack()
                 } label: {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
@@ -518,12 +519,22 @@ struct ItemCardRow: View {
             ActivitySheet(items: [card.image])
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $paywall) { PlusPaywall(reason: $0) { item.putBack() } }
     }
 
     /// The glow: the card's accent pulled toward the ink so it reads on
     /// every theme, including ones whose base is near the accent.
     private var landingColor: Color {
         item.accentColor.mix(with: AppBackground.ink, by: 0.45)
+    }
+
+    /// Back from the journal counts as a new save against a full category.
+    private func putBack() {
+        if let full = CategoryCap.overflow(item, context: context) {
+            paywall = .category(full)
+            return
+        }
+        item.putBack()
     }
 
     /// Deletion always leaves a five-second Undo behind (toast in ContentView).

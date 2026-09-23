@@ -99,7 +99,7 @@ enum ParseClient {
         case 413:
             return "That photo is too big. Try a smaller screenshot."
         case 429:
-            return "Too many saves at once. Give it a minute."
+            return "That\u{2019}s today\u{2019}s reading done. Come back tomorrow, or fill the card in yourself."
         case 500...:
             return "The server tripped over that one. Try again in a moment."
         default:

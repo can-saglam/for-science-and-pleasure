@@ -594,12 +594,12 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [ ] In-app account deletion with export-before-delete
 
 ### Phase 3
-- [ ] 4-active-items-per-category cap (active = saved and not ended): DB trigger on transitions to active (insert or putBack), ignoring routine upserts, bypassed by the membership function; paywall sheet; "n / 4" chips
-- [ ] Unprompted upgrade: Plus row in Settings + button on the My group card
-- [ ] Parse-then-paywall ordering; share extension parks capped saves in the inbox
-- [ ] CanWeGo Plus via StoreKit 2 + `record-entitlement` function writing per-user rows (no webhook); `group_is_plus`; Restore/Manage; `displayPrice`
-- [ ] Nightly entitlement re-verification cron against the App Store Server API
-- [ ] Per-user daily AI quota (10 free / 50 Plus) in limits.ts
+- [x] 4-active-items-per-category cap (active = saved and not ended): DB trigger on transitions to active (insert or putBack), ignoring routine upserts, bypassed by the membership function; paywall sheet; "n / 4" chips — `0030_plus_cap.sql` (tested in a rolled-back transaction, **not yet applied**; uncategorised saves never count), `CategoryCap` mirror, `PlusPaywall`, "3/4" on chips from 3 up
+- [x] Unprompted upgrade: Plus section in Settings under My group (status, Manage, Restore); "Invite people" on a full free group opens the same paywall
+- [x] Parse-then-paywall ordering (capture and put-back; saves itself once Plus lands); share extension parks capped saves in the inbox, the app asks once and imports them when there's room
+- [x] CanWeGo Plus via StoreKit 2 + `record-entitlement` function writing per-user rows (no webhook); `group_is_plus`; Restore/Manage; `displayPrice` — `PlusStore` (appAccountToken = user id, finish only once recorded, daily re-post), `SubscriptionStoreView`, `ios/Plus.storekit` for local runs. **Still needed:** the two products in App Store Connect and the `ASC_*` secrets
+- [x] Nightly entitlement re-verification cron against the App Store Server API (`verify-entitlements` + `0031_plus_jobs.sql`, not yet applied)
+- [x] Per-user daily AI quota (10 free / 50 Plus), shared across parse/locate/suggest, in `_shared/quota.ts`
 
 ### Phase 4
 - [ ] Legal pages, App Store assets, privacy labels

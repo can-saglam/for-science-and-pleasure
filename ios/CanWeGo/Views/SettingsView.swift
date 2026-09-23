@@ -78,6 +78,8 @@ struct SettingsView: View {
 
                 GroupSection(ui: groupUI)
 
+                PlusSection()
+
                 Section("Appearance") {
                     // The same one-tap swatch row as the first run: the
                     // whole sheet repaints under the finger, no sub-screen.

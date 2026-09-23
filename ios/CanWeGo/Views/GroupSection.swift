@@ -323,7 +323,7 @@ struct GroupPresentations: ViewModifier {
         content
             .task { await group.refresh() }
             .sheet(item: $ui.invite) { InviteSheet(invite: $0, groupName: card?.name ?? "the group") }
-            .sheet(isPresented: $ui.showPlus) { PlusSheet() }
+            .sheet(isPresented: $ui.showPlus) { PlusPaywall(reason: .seats) }
             .sheet(isPresented: $ui.showJoin) { JoinSheet() }
             .alert(
                 "You\u{2019}ve left \(ui.left?.result.formerGroupName ?? "the group")",
@@ -403,63 +403,6 @@ struct InviteSheet: View {
             .appBackground(AppBackground.sheet)
             .sheetTitle(groupName) {
                 dismiss()
-            }
-        }
-        .presentationDetents([.fraction(0.55), .large])
-        .presentationDragIndicator(.visible)
-        .appColorScheme()
-    }
-}
-
-/// Where "Invite people" leads when a free group is full. Stands in for the
-/// paywall until Plus ships (Phase 3); same shape, so the swap is one view.
-struct PlusSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                Spacer(minLength: 0)
-                Image(systemName: "person.3.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(AppBackground.accent)
-                VStack(spacing: 8) {
-                    Text("Room for two more")
-                        .font(.displaySmallBold(30, relativeTo: .title2))
-                    Text("Free groups have two seats. Plus opens two more: four people, one library, everyone adding and planning together.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Button {
-                    Haptics.tap()
-                    dismiss()
-                } label: {
-                    Text("Coming soon")
-                        .frame(maxWidth: .infinity)
-                }
-                .prominentGlass()
-                .controlSize(.large)
-                Text("Plus isn\u{2019}t available just yet. It arrives with an upcoming release.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .padding(24)
-            .appBackground(AppBackground.sheet)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
             }
         }
         .presentationDetents([.fraction(0.55), .large])

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
+  <meta name="description" content="{{ site.description }}">
+  <style>
+    :root {
+      --base: #f4efe6;
+      --ink: #1d1a16;
+      --muted: #6f675c;
+      --line: #ddd3c3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --base: #16140f; --ink: #f1ebdf; --muted: #a79e90; --line: #332e26; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--base);
+      color: var(--ink);
+      font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+    main { max-width: 640px; margin: 0 auto; padding: 48px 24px 72px; }
+    nav { display: flex; gap: 20px; margin-bottom: 40px; font-size: 15px; }
+    nav a:first-child { font-weight: 700; margin-right: auto; }
+    a { color: inherit; text-underline-offset: 3px; }
+    nav a { text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    h1 { font-size: 34px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 24px; }
+    h2 { font-size: 19px; margin: 36px 0 8px; }
+    ul { padding-left: 20px; }
+    li { margin: 6px 0; }
+    footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav>
+      <a href="{{ '/' | relative_url }}">Can We Go?</a>
+      <a href="{{ '/privacy/' | relative_url }}">Privacy</a>
+      <a href="{{ '/terms/' | relative_url }}">Terms</a>
+    </nav>
+    {{ content }}
+    <footer>Can We Go? for iPhone</footer>
+  </main>
+</body>
+</html>

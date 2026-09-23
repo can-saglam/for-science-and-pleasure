@@ -33,6 +33,8 @@ struct CaptureView: View {
     @State private var headerHeight: CGFloat = 0
     @State private var inputHeight: CGFloat = 0
     @State private var confirmDiscard = false
+    /// Set when Save meets a full category: the card stays, Plus is offered.
+    @State private var paywall: PlusReason?
 
     private var inputDetent: PresentationDetent {
         guard inputHeight > 0 else { return .medium }
@@ -120,6 +122,11 @@ struct CaptureView: View {
         .onChange(of: text) { _, _ in
             existing = nil
             saveAnyway = false
+        }
+        .sheet(item: $paywall) { reason in
+            PlusPaywall(reason: reason) {
+                if let draft { commit(draft) }
+            }
         }
     }
 
@@ -262,6 +269,16 @@ struct CaptureView: View {
             .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
             // Not `.disabled`: that would grey the button out under "Saved".
             .allowsHitTesting(!saved)
+
+            if !saved, !draft.isDone, let full = CategoryCap.overflow(draft, context: context) {
+                Label(
+                    "\(CategoryCap.plural(full)) already has \(CategoryCap.limit) coming up. Saving this one needs Plus, or a different category.",
+                    systemImage: "lock"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if !saved, manual {
                 // A blank card is always in edit mode and the × already
@@ -446,7 +463,18 @@ struct CaptureView: View {
         }
     }
 
+    /// Parse first, paywall second: the finished card is on screen when a
+    /// full category is mentioned, and it saves itself once Plus lands.
     private func save(_ item: Item) {
+        if !item.isDone, let full = CategoryCap.overflow(item, context: context) {
+            Haptics.tap()
+            paywall = .category(full)
+            return
+        }
+        commit(item)
+    }
+
+    private func commit(_ item: Item) {
         item.createdAt = .now
         item.updatedAt = .now
         item.stampAuthor()

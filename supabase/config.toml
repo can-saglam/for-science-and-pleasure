@@ -435,3 +435,9 @@ verify_jwt = true
 
 [functions.delete-account]
 verify_jwt = true
+
+[functions.record-entitlement]
+verify_jwt = true
+
+[functions.verify-entitlements]
+verify_jwt = false
