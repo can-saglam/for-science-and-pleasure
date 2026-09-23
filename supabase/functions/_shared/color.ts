@@ -13,18 +13,28 @@ interface Rgba {
   height: number;
 }
 
+/// Largest picture decoded for its colour. A 10 MP photo decodes to ~40 MB
+/// of RGBA plus the decoder's own buffers — past the edge worker's memory
+/// limit, which kills the whole request (546), not just the colour.
+const MAX_DECODE_MP = 4;
+
 async function decodeRgba(bytes: Uint8Array): Promise<Rgba | null> {
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     const m = await import("npm:jpeg-js@0.4.4");
     const decode = m.decode ?? m.default.decode;
+    // Both limits throw before the pixel buffers are allocated.
     const img = decode(bytes, {
       useTArray: true,
       formatAsRGBA: true,
-      maxMemoryUsageInMB: 256,
+      maxResolutionInMP: MAX_DECODE_MP,
+      maxMemoryUsageInMB: 96,
     });
     return { data: img.data, width: img.width, height: img.height };
   }
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    // IHDR is always the first chunk: width and height at bytes 16–23.
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 24 || view.getUint32(16) * view.getUint32(20) > MAX_DECODE_MP * 1_000_000) return null;
     const m = await import("npm:pngjs@7.0.0");
     const PNG = m.PNG ?? m.default.PNG;
     const img = PNG.sync.read(Buffer.from(bytes));
@@ -370,11 +380,19 @@ export function wikipediaThumbnailFromSummary(json: unknown, query: string): str
   if (page.type === "disambiguation") return null;
   const title = typeof page.title === "string" ? page.title : "";
   if (!wikipediaTitlesOverlap(query, title)) return null;
-  const original = page.originalimage as { source?: string } | undefined;
+  const original = page.originalimage as { source?: string; width?: number } | undefined;
   const thumb = page.thumbnail as { source?: string } | undefined;
-  const src = original?.source ?? thumb?.source;
+  // Commons originals run to 10+ MP and several MB — too heavy for a card,
+  // and decoding one for its colour blows the edge worker's memory. The
+  // thumb URL's width step is swapped for 1280, one of Wikimedia's sizes.
+  const sized = (original?.width ?? 0) > WIKI_WIDTH && thumb?.source && /\/\d+px-/.test(thumb.source)
+    ? thumb.source.replace(/\/\d+px-/, `/${WIKI_WIDTH}px-`)
+    : null;
+  const src = sized ?? original?.source ?? thumb?.source;
   return typeof src === "string" && /^https:\/\//i.test(src) ? src : null;
 }
+
+const WIKI_WIDTH = 1280;
 
 export async function wikipediaImage(query: string): Promise<string | null> {
   const path = encodeURIComponent(query.replace(/ /g, "_"));

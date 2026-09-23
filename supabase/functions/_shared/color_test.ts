@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  colorFromImageBytes,
   heroImageFromHtml,
   largestImageCandidate,
   wikipediaQueries,
@@ -194,4 +195,34 @@ Deno.test("Wikipedia summary: keep a matching original image, drop disambiguatio
     wikipediaThumbnailFromSummary(page, "Somewhere Else Festival"),
     null,
   );
+});
+
+Deno.test("Wikipedia summary: a huge original is swapped for the 1280px thumb (İzmir)", () => {
+  const page = {
+    type: "standard",
+    title: "İzmir Archaeological Museum",
+    thumbnail: {
+      source: "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1e/Museo.JPG/330px-Museo.JPG?utm_source=en.wikipedia.org",
+      width: 330,
+    },
+    originalimage: { source: "https://upload.wikimedia.org/wikipedia/commons/1/1e/Museo.JPG", width: 3648 },
+  };
+  assertEquals(
+    wikipediaThumbnailFromSummary(page, "İzmir Archaeology Museum"),
+    "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1e/Museo.JPG/1280px-Museo.JPG?utm_source=en.wikipedia.org",
+  );
+  const small = { ...page, originalimage: { ...page.originalimage, width: 900 } };
+  assertEquals(
+    wikipediaThumbnailFromSummary(small, "İzmir Archaeology Museum"),
+    "https://upload.wikimedia.org/wikipedia/commons/1/1e/Museo.JPG",
+  );
+});
+
+Deno.test("a PNG too big to decode safely yields no colour instead of decoding", async () => {
+  const png = new Uint8Array(33);
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const view = new DataView(png.buffer);
+  view.setUint32(16, 5000);
+  view.setUint32(20, 4000);
+  assertEquals(await colorFromImageBytes(png), null);
 });
