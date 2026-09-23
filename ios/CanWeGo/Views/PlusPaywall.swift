@@ -684,11 +684,13 @@ private extension PlusReason {
 
 /// Settings' way in, unprompted: the paywall, and the two rows App Review
 /// looks for — Restore Purchases and Manage Subscription.
+/// The Settings rows for Plus. Its sheets hang off the Settings list: one
+/// attached to a list section tears Settings down along with it.
 struct PlusSection: View {
+    @Binding var showPaywall: Bool
+    @Binding var manage: Bool
     @State private var group = GroupStore.shared
     @State private var plus = PlusStore.shared
-    @State private var showPaywall = false
-    @State private var manage = false
     @State private var restoring = false
     @State private var note: String?
 
@@ -749,8 +751,6 @@ struct PlusSection: View {
                 }
             }
             .listRowBackground(SettingsView.rowBackground)
-            .sheet(isPresented: $showPaywall) { PlusPaywall() }
-            .manageSubscriptionsSheet(isPresented: $manage)
         }
     }
 }

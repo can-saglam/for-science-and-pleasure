@@ -87,17 +87,16 @@ struct HomeCitySheet: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Home city")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
+            .scrollDismissesKeyboard(.interactively)
+            .appBackground(AppBackground.sheet)
+            .sheetTitle("Home city") {
+                dismiss()
             }
         }
         .foregroundStyle(AppBackground.ink)
         .appColorScheme()
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
         .onAppear { focused = true }
     }
 

@@ -3,6 +3,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var groupUI = GroupUI()
+    @State private var showPlus = false
+    @State private var manageSubscription = false
     /// Translucent panel rows on the theme wash.
     static var rowBackground: Color { AppBackground.wash(0.08) }
 
@@ -78,7 +80,7 @@ struct SettingsView: View {
 
                 GroupSection(ui: groupUI)
 
-                PlusSection()
+                PlusSection(showPaywall: $showPlus, manage: $manageSubscription)
 
                 Section("Appearance") {
                     // The same one-tap swatch row as the first run: the
@@ -336,6 +338,15 @@ struct SettingsView: View {
             }
             // The group rows' alerts, invite sheet and leave dialog.
             .modifier(GroupPresentations(ui: groupUI))
+            .sheet(isPresented: $showPlus) { PlusPaywall() }
+            .manageSubscriptionsSheet(isPresented: $manageSubscription)
+            // CWG_SETTINGS=plus is only set by automated test runs.
+            .task {
+                if ProcessInfo.processInfo.environment["CWG_SETTINGS"] == "plus" {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    showPlus = true
+                }
+            }
         }
         .presentationDetents([.large])
         .onDisappear(perform: syncAppIcon)

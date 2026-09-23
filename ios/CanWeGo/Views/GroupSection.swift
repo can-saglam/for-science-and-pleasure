@@ -44,6 +44,10 @@ final class GroupUI {
     /// The group is full for its tier; the invite row opens the upsell.
     var showPlus = false
     var showJoin = false
+    var editingHome = false
+    var renaming = false
+    var draftName = ""
+    var savingName = false
     var confirmLeave = false
     var leaving = false
     var left: (result: GroupStore.LeaveResult, landed: Bool)?
@@ -69,6 +73,18 @@ final class GroupUI {
             let fresh = try await group.invite()
             invite = fresh
         }
+    }
+
+    func saveName() async {
+        savingName = true
+        defer { savingName = false }
+        note = nil
+        if let problem = await MembersStore.shared.setDisplayName(draftName) {
+            note = problem
+            return
+        }
+        Haptics.success()
+        await group.refresh()
     }
 
     func leave(keepCopy: Bool, context: ModelContext) async {
@@ -98,7 +114,6 @@ final class GroupUI {
 struct GroupSection: View {
     @Bindable var ui: GroupUI
     @State private var group = GroupStore.shared
-    @State private var editingHome = false
     @Environment(\.modelContext) private var context
 
     private var me: UUID? { SupabaseAuth.shared.userId }
@@ -126,9 +141,6 @@ struct GroupSection: View {
             }
             .listRowBackground(SettingsView.rowBackground)
             .disabled(ui.leaving)
-            .sheet(isPresented: $editingHome) {
-                HomeCitySheet()
-            }
         }
     }
 
@@ -142,24 +154,23 @@ struct GroupSection: View {
 
         Button {
             Haptics.tap()
-            editingHome = true
+            ui.editingHome = true
         } label: {
-            if let home = card.homeLocality, !home.isEmpty {
-                LabeledContent {
-                    Text(home)
-                } label: {
+            HStack {
+                if let home = card.homeLocality, !home.isEmpty {
                     SettingsRow(title: "City", icon: "building.2.fill")
-                }
-            } else {
-                HStack {
+                    Spacer()
+                    Text(home)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
                     SettingsRow(title: "Set a home city", icon: "building.2.fill")
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppBackground.ink.opacity(0.45))
                 }
+                chevron
             }
         }
+        .accessibilityHint("Changes the city your cards and map use")
 
         // One call to action, always present until the group is at four.
         // With room: a live code is reused (codes are multi-use and last a
@@ -258,11 +269,40 @@ struct GroupSection: View {
         return lines.joined(separator: "\n\n")
     }
 
-    /// Names come from Apple (or the account), so rows only show; nothing
-    /// here is tappable.
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(AppBackground.ink.opacity(0.45))
+            .accessibilityHidden(true)
+    }
+
+    /// Your own row renames you; everyone else's only shows.
+    @ViewBuilder
     private func memberRow(_ member: GroupCard.Member) -> some View {
-        let isMe = member.userId == me
-        return HStack(spacing: 12) {
+        if member.userId == me {
+            Button {
+                Haptics.tap()
+                ui.draftName = member.displayName ?? ""
+                ui.renaming = true
+            } label: {
+                HStack {
+                    memberLabel(member, isMe: true)
+                    if ui.savingName { ProgressView() } else { chevron }
+                }
+            }
+            .disabled(ui.savingName)
+            .accessibilityHint("Changes your name")
+        } else {
+            // The hidden chevron keeps Plus badges in one column with yours.
+            HStack {
+                memberLabel(member, isMe: false)
+                chevron.hidden()
+            }
+        }
+    }
+
+    private func memberLabel(_ member: GroupCard.Member, isMe: Bool) -> some View {
+        HStack(spacing: 12) {
             Text(member.initial)
                 .font(.footnote.weight(.bold))
                 // Per-swatch ink, the same as Join: white on the deep
@@ -325,6 +365,24 @@ struct GroupPresentations: ViewModifier {
             .sheet(item: $ui.invite) { InviteSheet(invite: $0, groupName: card?.name ?? "the group") }
             .sheet(isPresented: $ui.showPlus) { PlusPaywall(reason: .seats) }
             .sheet(isPresented: $ui.showJoin) { JoinSheet() }
+            .sheet(isPresented: $ui.editingHome) { HomeCitySheet() }
+            .alert("Your name", isPresented: $ui.renaming) {
+                TextField("Name", text: $ui.draftName)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                Button("Save") { Task { await ui.saveName() } }
+                    .disabled(ui.draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("It\u{2019}s how you appear to your group, on the cards you add and in the group\u{2019}s name.")
+            }
+            // CWG_SETTINGS=city is only set by automated test runs.
+            .task {
+                if ProcessInfo.processInfo.environment["CWG_SETTINGS"] == "city" {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    ui.editingHome = true
+                }
+            }
             .alert(
                 "You\u{2019}ve left \(ui.left?.result.formerGroupName ?? "the group")",
                 isPresented: Binding(get: { ui.left != nil }, set: { if !$0 { ui.left = nil } })
