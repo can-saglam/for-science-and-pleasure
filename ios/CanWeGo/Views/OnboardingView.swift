@@ -146,6 +146,8 @@ struct OnboardingView: View {
     @State private var drift = false
     /// Welcome's card fan has been dealt (once per run of the flow).
     @State private var dealt = false
+    /// The joined page's fan of the group's own saves, dealt on arrival.
+    @State private var joinedDealt = false
     /// A finger on one of the fan's cards: how far it's been pulled from
     /// its seat, and which one is up off the table.
     @State private var pulled: [Int: CGSize] = [:]
@@ -562,7 +564,9 @@ struct OnboardingView: View {
     /// asked of them; returning ones skip the whole run.
     private var welcomePage: some View {
         VStack(spacing: 22) {
-            cardFan
+            cardFan(Self.sampleCards, seats: Self.seats, dealt: dealt, key: 0)
+                .frame(height: 250)
+                .accessibilityHidden(true)
                 .padding(.bottom, 18)
                 // Drawn over the wordmark and button below, so a card
                 // pulled down travels across the page, not under it.
@@ -613,21 +617,35 @@ struct OnboardingView: View {
         (0.0, 12.0, 58.0),
     ]
 
-    /// What the app makes, before anyone is asked for anything: four
-    /// cards dealt into a loose stack, then drifting a little. Real
-    /// `ItemCard`s on made-up saves with bundled photos, so the look is
-    /// exactly the library's — countdown badge, melt and all. Each one
-    /// can be picked up and pulled about; it springs back to its seat.
-    private var cardFan: some View {
+    /// The joined page's seats for up to three cards, back to front: the
+    /// welcome cascade's front three, re-centred on however many there are.
+    /// Real titles run long, so the cards are wider (less sideways room)
+    /// and further apart (a wrapped title still shows above the next card).
+    private static func joinedSeats(_ count: Int) -> [(Double, Double, Double)] {
+        let picked = Array(seats.suffix(count))
+        let mid = picked.map(\.2).reduce(0, +) / Double(max(picked.count, 1))
+        return picked.map { ($0.0, $0.1 * 0.5, ($0.2 - mid) * 1.4) }
+    }
+
+    /// Cards dealt into a loose stack, then drifting a little: welcome's
+    /// made-up saves, and the joined page's real ones. Real `ItemCard`s,
+    /// so the look is exactly the library's — countdown badge, melt and
+    /// all. Each one can be picked up and pulled about; it springs back to
+    /// its seat. `items` and `seats` run back to front; `key` keeps each
+    /// fan's pulls apart.
+    private func cardFan(
+        _ items: [Item], seats: [(Double, Double, Double)], dealt: Bool, key: Int, width: CGFloat = 280
+    ) -> some View {
         ZStack {
-            ForEach(Array(Self.sampleCards.enumerated()), id: \.offset) { i, item in
-                let seat = Self.seats[i]
-                let front = i == Self.seats.count - 1
-                let sway = front ? 0.0 : (i.isMultiple(of: 2) ? 1.0 : -1.0)
+            ForEach(Array(items.prefix(seats.count).enumerated()), id: \.offset) { index, item in
+                let i = key + index
+                let seat = seats[index]
+                let front = index == min(items.count, seats.count) - 1
+                let sway = front ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
                 let pull = pulled[i] ?? .zero
                 let held = lifted == i
                 ItemCard(item: item)
-                    .frame(width: 280)
+                    .frame(width: width)
                     // A held card tilts with the pull, like a card on a
                     // table dragged from one edge.
                     .rotationEffect(.degrees((dealt ? seat.0 + (drift ? 1.2 : -1.2) * sway : 0) + pull.width / 16))
@@ -643,10 +661,10 @@ struct OnboardingView: View {
                     )
                     // Depth is fixed: a card pulled out from the middle
                     // of the stack stays in the middle of the stack.
-                    .zIndex(Double(i))
+                    .zIndex(Double(index))
                     // Dealt back to front, a beat apart.
                     .animation(
-                        reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(i) * 0.13),
+                        reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(index) * 0.13),
                         value: dealt
                     )
                     .animation(reduceMotion ? nil : .spring(duration: 0.3), value: held)
@@ -680,9 +698,7 @@ struct OnboardingView: View {
                     )
             }
         }
-        .frame(height: 250)
         .animation(reduceMotion ? nil : .easeInOut(duration: 5).repeatForever(autoreverses: true), value: drift)
-        .accessibilityHidden(true)
     }
 
     /// Four saves that read like a real week, back to front: an
@@ -1224,15 +1240,21 @@ struct OnboardingView: View {
 
     /// In the preview any well-formed code "belongs" to Joyce, so the
     /// join flow can be walked end to end without a second account.
-    private static let previewInvite = GroupStore.JoinPreview(
-        status: "ok",
-        inviter: "Joyce",
-        name: "Joyce's library",
-        homeLocality: "London",
-        capacity: 2,
-        isPlus: false,
-        members: [.init(displayName: "Joyce", avatarColour: "coral")]
-    )
+    /// `CWG_ONBOARDING_MEMBERS=Joyce,Sam` (test runs only) previews a
+    /// bigger group; the first name is the inviter.
+    private static var previewInvite: GroupStore.JoinPreview {
+        let names = ProcessInfo.processInfo.environment["CWG_ONBOARDING_MEMBERS"]?
+            .split(separator: ",").map(String.init) ?? ["Joyce"]
+        return GroupStore.JoinPreview(
+            status: "ok",
+            inviter: names.first,
+            name: "\(names.first ?? "Joyce")'s library",
+            homeLocality: "London",
+            capacity: max(2, names.count + 1),
+            isPlus: names.count > 1,
+            members: names.map { .init(displayName: $0, avatarColour: "coral") }
+        )
+    }
 
     private func lookup(_ code: String) async {
         lookingUp = true
@@ -1318,24 +1340,64 @@ struct OnboardingView: View {
 
     // MARK: Joined
 
-    private var joinedName: String {
-        codePreview?.inviter ?? codePreview?.name ?? "they"
+    /// Everyone else in the group once joined, the one who invited first.
+    private var groupmates: [String] {
+        var names: [String]
+        if !preview, let card = group.card, card.members.count > 1 {
+            let me = SupabaseAuth.shared.userId
+            names = card.members.filter { $0.userId != me }.map(\.name)
+        } else if joined, let invite = codePreview {
+            names = (invite.members ?? []).map(\.name)
+            if names.isEmpty, let inviter = invite.inviter { names = [inviter] }
+        } else {
+            return []
+        }
+        if let inviter = codePreview?.inviter, let i = names.firstIndex(of: inviter) {
+            names.insert(names.remove(at: i), at: 0)
+        }
+        return names
+    }
+
+    /// "Joyce", "Joyce and Sam", "Joyce, Sam and Alex" (or "or").
+    private static func listed(_ names: [String], _ conjunction: String) -> String {
+        guard let last = names.last else { return "" }
+        guard names.count > 1 else { return last }
+        return names.dropLast().joined(separator: ", ") + " \(conjunction) " + last
     }
 
     private var joinedPage: some View {
         VStack(alignment: .leading, spacing: 18) {
             headline("You're in.")
             if groupCards.isEmpty {
-                lede("Nothing saved yet — you'll be the first. Anything either of you shares into the app lands here for both of you.")
+                lede(groupmates.count > 1
+                     ? "Nothing saved yet — you'll be the first. Anything any of you shares into the app lands here for all of you."
+                     : "Nothing saved yet — you'll be the first. Anything either of you shares into the app lands here for both of you.")
             } else {
-                lede("Some of what \(joinedName) has saved so far. It's your library now too: edit anything, add anything.")
-                ForEach(groupCards.prefix(3)) { item in
-                    ItemCard(item: item)
-                }
+                let who = groupmates.isEmpty ? "they" : Self.listed(groupmates, "and")
+                lede("Some of what \(who) \(groupmates.count > 1 || groupmates.isEmpty ? "have" : "has") saved so far. It's your library now too: edit anything, add anything.")
+                let shown = Array(groupCards.prefix(3))
+                let seats = Self.joinedSeats(shown.count)
+                // Newest in front: the fan runs back to front.
+                cardFan(shown.reversed(), seats: seats, dealt: joinedDealt, key: 100, width: 320)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120 + CGFloat((seats.map(\.2).max() ?? 0) - (seats.map(\.2).min() ?? 0)))
+                    .padding(.vertical, 8)
+                    .zIndex(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(shown.map(\.title).joined(separator: ", "))
+                    .onAppear {
+                        guard !joinedDealt else { return }
+                        if reduceMotion { joinedDealt = true; return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(0.25))
+                            joinedDealt = true
+                        }
+                    }
                 if groupCards.count > 3 {
                     Text("…and \(groupCards.count - 3) more in the library.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
                 }
             }
             themeSwatches
@@ -1937,12 +1999,10 @@ struct OnboardingView: View {
 
     // MARK: Notify
 
+    /// "Joyce", or "Joyce or Sam" in a bigger group: who the new-save
+    /// ping is about.
     private var partnerName: String? {
-        guard !preview, let card = group.card, card.members.count > 1 else {
-            return joined ? codePreview?.members?.first?.name : nil
-        }
-        let me = SupabaseAuth.shared.userId
-        return card.members.first { $0.userId != me }?.name
+        groupmates.isEmpty ? nil : Self.listed(groupmates, "or")
     }
 
     private var notifyPage: some View {

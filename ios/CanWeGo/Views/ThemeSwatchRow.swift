@@ -4,7 +4,7 @@ import SwiftUI
 /// the name of the current one at the trailing end. The same row on the
 /// first-run's "There it is." page and in Settings, so the two agree.
 struct ThemeSwatchRow: View {
-    var title = "Make it yours"
+    var title = "Choose your theme"
     /// Runs on a pick of a *different* theme; the caller decides how to
     /// commit (the first run previews and commits, Settings also flips
     /// the home-screen icon).
