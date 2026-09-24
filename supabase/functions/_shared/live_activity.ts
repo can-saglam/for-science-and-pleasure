@@ -1,20 +1,26 @@
-// Live Activities on reminder days. From 09:00 on the home clock, every
-// save on its reminder day goes onto each group member's Lock Screen and
-// Dynamic Island (push-to-start); from 17:00 it's ended with a dismissal at
-// 18:00, so it's gone by six. Runs beside the reminder push, never instead
-// of it: nothing here touches reminder_runs or the alert.
+// Live Activities on the day. A "morning of" reminder (offset 0) or a
+// hand-picked one puts the save on each group member's Lock Screen and
+// Dynamic Island at the moment its reminder goes off (push-to-start). It
+// runs up to eight hours, the system's cap, and is gone by midnight: the
+// end push goes out in the last dispatcher tick before then, with the
+// dismissal at the exact time. Runs beside the reminder push, never
+// instead of it: nothing here touches reminder_runs or the alert.
 import { sendLiveActivity } from "./apns.ts";
 import type { admin } from "./groups.ts";
 import { groupHome, homeToday } from "./home.ts";
+import { customTimeDue } from "./reminders.ts";
 import { homeInstant, localClock } from "./schedule.ts";
 
 type Db = ReturnType<typeof admin>;
 
-/** Starts from 09:00; after 17:00 only ends. */
-export const START_MINUTE = 9 * 60;
-export const END_MINUTE = 17 * 60;
-/** Off the Lock Screen by 18:00. */
-export const GONE_HOUR = 18;
+/** The system ends a Live Activity after eight hours. */
+export const MAX_HOURS = 8;
+/** Nothing starts this late; it would barely be on screen. */
+export const LAST_START_MINUTE = 23 * 60;
+/** Morning-of presets go off in the 10:00 hour. */
+export const PRESET_MINUTE = 10 * 60;
+/** The dispatcher ticks every 15 minutes: end in the tick before. */
+const TICK_MS = 15 * 60 * 1000;
 
 export interface ActivityItem {
   id: string;
@@ -23,8 +29,12 @@ export interface ActivityItem {
   venue: string | null;
   area: string | null;
   color: string | null;
+  image_url: string | null;
   starts_on: string | null;
   ends_on: string | null;
+  reminder_offset_days: number | null;
+  reminder_anchor: string | null;
+  remind_time: string | null;
 }
 
 export type ActivityResult =
@@ -46,13 +56,13 @@ export function activityLabel(
   endsOn: string | null,
   today: string,
 ): string {
-  if (kind !== "event") return "Reminder";
+  if (kind !== "event") return "Today";
   if (startsOn === today && (endsOn == null || endsOn === today)) return "On today";
   if (endsOn === today) return "Last day";
   if (startsOn === today) return "Opens today";
   if (startsOn && startsOn > today) return `Opens ${inDays(daysBetween(today, startsOn))}`;
   if (endsOn && endsOn > today) return `Closes ${inDays(daysBetween(today, endsOn))}`;
-  return "Reminder";
+  return "Today";
 }
 
 export function activityPlace(item: Pick<ActivityItem, "venue" | "area">): string | null {
@@ -60,28 +70,55 @@ export function activityPlace(item: Pick<ActivityItem, "venue" | "area">): strin
   return parts.length ? parts.join(" · ") : null;
 }
 
+/** A reminder for the day itself: the "morning of" preset, or one picked
+ * by hand. The earlier presets stay notifications. */
+export function isDayOf(item: Pick<ActivityItem, "reminder_offset_days" | "reminder_anchor" | "remind_time">): boolean {
+  if (item.reminder_anchor === "custom") return item.remind_time != null;
+  return item.reminder_offset_days === 0;
+}
+
+/** Its reminder has gone off, and it isn't too late in the day to start. */
+export function startDue(
+  item: Pick<ActivityItem, "reminder_offset_days" | "reminder_anchor" | "remind_time">,
+  clock: { hour: string; minute: string },
+): boolean {
+  const minutes = Number(clock.hour) * 60 + Number(clock.minute);
+  if (!isDayOf(item) || minutes >= LAST_START_MINUTE) return false;
+  if (item.reminder_anchor === "custom") return customTimeDue(item.remind_time!, clock);
+  return minutes >= PRESET_MINUTE;
+}
+
+/** Eight hours on, or midnight on the home clock, whichever comes first. */
+export function activityEnd(timeZone: string, today: string, at: Date): Date {
+  const cap = new Date(at.getTime() + MAX_HOURS * 3_600_000);
+  const midnight = homeInstant(timeZone, today, 24);
+  return cap < midnight ? cap : midnight;
+}
+
 /** The start push. `attributes` and `content-state` mirror the app's
  * `DayActivityAttributes` field for field; the alert is required for a
  * push-to-start, and carries no sound so the reminder push stays the only
  * one that makes a noise. */
-export function startAps(item: ActivityItem, today: string, goneAt: Date): Record<string, unknown> {
+export function startAps(item: ActivityItem, today: string, endsAt: Date): Record<string, unknown> {
   const label = activityLabel(item.kind, item.starts_on, item.ends_on, today);
   const place = activityPlace(item);
+  const end = Math.floor(endsAt.getTime() / 1000);
   const attributes: Record<string, unknown> = {
     itemID: item.id,
     title: item.title,
     kind: item.kind,
     day: today,
-    endsAt: Math.floor(goneAt.getTime() / 1000),
+    endsAt: end,
   };
   if (place) attributes.place = place;
   if (item.color) attributes.colorHex = item.color;
+  if (item.image_url) attributes.imageURL = item.image_url;
   return {
     event: "start",
     "content-state": { label },
     "attributes-type": "DayActivityAttributes",
     attributes,
-    "stale-date": Math.floor(goneAt.getTime() / 1000),
+    "stale-date": end,
     alert: { title: item.title, body: place ? `${label} · ${place}` : label },
   };
 }
@@ -89,9 +126,7 @@ export function startAps(item: ActivityItem, today: string, goneAt: Date): Recor
 export async function runActivities(db: Db, groupId: string, at: Date): Promise<ActivityResult> {
   const home = await groupHome(db, groupId);
   const clock = localClock(home.timezone, at);
-  const minutes = Number(clock.hour) * 60 + Number(clock.minute);
   const today = homeToday(home, at);
-  const goneAt = homeInstant(home.timezone, today, GONE_HOUR);
   const result = { group_id: groupId, started: 0, ended: 0, sent: 0, gone: 0, failed: 0 };
   const tally = (r: string) => {
     if (r === "sent") result.sent++;
@@ -104,14 +139,14 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
   await db.from("live_activity_tokens").delete()
     .lt("updated_at", new Date(at.getTime() - 2 * 86_400_000).toISOString());
 
-  // End: the day's over (17:00 on, dismissed at 18:00) or the save is no
-  // longer on its reminder day (dismissed now).
+  // End: its time is within a tick (dismissed at that time), or the save
+  // is no longer on its reminder day (dismissed now).
   const { data: open } = await db
     .from("live_activity_runs")
-    .select("item_id, remind_at")
+    .select("item_id, remind_at, ends_at")
     .eq("group_id", groupId)
     .is("ended_at", null);
-  const runs = (open ?? []) as { item_id: string; remind_at: string }[];
+  const runs = (open ?? []) as { item_id: string; remind_at: string; ends_at: string | null }[];
   if (runs.length) {
     const { data: rows } = await db
       .from("items")
@@ -122,20 +157,21 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
       const item = byId.get(run.item_id) as
         | { kind: string; starts_on: string | null; ends_on: string | null; status: string; deleted_at: string | null; remind_at: string | null }
         | undefined;
+      const endsAt = run.ends_at ? new Date(run.ends_at) : at;
       const pastDay = run.remind_at < today;
       const gone = !item || item.deleted_at != null || item.status !== "saved" || item.remind_at !== run.remind_at;
-      if (!pastDay && !gone && minutes < END_MINUTE) continue;
+      const nearlyOver = endsAt.getTime() - at.getTime() <= TICK_MS;
+      if (!pastDay && !gone && !nearlyOver) continue;
 
-      const dismissAt = gone || pastDay || at >= goneAt ? at : goneAt;
-      const label = item ? activityLabel(item.kind, item.starts_on, item.ends_on, run.remind_at) : "Reminder";
+      const dismissAt = gone || pastDay || endsAt <= at ? at : endsAt;
+      const label = item ? activityLabel(item.kind, item.starts_on, item.ends_on, run.remind_at) : "Today";
       const { data: tokens } = await db.from("live_activity_tokens").select("token").eq("item_id", run.item_id);
       for (const { token } of (tokens ?? []) as { token: string }[]) {
-        const r = await sendLiveActivity(token, {
+        tally(await sendLiveActivity(token, {
           event: "end",
           "content-state": { label },
           "dismissal-date": Math.floor(dismissAt.getTime() / 1000),
-        });
-        tally(r);
+        }));
       }
       await db.from("live_activity_tokens").delete().eq("item_id", run.item_id);
       await db.from("live_activity_runs")
@@ -146,8 +182,18 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
     }
   }
 
-  // Start: 09:00–16:59, each save on its reminder day, once.
-  if (minutes < START_MINUTE || minutes >= END_MINUTE) return result;
+  // Start: each day-of reminder whose moment has come, once.
+  const { data: dueRows, error } = await db
+    .from("items")
+    .select("id, kind, title, venue, area, color, image_url, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_time")
+    .eq("group_id", groupId)
+    .eq("remind_at", today)
+    .eq("status", "saved")
+    .is("deleted_at", null);
+  if (error) throw error;
+  const due = ((dueRows ?? []) as ActivityItem[]).filter((item) => startDue(item, clock));
+  if (!due.length) return result;
+
   const { data: members } = await db.from("group_members").select("user_id").eq("group_id", groupId);
   const userIds = (members ?? []).map((m: { user_id: string }) => m.user_id);
   if (!userIds.length) return result;
@@ -155,33 +201,24 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
   const tokens = ((tokenRows ?? []) as { token: string }[]).map((t) => t.token);
   if (!tokens.length) return result;
 
-  const { data: dueRows, error } = await db
-    .from("items")
-    .select("id, kind, title, venue, area, color, starts_on, ends_on")
-    .eq("group_id", groupId)
-    .eq("remind_at", today)
-    .eq("status", "saved")
-    .is("deleted_at", null);
-  if (error) throw error;
-  const due = (dueRows ?? []) as ActivityItem[];
-  if (!due.length) return result;
   const { data: startedRows } = await db
     .from("live_activity_runs")
     .select("item_id")
     .eq("remind_at", today)
     .in("item_id", due.map((i) => i.id));
   const started = new Set((startedRows ?? []).map((r: { item_id: string }) => r.item_id));
+  const endsAt = activityEnd(home.timezone, today, at);
 
   for (const item of due) {
     if (started.has(item.id)) continue;
     const { error: claim } = await db
       .from("live_activity_runs")
-      .insert({ item_id: item.id, remind_at: today, group_id: groupId });
+      .insert({ item_id: item.id, remind_at: today, group_id: groupId, ends_at: endsAt.toISOString() });
     // A twin cron hit already claimed it.
     if (claim?.code === "23505") continue;
     if (claim) throw claim;
     result.started++;
-    const aps = startAps(item, today, goneAt);
+    const aps = startAps(item, today, endsAt);
     for (const token of tokens) {
       const r = await sendLiveActivity(token, aps);
       tally(r);

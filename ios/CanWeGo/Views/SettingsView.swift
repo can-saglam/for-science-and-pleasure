@@ -46,6 +46,8 @@ struct SettingsView: View {
     /// Which maps app gets the directions taps — same key `TransportApp` reads.
     @AppStorage(TransportApp.key, store: UserDefaults(suiteName: SharedInbox.groupID))
     private var transportApp = TransportApp.google.rawValue
+    /// Same key `LiveDay` reads; on until switched off.
+    @AppStorage("liveActivities") private var liveActivities = true
 
     private var version: String {
         let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -116,6 +118,25 @@ struct SettingsView: View {
                         .font(.footnote)
                 }
                 .listRowBackground(Self.rowBackground)
+
+                #if !APP_EXTENSION
+                Section {
+                    Toggle(isOn: $liveActivities) {
+                        row("Live Activity on the day", icon: "platter.filled.top.iphone")
+                    }
+                    .tint(themes.current.ink.opacity(0.85))
+                    .sensoryFeedback(.selection, trigger: liveActivities)
+                    .onChange(of: liveActivities) { _, on in
+                        Task { await LiveDay.set(on) }
+                    }
+                } header: {
+                    Text("Reminders").id("reminders")
+                } footer: {
+                    Text("When a reminder goes off on the day itself, the save stays on your Lock Screen and in the Dynamic Island for the rest of the day. Just for this iPhone.")
+                        .font(.footnote)
+                }
+                .listRowBackground(Self.rowBackground)
+                #endif
 
                 Section {
                     Button {
