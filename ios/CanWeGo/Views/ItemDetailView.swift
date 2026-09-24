@@ -434,6 +434,18 @@ struct ItemDetailView: View {
             }
     }
 
+    /// Google's photos have to name who took them wherever they're shown
+    /// large. The parser puts the name on the link (`by`).
+    private var photoCredit: String? {
+        guard showsHero, let raw = item.imageUrl, raw.contains("/functions/v1/place-photo"),
+              let parts = URLComponents(string: raw)
+        else { return nil }
+        // Form encoding: "+" is a space (a real plus arrives as %2B).
+        let by = parts.percentEncodedQueryItems?.first { $0.name == "by" }?.value?
+            .replacingOccurrences(of: "+", with: "%20").removingPercentEncoding ?? ""
+        return by.isEmpty ? "Photo from Google Maps" : "Photo by \(by) on Google Maps"
+    }
+
     /// "Nunhead" under a "Nunhead" venue, or "Barbican" under "Barbican
     /// Centre", says nothing new.
     private var areaLine: String? {
@@ -488,6 +500,7 @@ struct ItemDetailView: View {
             metaRow("sterlingsign.circle", item.price)
             metaRow("person", addedBy)
             metaRow("pencil", editedBy)
+            metaRow("camera", photoCredit)
         }
 
         RemindRow(item: item, persist: true)

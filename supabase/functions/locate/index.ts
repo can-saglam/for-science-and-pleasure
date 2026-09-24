@@ -7,6 +7,7 @@ import Anthropic from "npm:@anthropic-ai/sdk";
 import { corsHeaders, geocode, resolveMapsLink } from "../_shared/geo.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { geocodeNearHome, groupHome, type Home, homeLabel } from "../_shared/home.ts";
+import { findPlace } from "../_shared/places.ts";
 import { consumeQuota } from "../_shared/quota.ts";
 
 interface LocateItem {
@@ -120,10 +121,33 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Second pass: Google knows most named venues outright, in a fraction
+    // of a web search's time. Only the misses go on to the model.
+    const unmatched: LocateItem[] = [];
+    for (const item of needsModel) {
+      const name = item.kind === "event" ? item.venue : (item.venue ?? item.title);
+      const place = name && !/^https?:\/\//.test(name)
+        ? await findPlace(name, item, home)
+        : null;
+      if (place?.lat != null && place.lng != null) {
+        proposals.push({
+          id: item.id,
+          venue: item.venue ?? place.name,
+          area: item.area ?? null,
+          address: place.address,
+          confidence: "high" as const,
+          lat: place.lat,
+          lng: place.lng,
+        });
+      } else {
+        unmatched.push(item);
+      }
+    }
+
     // Web search + geocoding are slow; keep the model batch small so the
     // whole run fits in the edge worker's wall-clock budget. Leftovers get
     // picked up the next time the user runs it.
-    const modelBatch = needsModel.slice(0, 8);
+    const modelBatch = unmatched.slice(0, 8);
     if (modelBatch.length > 0) {
       const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
       const prompt = [

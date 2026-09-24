@@ -421,6 +421,9 @@ verify_jwt = true
 [functions.calendar]
 verify_jwt = false
 
+[functions.place-photo]
+verify_jwt = false
+
 [functions.suggest]
 verify_jwt = true
 

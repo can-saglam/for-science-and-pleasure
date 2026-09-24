@@ -27,8 +27,10 @@ enum ThumbnailBackfill {
     @MainActor
     static func run(context: ModelContext) async {
         guard let all = try? context.fetch(FetchDescriptor<Item>()) else { return }
+        // A Google Maps photo is only ever the last resort: the saved
+        // page's own picture replaces it whenever one turns up.
         let missing = all.filter { item in
-            item.url != nil && (item.imageUrl.map(ImageStore.isDead) ?? true)
+            item.url != nil && (item.imageUrl.map { ImageStore.isDead($0) || isGooglePhoto($0) } ?? true)
         }
         guard !missing.isEmpty else { return }
 
@@ -78,6 +80,10 @@ enum ThumbnailBackfill {
         for (id, image) in found {
             await SupabaseSync.patch(id, ["image_url": image])
         }
+    }
+
+    private static func isGooglePhoto(_ url: String) -> Bool {
+        url.contains("/functions/v1/place-photo")
     }
 
     /// Maps pages only ever offer the Google Maps app icon as their

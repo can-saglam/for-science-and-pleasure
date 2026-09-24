@@ -681,6 +681,12 @@ enum SupabaseSync {
             if let local = byID[row.id] {
                 if row.updated_at > local.updatedAt {
                     apply(row, to: local)
+                } else if row.updated_at == local.updatedAt {
+                    // Thumbnails and colours filled in on the server leave
+                    // updated_at alone (0015), so an unedited row can still
+                    // carry a new picture.
+                    if local.imageUrl != row.image_url { local.imageUrl = row.image_url }
+                    if local.colorHex != row.color { local.colorHex = row.color }
                 }
             } else {
                 let item = Item()

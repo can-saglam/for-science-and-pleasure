@@ -9,6 +9,7 @@ import {
   wikipediaQueries,
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
+import { findPlace, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
 import {
   geocodeNearHome,
   type Home,
@@ -408,10 +409,21 @@ export async function extractCard(
   card.category = normaliseCategory(card.kind, card.category);
 
   // The pin in a Maps URL is exact — trust it over geocoding the name.
-  let coords: { lat: number; lng: number } | null =
-    mapsLink && mapsLink.lat !== null && mapsLink.lng !== null
-      ? { lat: mapsLink.lat, lng: mapsLink.lng }
-      : null;
+  const pin = mapsLink && mapsLink.lat !== null && mapsLink.lng !== null
+    ? { lat: mapsLink.lat, lng: mapsLink.lng }
+    : null;
+  let coords: { lat: number; lng: number } | null = pin;
+  // Google knows the street address of nearly every place, where the
+  // model's is a best guess from search snippets. A match replaces it.
+  let google: PlaceMatch | null = card.kind === "place"
+    ? await findPlace(mapsLink?.name ?? card.title, card, home, pin)
+    : null;
+  if (google) {
+    card.address = google.address ?? card.address;
+    if (!coords && google.lat != null && google.lng != null) {
+      coords = { lat: google.lat, lng: google.lng };
+    }
+  }
   // Street addresses geocode far more reliably than small-venue names
   // (Nominatim rarely knows independent restaurants), so try those first.
   if (!coords && card.address) {
@@ -423,6 +435,14 @@ export async function extractCard(
       [card.venue ?? card.title, card.area].filter(Boolean).join(", "),
       home,
     );
+  }
+  // An event at a venue nothing else could place: ask Google for the venue.
+  if (!coords && card.kind === "event" && card.venue) {
+    google = await findPlace(card.venue, card, home);
+    if (google?.lat != null && google.lng != null) {
+      coords = { lat: google.lat, lng: google.lng };
+      card.address ??= google.address;
+    }
   }
 
   // A card with nothing to stand on is not a save. The model's own verdict
@@ -458,8 +478,17 @@ export async function extractCard(
     }
   }
 
+  // Last resort: the place's own photo on Google.
+  let googlePhoto: string | null = null;
+  if (!imageUrl && google?.photo) {
+    imageUrl = await placePhotoLink(google.id, google.credit);
+    googlePhoto = await photoUri(google.photo, 400);
+  }
+
   let color = await colorPromise.catch(() => null);
-  if (!color && imageUrl) {
+  if (!color && googlePhoto) {
+    color = await colorFromImageUrl(googlePhoto).catch(() => null);
+  } else if (!color && imageUrl) {
     color = await colorFromImageUrl(imageUrl).catch(() => null);
   }
 
