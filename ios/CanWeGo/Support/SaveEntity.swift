@@ -99,10 +99,10 @@ enum SavePeriod: String, AppEnum {
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "When"
     static let caseDisplayRepresentations: [SavePeriod: DisplayRepresentation] = [
-        .today: "today",
-        .weekend: "this weekend",
-        .week: "this week",
-        .closing: "closing soon",
+        .today: DisplayRepresentation(title: "today", synonyms: ["tonight", "my day"]),
+        .weekend: DisplayRepresentation(title: "this weekend", synonyms: ["the weekend", "my weekend", "weekend"]),
+        .week: DisplayRepresentation(title: "this week", synonyms: ["the week", "my week", "week"]),
+        .closing: DisplayRepresentation(title: "closing soon", synonyms: ["ending soon", "last chance"]),
     ]
 }
 

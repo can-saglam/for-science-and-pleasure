@@ -163,7 +163,11 @@ struct CanWeGoShortcuts: AppShortcutsProvider {
             phrases: [
                 "What's on \(\.$period) in \(.applicationName)",
                 "What's on \(\.$period) from \(.applicationName)",
+                "What's on \(\.$period) for \(.applicationName)",
+                "What's on \(\.$period) on \(.applicationName)",
+                "Ask \(.applicationName) what's on \(\.$period)",
                 "What have we saved for \(\.$period) in \(.applicationName)",
+                "What's on in \(.applicationName)",
             ],
             shortTitle: "What's On",
             systemImageName: "calendar"
@@ -173,6 +177,9 @@ struct CanWeGoShortcuts: AppShortcutsProvider {
             phrases: [
                 "What's closing soon in \(.applicationName)",
                 "What's closing soon from \(.applicationName)",
+                "What's closing soon on \(.applicationName)",
+                "What's ending soon in \(.applicationName)",
+                "Ask \(.applicationName) what's closing soon",
             ],
             shortTitle: "Closing Soon",
             systemImageName: "hourglass"
