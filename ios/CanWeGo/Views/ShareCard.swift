@@ -131,9 +131,12 @@ struct ShareCard: View {
 /// build time, and the postcard is rendered on demand.
 struct ActivitySheet: UIViewControllerRepresentable {
     let items: [Any]
+    var excluded: [UIActivity.ActivityType] = []
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.excludedActivityTypes = excluded
+        return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}

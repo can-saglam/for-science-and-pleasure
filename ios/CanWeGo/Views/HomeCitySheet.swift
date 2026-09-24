@@ -5,6 +5,7 @@ import SwiftUI
 /// onboarding, so skipping the city there isn't a dead end.
 struct HomeCitySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var home = HomeStore.shared
     @State private var query = ""
     @State private var matches: [HomeStore.Home] = []
     @State private var looking = false
@@ -20,6 +21,16 @@ struct HomeCitySheet: View {
                         .font(.subheadline)
                         .foregroundStyle(AppBackground.ink.opacity(0.72))
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if home.isSet {
+                        Label {
+                            Text("Now: \(Text("\(home.home.locality), \(home.home.country)").fontWeight(.semibold))")
+                        } icon: {
+                            Image(systemName: "house.fill")
+                        }
+                        .font(.subheadline)
+                        .accessibilityLabel("Home is \(home.home.locality), \(home.home.country)")
+                    }
 
                     HStack(spacing: 10) {
                         TextField("", text: $query, prompt: AppBackground.fieldPrompt("City"))

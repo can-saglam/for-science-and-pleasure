@@ -3,19 +3,32 @@ import SwiftUI
 
 /// One row, modern-settings style: a small icon squircle, then the title.
 /// Monochrome — every badge wears the current theme's accent, with the
-/// glyph in the theme base for contrast.
+/// glyph in the theme base for contrast — except destructive rows, which
+/// say so with a red badge while the title stays in the ink.
 struct SettingsRow: View {
     let title: String
     let icon: String
     /// A second, quieter line under the title. The icon stays centred on
     /// the pair, so a two-line row lines up with its one-line neighbours.
     var subtitle: String? = nil
+    var destructive = false
+
+    private var badge: Color { destructive ? AppBackground.destructive : AppBackground.badge }
+    private var glyph: Color {
+        guard destructive else { return AppBackground.badgeGlyph }
+        return AppBackground.theme.isLight ? .white : AppBackground.base
+    }
 
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                // No explicit color: lets callers tint the title (e.g. Sign out).
-                Text(title)
+                // Pinned only for destructive rows, which the button role
+                // would otherwise paint red.
+                if destructive {
+                    Text(title).foregroundStyle(AppBackground.ink)
+                } else {
+                    Text(title)
+                }
                 if let subtitle {
                     Text(subtitle)
                         .font(.footnote)
@@ -25,9 +38,9 @@ struct SettingsRow: View {
         } icon: {
             Image(systemName: icon)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppBackground.badgeGlyph)
+                .foregroundStyle(glyph)
                 .frame(width: 28, height: 28)
-                .background(AppBackground.badge.gradient, in: .rect(cornerRadius: 7, style: .continuous))
+                .background(badge.gradient, in: .rect(cornerRadius: 7, style: .continuous))
         }
     }
 }
@@ -234,8 +247,7 @@ struct GroupSection: View {
                 ui.confirmLeave = true
             } label: {
                 HStack {
-                    SettingsRow(title: "Leave group", icon: "person.2.slash.fill")
-                        .foregroundStyle(AppBackground.destructive)
+                    SettingsRow(title: "Leave group", icon: "person.2.slash.fill", destructive: true)
                     Spacer()
                     if ui.leaving { ProgressView() }
                 }

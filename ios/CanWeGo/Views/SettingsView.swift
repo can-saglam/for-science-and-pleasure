@@ -41,6 +41,8 @@ struct SettingsView: View {
     @State private var deletePhrase = ""
     @State private var deleteBusy = false
     @State private var deleteError: String?
+    @State private var showExport = false
+    @State private var deleteAfterExport = false
     /// Which maps app gets the directions taps — same key `TransportApp` reads.
     @AppStorage(TransportApp.key, store: UserDefaults(suiteName: SharedInbox.groupID))
     private var transportApp = TransportApp.google.rawValue
@@ -116,11 +118,17 @@ struct SettingsView: View {
                 .listRowBackground(Self.rowBackground)
 
                 Section {
-                    ShareLink(item: exportFile()) {
-                        row("Export as Markdown", icon: "square.and.arrow.up")
+                    Button {
+                        Haptics.tap()
+                        showExport = true
+                    } label: {
+                        row("Export your library", icon: "square.and.arrow.up")
                     }
                 } header: {
                     Text("Your library")
+                } footer: {
+                    Text("A spreadsheet of everything, your events for any calendar, and a list to read. Yours to keep, wherever you go next.")
+                        .font(.footnote)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -200,8 +208,7 @@ struct SettingsView: View {
                             Haptics.tap()
                             confirmSignOut = true
                         } label: {
-                            row("Sign out", icon: "rectangle.portrait.and.arrow.right")
-                                .foregroundStyle(AppBackground.destructive)
+                            row("Sign out", icon: "rectangle.portrait.and.arrow.right", destructive: true)
                         }
                         Button(role: .destructive) {
                             Haptics.tap()
@@ -209,16 +216,18 @@ struct SettingsView: View {
                             deleteError = nil
                             confirmDelete = true
                         } label: {
-                            row("Delete account", icon: "trash")
-                                .foregroundStyle(AppBackground.destructive)
+                            row("Delete account", icon: "trash", destructive: true)
                         }
                         .confirmationDialog(
                             "Delete your account?",
                             isPresented: $confirmDelete,
                             titleVisibility: .visible
                         ) {
-                            Button("Export, then type DELETE", role: .destructive) {
-                                _ = exportFile()
+                            Button("Export my library first") {
+                                deleteAfterExport = true
+                                showExport = true
+                            }
+                            Button("Delete without a copy", role: .destructive) {
                                 deletePhrase = ""
                                 showDeleteConfirm = true
                             }
@@ -305,6 +314,16 @@ struct SettingsView: View {
             .sheet(item: $legal) { page in
                 LegalSheet(page: page)
             }
+            // Deleting after an export picks up where it left off once the
+            // export sheet closes.
+            .sheet(isPresented: $showExport, onDismiss: {
+                guard deleteAfterExport else { return }
+                deleteAfterExport = false
+                deletePhrase = ""
+                showDeleteConfirm = true
+            }) {
+                ExportSheet()
+            }
             .alert("Type DELETE to confirm", isPresented: $showDeleteConfirm) {
                 TextField("", text: $deletePhrase, prompt: AppBackground.fieldPrompt("DELETE"))
                     .foregroundStyle(AppBackground.ink)
@@ -340,11 +359,15 @@ struct SettingsView: View {
             .modifier(GroupPresentations(ui: groupUI))
             .sheet(isPresented: $showPlus) { PlusPaywall() }
             .manageSubscriptionsSheet(isPresented: $manageSubscription)
-            // CWG_SETTINGS=plus is only set by automated test runs.
+            // CWG_SETTINGS=plus / export are only set by automated test runs.
             .task {
                 if ProcessInfo.processInfo.environment["CWG_SETTINGS"] == "plus" {
                     try? await Task.sleep(for: .seconds(1.5))
                     showPlus = true
+                }
+                if ProcessInfo.processInfo.environment["CWG_SETTINGS"]?.hasPrefix("export") == true {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    showExport = true
                 }
             }
         }
@@ -355,8 +378,8 @@ struct SettingsView: View {
     /// One row, modern-settings style: a small icon squircle, then the
     /// title. Monochrome — every badge wears the current theme's accent,
     /// with the icon glyph in the theme base for contrast.
-    private func row(_ title: String, icon: String) -> some View {
-        SettingsRow(title: title, icon: icon)
+    private func row(_ title: String, icon: String, destructive: Bool = false) -> some View {
+        SettingsRow(title: title, icon: icon, destructive: destructive)
     }
 
     /// A Settings-style value row: the title on the left, a menu picker as
@@ -405,9 +428,9 @@ struct SettingsView: View {
     private var deleteAccountCopy: String {
         let shared = (GroupStore.shared.card?.members.count ?? 0) > 1
         if shared {
-            return "You share this library. Deleting your account leaves their saves where they are. Export a Markdown copy from Your library first if you want one."
+            return "You share this library. Deleting your account leaves their saves where they are. Export first to keep your own copy: a spreadsheet, a calendar and a readable list."
         }
-        return "You're the only member. Deleting your account removes this library. Export a Markdown copy from Your library first if you want one."
+        return "You're the only member. Deleting your account removes this library. Export first to keep a copy: a spreadsheet, a calendar and a readable list."
     }
 
     private func deleteAccount() async {
@@ -415,7 +438,6 @@ struct SettingsView: View {
         deleteBusy = true
         defer { deleteBusy = false }
         do {
-            _ = exportFile()
             let jwt = try await SupabaseAuth.shared.validToken()
             var request = URLRequest(url: SupabaseAuth.baseURL.appending(path: "functions/v1/delete-account"))
             request.httpMethod = "POST"
@@ -443,39 +465,6 @@ struct SettingsView: View {
         }
     }
 
-    /// Same shape as the web export: grouped, human-readable Markdown.
-    private func exportFile() -> URL {
-        var lines = ["# Can We Go?", ""]
-
-        func section(_ title: String, _ list: [Item]) {
-            guard !list.isEmpty else { return }
-            lines.append("## \(title)")
-            lines.append("")
-            for i in list {
-                var meta = [i.venue, i.area, i.price].compactMap(\.self)
-                if let s = i.startsOn, let e = i.endsOn {
-                    meta.append(s == e ? s : "\(s) – \(e)")
-                } else if let e = i.endsOn {
-                    meta.append("until \(e)")
-                }
-                lines.append("- **\(i.title)**\(meta.isEmpty ? "" : " · \(meta.joined(separator: " · "))")")
-                if let summary = i.summary { lines.append("  \(summary)") }
-                if let url = i.url { lines.append("  <\(url)>") }
-                if let notes = i.notes, !notes.isEmpty { lines.append("  > \(notes)") }
-            }
-            lines.append("")
-        }
-
-        section("Events", items.filter { !$0.isDeleted && $0.isEvent && !$0.isDone && !$0.isMissed })
-        section("Places", items.filter { !$0.isDeleted && $0.isPlace && !$0.isDone && !$0.isMissed })
-        section("Been", items.filter { !$0.isDeleted && $0.isDone })
-        section("Missed", items.filter { !$0.isDeleted && $0.isMissed })
-
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "can-we-go.md")
-        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
-        return url
-    }
 }
 
 // MARK: - Toolbar hook
@@ -500,11 +489,15 @@ struct SettingsButton: View {
         // Explicit accent: this sheet is presented from inside the nav bar's
         // dimmed-white tint scope, which would otherwise wash its controls.
         .sheet(isPresented: $open) { SettingsView().tint(AppBackground.ink) }
-        // CWG_SETTINGS is only set by automated test runs.
+        // CWG_SETTINGS is only set by automated test runs. Once per launch:
+        // every tab has its own gear, and the next tab's would open it again.
         .task {
-            if ProcessInfo.processInfo.environment["CWG_SETTINGS"] != nil {
+            if ProcessInfo.processInfo.environment["CWG_SETTINGS"] != nil, !Self.openedForTest {
+                Self.openedForTest = true
                 open = true
             }
         }
     }
+
+    @MainActor private static var openedForTest = false
 }

@@ -11,6 +11,7 @@ struct ItemDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var done = false
     @State private var editing = false
     /// Edits land on this detached scratch copy, applied on Done. Typing
@@ -433,17 +434,32 @@ struct ItemDetailView: View {
             }
     }
 
+    /// "Nunhead" under a "Nunhead" venue, or "Barbican" under "Barbican
+    /// Centre", says nothing new.
+    private var areaLine: String? {
+        guard let area = item.area else { return nil }
+        let squash = { (s: String) in s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        if let venue = item.venue, venue != item.title, squash(venue).contains(squash(area)) { return nil }
+        return area
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // At accessibility sizes the pair can't share a line without the
+        // dot stranded between wrapped halves, so they stack.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return VStack(alignment: .leading, spacing: 8) {
             Text(item.title)
                 .font(.displaySmallBold(28, relativeTo: .title2))
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            layout {
                 if let label = item.timeLabel {
                     Text(label)
                         .foregroundStyle(item.timeLabelIsUrgent ? AppBackground.destructive : Color.secondary)
                 }
-                if item.timeLabel != nil && item.category != nil {
+                if !stacked && item.timeLabel != nil && item.category != nil {
                     Text("·").foregroundStyle(.tertiary)
                 }
                 if let category = item.category {
@@ -468,7 +484,7 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             metaRow("calendar", dateLine)
             metaRow("building.2", item.venue != item.title ? item.venue : nil)
-            metaRow("map", item.area)
+            metaRow("map", areaLine)
             metaRow("sterlingsign.circle", item.price)
             metaRow("person", addedBy)
             metaRow("pencil", editedBy)

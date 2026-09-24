@@ -26,6 +26,7 @@ struct JoinSheet: View {
     @State private var clipboardOffer = false
     @State private var note: String?
     @State private var joinedName: String?
+    @State private var detent: PresentationDetent = .medium
 
     private var code: String? { GroupStore.normaliseCode(draft) }
     private var inSharedGroup: Bool { (group.card?.members.count ?? 1) > 1 }
@@ -51,7 +52,7 @@ struct JoinSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(24)
+                .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
             .appBackground(AppBackground.sheet)
@@ -60,8 +61,13 @@ struct JoinSheet: View {
             }
             .disabled(joining)
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
+        // Half height while it's just the field; the group card and its
+        // buttons get the full sheet.
+        .onChange(of: preview != nil || note != nil || lookingUp) { _, grown in
+            if grown { detent = .large }
+        }
         .appColorScheme()
         .onAppear { focused = code == nil }
         .task {
@@ -92,20 +98,15 @@ struct JoinSheet: View {
 
     private var field: some View {
         VStack(spacing: 12) {
-            TextField("", text: $draft, prompt: AppBackground.fieldPrompt("KV7-P2M"))
-                .foregroundStyle(AppBackground.ink)
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .keyboardType(.asciiCapable)
+            Text("Ask anyone in the group for their invite code. It\u{2019}s under Invite people in their Settings.")
+                .font(.subheadline)
+                .foregroundStyle(AppBackground.ink.opacity(0.72))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 4)
+
+            InviteCodeField(code: $draft) { Task { await lookup() } }
                 .focused($focused)
-                .onChange(of: draft) { _, new in
-                    let formatted = Self.formatTyping(new)
-                    if formatted != new { draft = formatted }
-                }
-                .onSubmit { Task { await lookup() } }
-                .accessibilityLabel("Invite code")
 
             Button {
                 Haptics.tap()
@@ -313,5 +314,43 @@ struct JoinSheet: View {
             return "\(clipped.prefix(3))-\(clipped.dropFirst(3))"
         }
         return clipped
+    }
+}
+
+/// The invite-code field on onboarding's code page and in the Join sheet:
+/// big rounded capitals on a glass slab. Callers attach `.focused`.
+struct InviteCodeField: View {
+    @Binding var code: String
+    var busy = false
+    var onSubmit: () -> Void = {}
+
+    var body: some View {
+        // Formatting happens in the binding's setter, in the same pass as
+        // the keystroke, so fast typing never lands on a draft that's
+        // about to be rewritten (and lose a letter).
+        TextField(
+            "",
+            text: Binding(
+                get: { code },
+                set: { code = JoinSheet.formatTyping($0) }
+            ),
+            prompt: AppBackground.fieldPrompt("KV7-P2M")
+        )
+        .accessibilityLabel("Invite code")
+        .font(.system(size: 28, weight: .bold, design: .rounded))
+        .monospacedDigit()
+        .multilineTextAlignment(.center)
+        .textInputAutocapitalization(.characters)
+        .autocorrectionDisabled()
+        .keyboardType(.asciiCapable)
+        .foregroundStyle(AppBackground.ink)
+        .onSubmit(onSubmit)
+        .padding(.vertical, 16)
+        .overlay(alignment: .trailing) {
+            if busy {
+                ProgressView().controlSize(.small).padding(.trailing, 18)
+            }
+        }
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 }

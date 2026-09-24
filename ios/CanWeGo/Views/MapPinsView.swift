@@ -192,18 +192,23 @@ struct MapPinsView: View {
                             // A bubble of the theme base with the count in
                             // the theme ink, ringed in the members' shared
                             // colour — a cluster of galleries reads as one
-                            // big gallery pin, not a grey blob.
+                            // big gallery pin, not a grey blob. The white
+                            // outer ring is the photo pins' own: the base
+                            // alone vanished into the dark map.
                             ZStack {
                                 Circle()
                                     .fill(AppBackground.base)
                                 Circle()
-                                    .strokeBorder(clusterRing(cluster), lineWidth: 3)
+                                    .strokeBorder(.white, lineWidth: 3)
+                                Circle()
+                                    .inset(by: 3)
+                                    .strokeBorder(clusterRing(cluster), lineWidth: 2.5)
                                 Text("\(cluster.members.count)")
                                     .font(.subheadline.weight(.bold))
                                     .monospacedDigit()
                                     .foregroundStyle(AppBackground.ink)
                             }
-                            .frame(width: 36, height: 36)
+                            .frame(width: 38, height: 38)
                             .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
                             .padding(6)
                             .contentShape(.circle)

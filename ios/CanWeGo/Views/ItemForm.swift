@@ -108,9 +108,9 @@ private struct OptionalDateRow: View {
     var body: some View {
         HStack(spacing: 10) {
             fieldIcon(icon)
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(value == nil ? .tertiary : .secondary)
+            // Same type and ink as the text fields' prompts, so an empty
+            // date doesn't read as a disabled one.
+            AppBackground.fieldPrompt(label)
             Spacer()
             if let value, let date = DayString.date(value) {
                 DatePicker(
@@ -167,9 +167,11 @@ private struct ThumbnailField: View {
                 PhotosPicker(selection: $pick, matching: .images) {
                     HStack(spacing: 12) {
                         thumb
-                        Text(item.imageUrl == nil ? "Add a photo" : "Change photo")
-                            .font(.subheadline)
-                            .foregroundStyle(item.imageUrl == nil ? .tertiary : .primary)
+                        if item.imageUrl == nil {
+                            AppBackground.fieldPrompt("Add a photo")
+                        } else {
+                            Text("Change photo")
+                        }
                         Spacer(minLength: 0)
                         if uploading {
                             ProgressView().controlSize(.small)

@@ -175,11 +175,19 @@ struct OnboardingView: View {
 
             GeometryReader { geo in
                 ScrollView {
+                    // The front door is centred; every question starts at
+                    // the same height, so headlines don't hop as pages turn —
+                    // except home, which sits lower to leave the map in view.
                     pageBody
                         .id(page)
                         .transition(.opacity)
                         .padding(.horizontal, 28)
-                        .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .center)
+                        .padding(.top, topInset(in: geo.size.height))
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: geo.size.height,
+                            alignment: page == .welcome ? .center : .top
+                        )
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .scrollIndicators(.hidden)
@@ -286,8 +294,8 @@ struct OnboardingView: View {
         .mask(
             LinearGradient(stops: [
                 .init(color: .black, location: 0),
-                .init(color: .black, location: 0.26),
-                .init(color: .clear, location: 0.6),
+                .init(color: .black, location: 0.32),
+                .init(color: .clear, location: 0.62),
             ], startPoint: .top, endPoint: .bottom)
         )
         .ignoresSafeArea()
@@ -342,22 +350,30 @@ struct OnboardingView: View {
 
             Spacer()
 
-            // Until there's a session the step count isn't known (the
-            // account may already answer most of it), so no dots yet.
-            HStack(spacing: 6) {
-                ForEach(pages.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(AppBackground.ink.opacity(i == index ? 0.9 : 0.3))
-                        .frame(width: i == index ? 20 : 6, height: 6)
+            if offersNotNow {
+                // The way out sits beside the ask, not up in the page.
+                // Back, dots and two pills don't fit one bar, so the
+                // dots step aside on this last page.
+                notNowButton
+                    .padding(.trailing, 10)
+            } else {
+                // Until there's a session the step count isn't known (the
+                // account may already answer most of it), so no dots yet.
+                HStack(spacing: 6) {
+                    ForEach(pages.indices, id: \.self) { i in
+                        Capsule()
+                            .fill(AppBackground.ink.opacity(i == index ? 0.9 : 0.3))
+                            .frame(width: i == index ? 20 : 6, height: 6)
+                    }
                 }
-            }
-            .animation(ease, value: index)
-            .opacity(needsSignIn ? 0 : 1)
-            .accessibilityElement()
-            .accessibilityLabel("Step \(index + 1) of \(pages.count)")
-            .accessibilityHidden(needsSignIn)
+                .animation(ease, value: index)
+                .opacity(needsSignIn ? 0 : 1)
+                .accessibilityElement()
+                .accessibilityLabel("Step \(index + 1) of \(pages.count)")
+                .accessibilityHidden(needsSignIn)
 
-            Spacer()
+                Spacer()
+            }
 
             // Without a session the only way forward is the Apple button.
             forwardButton
@@ -370,8 +386,40 @@ struct OnboardingView: View {
     }
 
     private static let control: CGFloat = 56
+    /// Clears the preview's close button with room to spare.
+    private static let headlineTop: CGFloat = 100
+
+    private func topInset(in height: CGFloat) -> CGFloat {
+        switch page {
+        case .welcome: 0
+        case .home: max(Self.headlineTop, height * 0.34)
+        default: Self.headlineTop
+        }
+    }
 
     private var gatedBySignIn: Bool { page == .welcome && (needsSignIn || unreachable) }
+
+    /// Only while the system prompt is still ahead: once it's been
+    /// answered, the forward button already reads "Done".
+    private var offersNotNow: Bool { page == .notify && notifyStatus == .notDetermined }
+
+    private var notNowButton: some View {
+        Button {
+            Haptics.tap()
+            if !preview { PushRegistrar.declinePrime() }
+            finish()
+        } label: {
+            Text("Not now")
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .padding(.horizontal, 20)
+                .frame(height: Self.control)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .disabled(frozen)
+    }
 
     /// An arrow until a step has an outcome to name — then a pill. Same
     /// height and glass as the back button, so the pair reads as one bar.
@@ -485,10 +533,12 @@ struct OnboardingView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// A fixed share of the ink, like the home city sheet's intro: the
+    /// system secondary sank into the blue wash.
     private func lede(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.ink.opacity(0.72))
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -498,7 +548,7 @@ struct OnboardingView: View {
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
-    /// Optional ways out — "Somewhere else", "Not now": a small glass pill.
+    /// Optional ways out — "Somewhere else", "Skip for now": a small glass pill.
     private func quiet(_ title: String, action: @escaping () -> Void) -> some View {
         Button {
             Haptics.tap()
@@ -538,7 +588,7 @@ struct OnboardingView: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.footnote).foregroundStyle(.secondary)
+                Text(detail).font(.footnote).foregroundStyle(AppBackground.ink.opacity(0.72))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -824,7 +874,7 @@ struct OnboardingView: View {
                 .clipShape(.rect(cornerRadius: 14, style: .continuous))
                 .accessibilityHint("Uses your Apple Account")
                 .disabled(!needsSignIn)
-                .opacity(needsSignIn ? 1 : 0.6)
+                .opacity(needsSignIn || preview ? 1 : 0.6)
                 // Previewing the run (Settings, screenshots): Apple's
                 // button is inert, so a tap on it just turns the page.
                 .overlay {
@@ -1090,35 +1140,9 @@ struct OnboardingView: View {
     /// they've said they have a code.
     private var codeEntry: some View {
         VStack(alignment: .leading, spacing: 18) {
-            slab {
-                // Formatting happens in the binding's setter, in the same
-                // pass as the keystroke, so fast typing never lands on a
-                // draft that's about to be rewritten (and lose a letter).
-                TextField(
-                    "",
-                    text: Binding(
-                        get: { codeDraft },
-                        set: { codeDraft = JoinSheet.formatTyping($0) }
-                    ),
-                    prompt: AppBackground.fieldPrompt("KV7-P2M")
-                )
-                    .accessibilityLabel("Invite code")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .multilineTextAlignment(.center)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .keyboardType(.asciiCapable)
-                    .foregroundStyle(AppBackground.ink)
-                    .focused($focus, equals: .code)
-                    .padding(.vertical, 16)
-                    .overlay(alignment: .trailing) {
-                        if lookingUp {
-                            ProgressView().controlSize(.small).padding(.trailing, 18)
-                        }
-                    }
-                    .disabled(joined)
-            }
+            InviteCodeField(code: $codeDraft, busy: lookingUp)
+                .focused($focus, equals: .code)
+                .disabled(joined)
 
             if clipboardHasText, codeDraft.isEmpty, !joined {
                 chip("Paste the code you were sent", icon: "doc.on.clipboard") {
@@ -2036,10 +2060,7 @@ struct OnboardingView: View {
                 Label("Already on. Nothing more to do.", systemImage: "checkmark.circle.fill")
                     .font(.footnote.weight(.medium))
             default:
-                quiet("Not now") {
-                    if !preview { PushRegistrar.declinePrime() }
-                    finish()
-                }
+                EmptyView()
             }
         }
         .task {

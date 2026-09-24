@@ -158,6 +158,9 @@ struct ItemCard: View {
                     .foregroundStyle(AppBackground.warning)
             }
         }
+        // Wrapped subtitles otherwise inherit a centred alignment and
+        // drift off the title's edge at big text sizes.
+        .multilineTextAlignment(.leading)
         .padding(.horizontal, compact ? 14 : 16)
         .padding(.vertical, compact ? 10 : 13)
         // Keep text clear of the visible part of the photo.
