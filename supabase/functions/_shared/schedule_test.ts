@@ -1,8 +1,20 @@
-import { homeInstant, isDue, isMorningHour, localClock, localDate, weekMonday } from "./schedule.ts";
+import { dayBefore, homeInstant, isDue, isMorningHour, localClock, localDate, weekMonday } from "./schedule.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
 }
+
+Deno.test("dayBefore crosses months, years and leap days", () => {
+  for (const [d, want] of [
+    ["2026-09-24", "2026-09-23"],
+    ["2026-10-01", "2026-09-30"],
+    ["2027-01-01", "2026-12-31"],
+    ["2028-03-01", "2028-02-29"],
+    ["2026-10-26", "2026-10-25"],
+  ]) {
+    assert(dayBefore(d) === want, `${d} → ${dayBefore(d)}`);
+  }
+});
 
 Deno.test("weekMonday returns the ISO Monday for every weekday", () => {
   // 2026-09-07 is a Monday.

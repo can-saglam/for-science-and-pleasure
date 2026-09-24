@@ -256,17 +256,19 @@ private struct ThumbnailField: View {
     }
 
     private func use(_ pick: PhotosPickerItem) async {
-        guard let data = try? await pick.loadTransferable(type: Data.self),
-              let image = UIImage(data: data)
-        else {
+        guard let data = try? await pick.loadTransferable(type: Data.self) else {
             note = "Couldn't read that photo."
             return
         }
-        await use(image)
+        await use(data.compressedImageForUpload())
     }
 
     private func use(_ image: UIImage) async {
-        guard let jpeg = image.compressedForUpload() else {
+        await use(image.compressedForUpload())
+    }
+
+    private func use(_ jpeg: Data?) async {
+        guard let jpeg else {
             note = "Couldn't read that photo."
             return
         }

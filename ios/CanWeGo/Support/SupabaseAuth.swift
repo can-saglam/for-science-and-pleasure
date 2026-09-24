@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// Email/password session against the same Supabase project as the web app,
 /// so both people sign in with the accounts they already have. The anon key
@@ -132,28 +133,47 @@ final class SupabaseAuth {
         Self.appleUserID = appleUserID
     }
 
-    func signOut() {
-        let refresh = session?.refreshToken
-        let access = session?.accessToken
+    /// `expired`: the server already refused the session. The share inbox
+    /// stays (its saves are tagged with this account and land after the
+    /// next sign-in), and there's no token left to unregister the phone with.
+    func signOut(expired: Bool = false) {
+        let last = session
         Self.signedOutFlag = true
         session = nil
         Self.appleUserID = nil
         KeychainSession.delete()
-        SharedInbox.removeAll()
-        if let refresh {
-            Task { await Self.logoutRemote(refresh: refresh, access: access) }
+        if !expired { SharedInbox.removeAll() }
+        if let last {
+            Task { await Self.logoutRemote(last, forgetDevice: !expired) }
         }
     }
 
-    /// Best-effort server revoke. Offline still clears local state above.
-    private static func logoutRemote(refresh: String, access: String?) async {
+    /// Best-effort: takes this phone off the account's push lists, then
+    /// revokes the session. Offline still clears local state above.
+    private static func logoutRemote(_ last: Session, forgetDevice: Bool) async {
+        var access = last.accessToken
+        var refresh = last.refreshToken
+        if forgetDevice, let device = await UIDevice.current.identifierForVendor?.uuidString {
+            // A sign-out long after the last sync holds a dead access token.
+            if last.expiresAt < .now.addingTimeInterval(60),
+               let fresh = try? await token(grant: "refresh_token", body: ["refresh_token": refresh]) {
+                access = fresh.accessToken
+                refresh = fresh.refreshToken
+            }
+            var request = URLRequest(url: baseURL.appending(path: "rest/v1/rpc/unregister_device"))
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(anonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try? JSONEncoder().encode(["p_device_id": device])
+            _ = try? await URLSession.shared.data(for: request)
+        }
         var request = URLRequest(url: baseURL.appending(path: "auth/v1/logout"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
-        if let access {
-            request.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
-        }
+        request.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONEncoder().encode(["refresh_token": refresh])
         _ = try? await URLSession.shared.data(for: request)
     }
@@ -231,7 +251,7 @@ final class SupabaseAuth {
             // 4xx means the token family is dead — no retry can save it.
             // Anything else (offline, 5xx) keeps the session for next time.
             if let rejection = error as? AuthError, (400...499).contains(rejection.status) {
-                signOut()
+                signOut(expired: true)
                 sessionExpired = true
             }
             throw error

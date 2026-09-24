@@ -587,6 +587,7 @@
 				CODE_SIGN_ENTITLEMENTS = Support/CanWeGo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 82;
+				EXCLUDED_SOURCE_FILE_NAMES = "seed-items.json";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Support/Info.plist;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

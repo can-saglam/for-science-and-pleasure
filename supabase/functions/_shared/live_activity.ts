@@ -123,8 +123,18 @@ export function startAps(item: ActivityItem, today: string, endsAt: Date): Recor
   };
 }
 
+/** A send that throws (timeout, connection) counts as a failed one. */
+async function send(token: string, aps: Record<string, unknown>, expiresAt?: Date): Promise<string> {
+  try {
+    return await sendLiveActivity(token, aps, expiresAt);
+  } catch (e) {
+    console.error("live activity send", e);
+    return "failed";
+  }
+}
+
 export async function runActivities(db: Db, groupId: string, at: Date): Promise<ActivityResult> {
-  const home = await groupHome(db, groupId);
+  const home = await groupHome(db, groupId, true);
   const clock = localClock(home.timezone, at);
   const today = homeToday(home, at);
   const result = { group_id: groupId, started: 0, ended: 0, sent: 0, gone: 0, failed: 0 };
@@ -141,17 +151,20 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
 
   // End: its time is within a tick (dismissed at that time), or the save
   // is no longer on its reminder day (dismissed now).
-  const { data: open } = await db
+  const { data: open, error: openError } = await db
     .from("live_activity_runs")
     .select("item_id, remind_at, ends_at")
     .eq("group_id", groupId)
     .is("ended_at", null);
+  if (openError) throw openError;
   const runs = (open ?? []) as { item_id: string; remind_at: string; ends_at: string | null }[];
   if (runs.length) {
-    const { data: rows } = await db
+    // A failed read here would look like every save had gone.
+    const { data: rows, error: rowsError } = await db
       .from("items")
       .select("id, kind, starts_on, ends_on, status, deleted_at, remind_at")
       .in("id", runs.map((r) => r.item_id));
+    if (rowsError) throw rowsError;
     const byId = new Map((rows ?? []).map((r: { id: string }) => [r.id, r]));
     for (const run of runs) {
       const item = byId.get(run.item_id) as
@@ -165,9 +178,11 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
 
       const dismissAt = gone || pastDay || endsAt <= at ? at : endsAt;
       const label = item ? activityLabel(item.kind, item.starts_on, item.ends_on, run.remind_at) : "Today";
-      const { data: tokens } = await db.from("live_activity_tokens").select("token").eq("item_id", run.item_id);
+      const { data: tokens, error: tokensError } = await db
+        .from("live_activity_tokens").select("token").eq("item_id", run.item_id);
+      if (tokensError) throw tokensError;
       for (const { token } of (tokens ?? []) as { token: string }[]) {
-        tally(await sendLiveActivity(token, {
+        tally(await send(token, {
           event: "end",
           "content-state": { label },
           "dismissal-date": Math.floor(dismissAt.getTime() / 1000),
@@ -194,18 +209,23 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
   const due = ((dueRows ?? []) as ActivityItem[]).filter((item) => startDue(item, clock));
   if (!due.length) return result;
 
-  const { data: members } = await db.from("group_members").select("user_id").eq("group_id", groupId);
+  const { data: members, error: membersError } = await db
+    .from("group_members").select("user_id").eq("group_id", groupId);
+  if (membersError) throw membersError;
   const userIds = (members ?? []).map((m: { user_id: string }) => m.user_id);
   if (!userIds.length) return result;
-  const { data: tokenRows } = await db.from("activity_tokens").select("token").in("user_id", userIds);
+  const { data: tokenRows, error: tokenError } = await db
+    .from("activity_tokens").select("token").in("user_id", userIds);
+  if (tokenError) throw tokenError;
   const tokens = ((tokenRows ?? []) as { token: string }[]).map((t) => t.token);
   if (!tokens.length) return result;
 
-  const { data: startedRows } = await db
+  const { data: startedRows, error: startedError } = await db
     .from("live_activity_runs")
     .select("item_id")
     .eq("remind_at", today)
     .in("item_id", due.map((i) => i.id));
+  if (startedError) throw startedError;
   const started = new Set((startedRows ?? []).map((r: { item_id: string }) => r.item_id));
   const endsAt = activityEnd(home.timezone, today, at);
 
@@ -217,12 +237,19 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
     // A twin cron hit already claimed it.
     if (claim?.code === "23505") continue;
     if (claim) throw claim;
-    result.started++;
     const aps = startAps(item, today, endsAt);
+    let failed = 0;
     for (const token of tokens) {
-      const r = await sendLiveActivity(token, aps);
+      const r = await send(token, aps, endsAt);
       tally(r);
       if (r === "gone") await db.from("activity_tokens").delete().eq("token", token);
+      if (r === "failed") failed++;
+    }
+    // Nobody got it: let the next tick start it instead.
+    if (failed === tokens.length) {
+      await db.from("live_activity_runs").delete().eq("item_id", item.id).eq("remind_at", today);
+    } else {
+      result.started++;
     }
   }
   return result;

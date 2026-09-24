@@ -259,10 +259,10 @@ struct Composer: View {
 
     private func loadPhoto(_ item: PhotosPickerItem) async {
         guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data)
+              let jpeg = data.compressedImageForUpload()
         else { return }
         withAnimation(.snappy) {
-            imageJPEG = image.compressedForUpload()
+            imageJPEG = jpeg
         }
     }
 }

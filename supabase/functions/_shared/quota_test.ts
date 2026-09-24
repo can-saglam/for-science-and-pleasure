@@ -2,8 +2,14 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { consumeQuota, DAILY } from "./quota.ts";
 
 /** A fake client: `usage` is today's usage_daily row, `plus` whether the
- * entitlements count comes back non-zero. */
-function stub(usage: Record<string, number> | null, plus: boolean, onWrite: (op: string, row: unknown) => void) {
+ * entitlements count comes back non-zero. Counting goes through the
+ * `bump_usage` RPC, reported to `onBump`. */
+function stub(
+  usage: Record<string, number> | null,
+  plus: boolean,
+  onBump: (args: Record<string, unknown>) => void,
+  bumpError: unknown = null,
+) {
   return {
     from(table: string) {
       const q = {
@@ -11,14 +17,6 @@ function stub(usage: Record<string, number> | null, plus: boolean, onWrite: (op:
         eq() { return q; },
         in() { return q; },
         or() { return Promise.resolve({ count: plus ? 1 : 0 }); },
-        update(row: unknown) {
-          onWrite("update", row);
-          return { eq() { return q; } };
-        },
-        insert(row: unknown) {
-          onWrite("insert", row);
-          return Promise.resolve({ error: null });
-        },
         maybeSingle() {
           return Promise.resolve({ data: table === "usage_daily" ? usage : { group_id: "g1" } });
         },
@@ -28,6 +26,10 @@ function stub(usage: Record<string, number> | null, plus: boolean, onWrite: (op:
       };
       return q;
     },
+    rpc(name: string, args: Record<string, unknown>) {
+      if (name === "bump_usage") onBump(args);
+      return Promise.resolve({ data: 1, error: bumpError });
+    },
   } as never;
 }
 
@@ -36,25 +38,32 @@ Deno.test("ten a day free, fifty with Plus", () => {
   assertEquals(DAILY.plus, 50);
 });
 
-Deno.test("first use of the day inserts a row", async () => {
-  let wrote: unknown;
-  const ok = await consumeQuota(stub(null, false, (_op, row) => { wrote = row; }), "u1", "parse");
+Deno.test("first use of the day counts one of its kind", async () => {
+  let bumped: Record<string, unknown> | undefined;
+  const ok = await consumeQuota(stub(null, false, (args) => { bumped = args; }), "u1", "parse");
   assertEquals(ok, true);
-  assertEquals((wrote as { parse: number }).parse, 1);
+  assertEquals(bumped?.p_user_id, "u1");
+  assertEquals(bumped?.p_kind, "parse");
+  assertEquals(typeof bumped?.p_day, "string");
 });
 
 Deno.test("kinds share one allowance", async () => {
-  const writes: string[] = [];
-  const ok = await consumeQuota(stub({ parse: 6, locate: 1, suggest: 3 }, false, (op) => writes.push(op)), "u1", "parse");
+  const bumps: unknown[] = [];
+  const ok = await consumeQuota(stub({ parse: 6, locate: 1, suggest: 3 }, false, (a) => bumps.push(a)), "u1", "parse");
   assertEquals(ok, false);
-  assertEquals(writes, []);
+  assertEquals(bumps, []);
 });
 
-Deno.test("under the free allowance increments only its own kind", async () => {
-  let wrote: unknown;
-  const ok = await consumeQuota(stub({ parse: 3, locate: 0, suggest: 1 }, false, (_op, row) => { wrote = row; }), "u1", "suggest");
+Deno.test("under the free allowance counts only its own kind", async () => {
+  let bumped: Record<string, unknown> | undefined;
+  const ok = await consumeQuota(stub({ parse: 3, locate: 0, suggest: 1 }, false, (a) => { bumped = a; }), "u1", "suggest");
   assertEquals(ok, true);
-  assertEquals(wrote, { suggest: 2 });
+  assertEquals(bumped?.p_kind, "suggest");
+});
+
+Deno.test("a failed count refuses rather than letting it through uncounted", async () => {
+  const ok = await consumeQuota(stub(null, false, () => {}, { message: "down" }), "u1", "parse");
+  assertEquals(ok, false);
 });
 
 Deno.test("Plus keeps going past ten", async () => {

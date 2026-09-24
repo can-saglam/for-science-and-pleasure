@@ -56,10 +56,18 @@ const schema = (home: Home) => ({
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// The edge worker is killed at 150 s. Whatever isn't done by then is
+// returned without a pin, and the next run picks it up.
+const BUDGET_MS = 135_000;
+/** Leave the model out once the quick passes have used this much. */
+const MODEL_CUTOFF_MS = 75_000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
   try {
     if (!(req.headers.get("Authorization") ?? "").startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "unauthorized" }), {
@@ -147,7 +155,7 @@ Deno.serve(async (req) => {
     // Web search + geocoding are slow; keep the model batch small so the
     // whole run fits in the edge worker's wall-clock budget. Leftovers get
     // picked up the next time the user runs it.
-    const modelBatch = unmatched.slice(0, 8);
+    const modelBatch = elapsed() < MODEL_CUTOFF_MS ? unmatched.slice(0, 8) : [];
     if (modelBatch.length > 0) {
       const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
       const prompt = [
@@ -161,34 +169,40 @@ Deno.serve(async (req) => {
 
       // Sonnet: address lookup doesn't need opus, and opus + web search
       // blows past the edge worker's 150s wall-clock budget.
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-5",
-        max_tokens: 4096,
-        output_config: { format: { type: "json_schema", schema: schema(home) } },
-        tools: [
-          { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 4 },
-        ],
-        messages: [{ role: "user", content: prompt }],
-      });
-      // Web search interleaves commentary; the JSON is the final text block.
-      const textBlock = [...response.content].reverse().find((b) => b.type === "text");
-      if (!textBlock || textBlock.type !== "text") {
-        throw new Error("No structured output returned");
-      }
-      const { locations } = JSON.parse(textBlock.text) as {
-        locations: {
-          id: string;
-          venue: string | null;
-          area: string | null;
-          address: string | null;
-          confidence: "high" | "medium" | "low";
-        }[];
+      type Location = {
+        id: string;
+        venue: string | null;
+        area: string | null;
+        address: string | null;
+        confidence: "high" | "medium" | "low";
       };
+      let locations: Location[] = [];
+      try {
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-5",
+          max_tokens: 4096,
+          output_config: { format: { type: "json_schema", schema: schema(home) } },
+          tools: [
+            { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 4 },
+          ],
+          messages: [{ role: "user", content: prompt }],
+        }, { timeout: BUDGET_MS - 10_000 - elapsed(), maxRetries: 0 });
+        // Web search interleaves commentary; the JSON is the final text block.
+        const textBlock = [...response.content].reverse().find((b) => b.type === "text");
+        if (!textBlock || textBlock.type !== "text") {
+          throw new Error("No structured output returned");
+        }
+        ({ locations } = JSON.parse(textBlock.text) as { locations: Location[] });
+      } catch (e) {
+        // The pins already found are still worth sending back.
+        if (proposals.length === 0) throw e;
+        console.error("locate model", e);
+      }
 
       for (const loc of locations) {
         let coords: { lat: number; lng: number } | null = null;
         const item = byId.get(loc.id);
-        if (loc.venue || loc.area || loc.address) {
+        if ((loc.venue || loc.area || loc.address) && elapsed() < BUDGET_MS) {
           // Addresses geocode far more reliably than small-venue names.
           if (loc.address) {
             coords = await geocodeNearHome(geocode, loc.address, home);

@@ -73,6 +73,7 @@ private struct RootGate: View {
                 SupabaseSync.resetCursor()
                 GroupStore.shared.signedOut()
                 HomeStore.shared.signedOut()
+                Task { await LiveDay.signedOut() }
                 phase = .checking
             } else {
                 cameFromFrontDoor = true

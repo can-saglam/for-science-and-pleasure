@@ -98,18 +98,20 @@ export async function groupTokens(
   groupId: string,
   excludeUserId?: string | null,
 ): Promise<string[]> {
-  const { data: members } = await db
+  const { data: members, error: membersError } = await db
     .from("group_members")
     .select("user_id")
     .eq("group_id", groupId);
+  if (membersError) throw membersError;
   const ids = (members ?? [])
     .map((m: { user_id: string }) => m.user_id)
     .filter((id: string) => id !== excludeUserId);
   if (ids.length === 0) return [];
-  const { data: tokens } = await db
+  const { data: tokens, error: tokensError } = await db
     .from("apns_tokens")
     .select("token")
     .in("user_id", ids);
+  if (tokensError) throw tokensError;
   return (tokens ?? []).map((t: { token: string }) => t.token);
 }
 

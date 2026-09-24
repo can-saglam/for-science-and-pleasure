@@ -139,7 +139,10 @@ struct ThemeSnapshot {
 struct SaveEntry: TimelineEntry {
     let date: Date
     let item: SnapshotItem?
-    let image: UIImage?
+    /// Already sized for the widget, and kept as JPEG: a timeline holds five
+    /// entries, and five decoded photos can push a large widget past its
+    /// memory limit. It's decoded only while this entry is drawn.
+    let photo: Data?
     let theme: ThemeSnapshot
     var canSkip = false
 }
@@ -156,7 +159,7 @@ struct Provider: TimelineProvider {
                 colorHex: "#8f4a3d",
                 hasImage: false
             ),
-            image: nil,
+            photo: nil,
             theme: ThemeSnapshot.load()
         )
     }
@@ -185,7 +188,7 @@ struct Provider: TimelineProvider {
     private func entry(at date: Date, in context: Context) -> SaveEntry {
         let all = Snapshot.load()
         let theme = ThemeSnapshot.load()
-        guard !all.isEmpty else { return SaveEntry(date: date, item: nil, image: nil, theme: theme) }
+        guard !all.isEmpty else { return SaveEntry(date: date, item: nil, photo: nil, theme: theme) }
         // Seeded by the hour so every size of the widget shows the same
         // pick, scrambled so consecutive hours jump around the list.
         let hour = Int(date.timeIntervalSince1970 / 3600)
@@ -194,8 +197,10 @@ struct Provider: TimelineProvider {
         // Decode at the widget's real pixel size: displaySize is in points,
         // and current iPhones are 3x displays.
         let side = max(context.displaySize.width, context.displaySize.height) * 3
-        let image = item.hasImage ? Snapshot.image(for: item.id, maxSide: side) : nil
-        return SaveEntry(date: date, item: item, image: image, theme: theme, canSkip: all.count > 1)
+        let photo = item.hasImage
+            ? Snapshot.image(for: item.id, maxSide: side)?.jpegData(compressionQuality: 0.85)
+            : nil
+        return SaveEntry(date: date, item: item, photo: photo, theme: theme, canSkip: all.count > 1)
     }
 }
 
@@ -230,7 +235,7 @@ struct RandomSaveView: View {
     /// color stands in, so the widget always looks dressed.
     @ViewBuilder
     private var background: some View {
-        if let image = entry.image {
+        if let image = entry.photo.flatMap(UIImage.init(data:)) {
             Color.clear.overlay(
                 Image(uiImage: image)
                     .resizable()
@@ -301,7 +306,7 @@ struct RandomSaveView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .shadow(color: .black.opacity(entry.image == nil ? 0 : 0.35), radius: 3, y: 1)
+        .shadow(color: .black.opacity(entry.photo == nil ? 0 : 0.35), radius: 3, y: 1)
     }
 
     private var nextButton: some View {
@@ -311,10 +316,10 @@ struct RandomSaveView: View {
                 .foregroundStyle(typeColor)
                 .frame(width: 32, height: 32)
                 .background(
-                    Circle().fill(entry.image != nil ? Color.black.opacity(0.45) : entry.theme.ink.opacity(0.2))
+                    Circle().fill(entry.photo != nil ? Color.black.opacity(0.45) : entry.theme.ink.opacity(0.2))
                 )
                 .overlay(
-                    Circle().strokeBorder(typeColor.opacity(entry.image != nil ? 0.3 : 0.18), lineWidth: 0.75)
+                    Circle().strokeBorder(typeColor.opacity(entry.photo != nil ? 0.3 : 0.18), lineWidth: 0.75)
                 )
         }
         .buttonStyle(.plain)
@@ -324,7 +329,7 @@ struct RandomSaveView: View {
     /// Photo sits on a dark scrim, so type stays white. Empty and no-photo
     /// follow the app theme — cream paper gets black ink.
     private var typeColor: Color {
-        entry.image != nil ? .white : entry.theme.ink
+        entry.photo != nil ? .white : entry.theme.ink
     }
 
     private var empty: some View {

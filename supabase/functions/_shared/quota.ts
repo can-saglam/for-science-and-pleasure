@@ -36,16 +36,7 @@ export async function consumeQuota(
   const used = (existing?.parse ?? 0) + (existing?.locate ?? 0) + (existing?.suggest ?? 0);
   if (used >= DAILY.free && (used >= DAILY.plus || !(await coveredByPlus(db, userId)))) return false;
 
-  if (!existing) {
-    const row = { user_id: userId, day, parse: 0, locate: 0, suggest: 0, [kind]: 1 };
-    const { error } = await db.from("usage_daily").insert(row);
-    return !error;
-  }
-  const { error } = await db
-    .from("usage_daily")
-    .update({ [kind]: ((existing[kind] as number | undefined) ?? 0) + 1 })
-    .eq("user_id", userId)
-    .eq("day", day);
+  const { error } = await db.rpc("bump_usage", { p_user_id: userId, p_day: day, p_kind: kind });
   return !error;
 }
 

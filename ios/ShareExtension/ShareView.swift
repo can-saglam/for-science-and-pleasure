@@ -396,17 +396,17 @@ struct ShareView: View {
     private func loadImage(from provider: NSItemProvider) async -> Data? {
         await withCheckedContinuation { cont in
             provider.loadItem(forTypeIdentifier: UTType.image.identifier) { item, _ in
-                let image: UIImage? =
+                let jpeg: Data? =
                     if let ui = item as? UIImage {
-                        ui
-                    } else if let url = item as? URL, let data = try? Data(contentsOf: url) {
-                        UIImage(data: data)
+                        ui.compressedForUpload()
+                    } else if let url = item as? URL, let data = try? Data(contentsOf: url, options: .mappedIfSafe) {
+                        data.compressedImageForUpload()
                     } else if let data = item as? Data {
-                        UIImage(data: data)
+                        data.compressedImageForUpload()
                     } else {
                         nil
                     }
-                cont.resume(returning: image?.compressedForUpload())
+                cont.resume(returning: jpeg)
             }
         }
     }

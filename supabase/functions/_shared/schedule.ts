@@ -75,6 +75,13 @@ export function homeInstant(timeZone: string, date: string, hour: number): Date 
   return new Date(guess);
 }
 
+/** The calendar day before `date` (YYYY-MM-DD). */
+export function dayBefore(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Fixed 10:00–10:59 home hour — when shared reminders fire. */
 export function isMorningHour(clock: LocalClock, hour = 10): boolean {
   const now = Number(clock.hour) * 60 + Number(clock.minute);

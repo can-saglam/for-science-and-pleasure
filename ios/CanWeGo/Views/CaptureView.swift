@@ -1,3 +1,4 @@
+import ImageIO
 import PhotosUI
 import SwiftData
 import SwiftUI
@@ -39,6 +40,9 @@ struct CaptureView: View {
     @State private var firstLook: Item?
     /// The last parse failed for want of a connection.
     @State private var offline = false
+    /// What the duplicate checks compare against. Read on opening and after
+    /// each parse, not per render: the card's check runs on every keystroke.
+    @State private var library: [Item] = []
 
     private var inputDetent: PresentationDetent {
         guard inputHeight > 0 else { return .medium }
@@ -109,6 +113,7 @@ struct CaptureView: View {
             withAnimation(.snappy) { detent = now }
         }
         .onAppear {
+            loadLibrary()
             // A picture from Visual Intelligence is read straight away.
             if imageJPEG == nil, draft == nil, let picture = CaptureGate.take() {
                 imageJPEG = picture
@@ -449,8 +454,8 @@ struct CaptureView: View {
         return detector?.firstMatch(in: text, range: range)?.url?.absoluteString
     }
 
-    private var library: [Item] {
-        (try? context.fetch(FetchDescriptor<Item>())) ?? []
+    private func loadLibrary() {
+        library = (try? context.fetch(FetchDescriptor<Item>())) ?? []
     }
 
     private func duplicate(of url: String?) -> Item? {
@@ -532,6 +537,7 @@ struct CaptureView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Known URL? Say so before spending a parse — unless they've already
         // chosen to save it anyway.
+        loadLibrary()
         if !saveAnyway, let twin = duplicate(of: firstURL(in: trimmed)) {
             withAnimation(.snappy) { existing = twin }
             return
@@ -565,6 +571,8 @@ struct CaptureView: View {
             item.colorHex = card.color
             item.imageUrl = card.image_url
             item.source = card.source
+            // A partner's save may have synced in while the parser worked.
+            loadLibrary()
             withAnimation(.spring(duration: 0.4)) { draft = item }
         } catch {
             // ParseError already speaks to a person; everything else
@@ -643,5 +651,22 @@ extension UIImage {
             data = resized.jpegData(compressionQuality: quality)
         }
         return data
+    }
+}
+
+extension Data {
+    /// The same upload JPEG, read from an image file's bytes at the target
+    /// size: ImageIO decodes straight to 2000 px, so a 48 MP photo never
+    /// sits in memory whole (the share extension can't hold one).
+    func compressedImageForUpload(maxEdge: CGFloat = 2000) -> Data? {
+        guard let source = CGImageSourceCreateWithData(self as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceShouldCacheImmediately: true,
+                  kCGImageSourceThumbnailMaxPixelSize: maxEdge,
+              ] as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: image).compressedForUpload(maxEdge: maxEdge)
     }
 }

@@ -445,7 +445,9 @@ struct ContentView: View {
     /// lands by itself as soon as there's room (or Plus).
     @discardableResult
     private func drainInbox() -> [String] {
-        let existing = Set(items.compactMap { $0.url.map(SavedURLIndex.normalize) })
+        // Same rule as the share sheet's "already saved": a deleted save
+        // doesn't count, and one that just landed does.
+        var existing = Set(items.filter { !$0.isDeleted }.compactMap { $0.url.map(SavedURLIndex.normalize) })
         var claimed: [Item] = []
         var claimedURLs: [String] = []
         var parked: [(file: String, category: String)] = []
@@ -472,7 +474,10 @@ struct ContentView: View {
                     try context.save()
                     SharedInbox.acknowledge(claim)
                     claimed.append(item)
-                    if let url = save.url { claimedURLs.append(url) }
+                    if let url = save.url {
+                        claimedURLs.append(url)
+                        existing.insert(SavedURLIndex.normalize(url))
+                    }
                 } catch {
                     context.delete(item)
                     try? context.save()

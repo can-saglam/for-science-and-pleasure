@@ -91,6 +91,16 @@ enum LiveDay {
         sweepPhotos()
     }
 
+    /// Signing out took the phone's tokens off the server; the screen and
+    /// the marker follow, so the next account sends its own.
+    static func signedOut() async {
+        UserDefaults.standard.removeObject(forKey: sentKey)
+        for activity in Activity<DayActivityAttributes>.activities {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        sweepPhotos()
+    }
+
     /// Token on the server matches the switch; off also clears the screen.
     private static func sync() async {
         if isOn {

@@ -113,7 +113,14 @@ struct SaveLinkIntent: AppIntent {
         if SavedURLIndex.contains(link.absoluteString) {
             return .result(dialog: "That one's already in your saves.")
         }
-        let card = try await SaveInbox.lookUp(link.absoluteString)
+        let card: ParseClient.Card
+        do {
+            card = try await SaveInbox.lookUp(link.absoluteString)
+        } catch SaveIntentError.tooSlow {
+            // The link is all it needs; the app reads it when next opened.
+            OfflineDrafts.enqueue(id: UUID(), text: link.absoluteString, imageJPEG: nil, inLibrary: false)
+            return .result(dialog: "That page is slow to read. It\u{2019}ll be in your saves next time you open Can We Go.")
+        }
         try SaveInbox.park(card, url: card.url ?? link.absoluteString, userId: userId)
         return .result(dialog: "Saved \u{201c}\(card.title)\u{201d}.")
     }
@@ -229,9 +236,23 @@ struct AddToLibraryIntent: AppIntent {
 /// category checks next time the app is on screen, or straight away if it is.
 @MainActor
 enum SaveInbox {
-    static func lookUp(_ text: String) async throws -> ParseClient.Card {
+    /// Siri won't wait for the parser's own timeouts (two minutes, and a
+    /// retry). Past the deadline the look-up is cancelled, so nothing lands
+    /// after Siri has already given up.
+    static func lookUp(_ text: String, within seconds: Double = 45) async throws -> ParseClient.Card {
         do {
-            return try await ParseClient.parse(text: text, imageJPEG: nil)
+            return try await withThrowingTaskGroup(of: ParseClient.Card?.self) { group in
+                group.addTask { try await ParseClient.parse(text: text, imageJPEG: nil) }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(seconds))
+                    return nil
+                }
+                defer { group.cancelAll() }
+                guard let card = try await group.next() ?? nil else { throw SaveIntentError.tooSlow }
+                return card
+            }
+        } catch let error as SaveIntentError {
+            throw error
         } catch {
             throw SaveIntentError.lookup((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message)
         }
@@ -250,6 +271,7 @@ enum SaveIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notALink
     case nothingAsked
     case lookup(String)
+    case tooSlow
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -257,6 +279,7 @@ enum SaveIntentError: Error, CustomLocalizedStringResourceConvertible {
         case .notALink: "That isn't a web link."
         case .nothingAsked: "Tell me what to add, like \u{201c}the new Anish Kapoor show at the Hayward\u{201d}."
         case .lookup(let why): "\(why)"
+        case .tooSlow: "That\u{2019}s taking too long to look up. Try again in a moment, or add it in the app."
         }
     }
 }

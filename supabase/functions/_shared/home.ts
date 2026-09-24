@@ -160,13 +160,19 @@ export function homeFromRow(row: GroupHomeRow | null | undefined): Home {
   };
 }
 
-/** The home of `groupId`; city-neutral when the group has none. */
-export async function groupHome(db: SupabaseClient, groupId: string | null): Promise<Home> {
+/** The home of `groupId`; city-neutral when the group has none. `strict`
+ * throws on a failed read instead, for callers that act on the clock. */
+export async function groupHome(
+  db: SupabaseClient,
+  groupId: string | null,
+  strict = false,
+): Promise<Home> {
   if (!groupId) return { ...UNSET };
-  const { data } = await db
+  const { data, error } = await db
     .from("groups")
     .select("home_locality, home_country, home_timezone, home_lat, home_lng")
     .eq("id", groupId)
     .maybeSingle();
+  if (error && strict) throw error;
   return homeFromRow(data as GroupHomeRow | null);
 }

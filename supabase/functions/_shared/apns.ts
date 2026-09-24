@@ -32,6 +32,9 @@ async function providerToken(): Promise<string> {
 
 export type ApnsResult = "sent" | "gone" | "failed";
 
+/** One stuck connection must not hold up the rest of a group's pushes. */
+const SEND_TIMEOUT_MS = 10_000;
+
 /** Sends one alert push. Tries production first, then the sandbox so
  * Xcode-installed dev builds get pushes too (TestFlight uses production). */
 export async function sendApnsAlert(
@@ -68,6 +71,7 @@ export async function sendApnsAlert(
         "content-type": "application/json",
       },
       body: payload,
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     if (response.ok) return "sent";
     if (response.status === 410) return "gone";
@@ -91,10 +95,13 @@ export async function sendApnsAlert(
 
 /** Starts or ends a Live Activity: `token` is a push-to-start token for a
  * start, the activity's own update token otherwise. Same host fallback and
- * pruning rules as alerts. */
+ * pruning rules as alerts. `expiresAt` stops APNs delivering it after that
+ * (a phone that was off all day shouldn't get the morning's start at
+ * night). */
 export async function sendLiveActivity(
   token: string,
   aps: Record<string, unknown>,
+  expiresAt?: Date,
 ): Promise<ApnsResult> {
   const payload = JSON.stringify({ aps: { timestamp: Math.floor(Date.now() / 1000), ...aps } });
   const auth = await providerToken();
@@ -109,8 +116,10 @@ export async function sendLiveActivity(
         "apns-push-type": "liveactivity",
         "apns-priority": "10",
         "content-type": "application/json",
+        ...(expiresAt ? { "apns-expiration": String(Math.floor(expiresAt.getTime() / 1000)) } : {}),
       },
       body: payload,
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     if (response.ok) return "sent";
     if (response.status === 410) return "gone";

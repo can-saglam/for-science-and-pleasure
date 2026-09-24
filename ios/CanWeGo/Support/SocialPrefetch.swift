@@ -131,9 +131,8 @@ enum SocialPrefetch {
         request.setValue(mobileUA, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
-              data.count < 6_000_000,
-              let image = UIImage(data: data)
+              data.count < 6_000_000
         else { return nil }
-        return image.compressedForUpload()
+        return data.compressedImageForUpload()
     }
 }

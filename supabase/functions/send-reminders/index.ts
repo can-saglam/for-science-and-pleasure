@@ -2,8 +2,8 @@
 // device in the group (including whoever set it).
 //
 // pg_cron runs dispatch_reminders() every 15 minutes. It POSTs here with
-// {group_id} for each group whose home clock is inside 10:00–10:59 (the
-// presets) or that has a hand-picked remind_time already past. This
+// {group_id} for each group with a preset due and its home clock inside
+// 10:00–10:59, or a hand-picked remind_time already past. This
 // function re-checks both, dedups with reminder_runs (item_id, remind_at),
 // and fans out. Without a group_id (manual runs) it does every group. `at`
 // overrides the clock (tests). `force` bypasses the windows and the run
@@ -18,7 +18,7 @@ import {
   customTimeDue,
   reminderBody,
 } from "../_shared/reminders.ts";
-import { isMorningHour, localClock } from "../_shared/schedule.ts";
+import { dayBefore, isMorningHour, localClock } from "../_shared/schedule.ts";
 
 type GroupResult =
   | { group_id: string; skipped: true; reason: string }
@@ -44,26 +44,34 @@ async function runGroup(
   at: Date,
   force: boolean,
 ): Promise<GroupResult> {
-  const home = await groupHome(supabase, groupId);
+  // Without push there's nothing to send, and a reminder marked done here
+  // would never go out once it's fixed.
+  if (!apnsConfigured()) return { group_id: groupId, skipped: true, reason: "apns not configured" };
+
+  const home = await groupHome(supabase, groupId, true);
   const clock = localClock(home.timezone, at);
   const morning = isMorningHour(clock);
 
   const today = homeToday(home, at);
+  // A hand-picked time in the last quarter hour of the day is only reached
+  // by the first ticks after midnight.
+  const yesterday = !force && clock.hour === "00" ? dayBefore(today) : null;
 
   const { data: rows, error: itemsError } = await supabase
     .from("items")
     .select("id, kind, title, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_at, remind_time")
     .eq("group_id", groupId)
-    .eq("remind_at", today)
+    .in("remind_at", yesterday ? [today, yesterday] : [today])
     .eq("status", "saved")
     .is("deleted_at", null);
   if (itemsError) throw itemsError;
 
   // Presets wait for the 10:00 hour; hand-picked times fire once the home
   // clock has passed them (reminder_runs stops a second send).
-  const due = ((rows ?? []) as DueItem[]).filter((item) =>
-    force || (item.remind_time == null ? morning : customTimeDue(item.remind_time, clock))
-  );
+  const due = ((rows ?? []) as DueItem[]).filter((item) => {
+    if (item.remind_at !== today) return item.remind_time != null;
+    return force || (item.remind_time == null ? morning : customTimeDue(item.remind_time, clock));
+  });
   if (!force && !morning && due.length === 0) {
     return { group_id: groupId, skipped: true, reason: "outside schedule" };
   }
@@ -73,33 +81,41 @@ async function runGroup(
   let apnsGone = 0;
   let apnsFailed = 0;
 
-  const tokens = apnsConfigured() ? await groupTokens(supabase, groupId) : [];
+  const tokens = await groupTokens(supabase, groupId);
 
   for (const item of due) {
     if (!force) {
-      const { data: existingRun } = await supabase
+      const { data: existingRun, error: runError } = await supabase
         .from("reminder_runs")
         .select("status, started_at")
         .eq("item_id", item.id)
         .eq("remind_at", item.remind_at)
         .maybeSingle();
+      if (runError) throw runError;
       if (existingRun?.status === "completed") continue;
       if (existingRun?.status === "running") {
         const started = existingRun.started_at ? Date.parse(existingRun.started_at) : 0;
         if (Date.now() - started < 20 * 60 * 1000) continue;
       }
-      const { error } = existingRun
+      // Re-claiming only matches the row as it was read, so of two runs
+      // that both saw it stale or failed, one sends.
+      const { data: claimed, error } = existingRun
         ? await supabase
           .from("reminder_runs")
           .update({ status: "running", started_at: new Date().toISOString(), error: null })
           .eq("item_id", item.id)
           .eq("remind_at", item.remind_at)
+          .eq("status", existingRun.status)
+          .eq("started_at", existingRun.started_at)
+          .select("item_id")
         : await supabase
           .from("reminder_runs")
-          .insert({ item_id: item.id, remind_at: item.remind_at, status: "running" });
+          .insert({ item_id: item.id, remind_at: item.remind_at, status: "running" })
+          .select("item_id");
       // A twin cron hit already claimed this row.
       if (error?.code === "23505") continue;
       if (error) throw error;
+      if (!claimed?.length) continue;
     }
 
     items++;
@@ -109,32 +125,45 @@ async function runGroup(
       : reminderBody(item.reminder_offset_days, item.reminder_anchor, item.starts_on, item.ends_on);
     const pushTitle = custom ? CUSTOM_REMINDER_TITLE : item.title;
 
-    try {
-      for (const token of tokens) {
-        const result = await sendApnsAlert(token, body, pushTitle, { itemID: item.id }, groupId);
-        if (result === "sent") apnsSent++;
-        else if (result === "gone") {
-          apnsGone++;
-          await supabase.from("apns_tokens").delete().eq("token", token);
-        } else apnsFailed++;
+    let failed = 0;
+    for (const token of tokens) {
+      let result;
+      try {
+        result = await sendApnsAlert(token, body, pushTitle, { itemID: item.id }, groupId);
+      } catch (error) {
+        console.error("apns error", error);
+        result = "failed";
       }
+      if (result === "sent") apnsSent++;
+      else if (result === "gone") {
+        apnsGone++;
+        await supabase.from("apns_tokens").delete().eq("token", token);
+      } else {
+        apnsFailed++;
+        failed++;
+      }
+    }
 
-      if (!force) {
-        await supabase
+    if (!force) {
+      // Nobody got it: the next tick tries again. Anyone did: done, so no
+      // phone hears it twice.
+      const allFailed = tokens.length > 0 && failed === tokens.length;
+      const update = allFailed
+        ? { status: "failed", error: `${failed} of ${tokens.length} devices failed` }
+        : { status: "completed", completed_at: new Date().toISOString() };
+      let { error } = await supabase
+        .from("reminder_runs")
+        .update(update)
+        .eq("item_id", item.id)
+        .eq("remind_at", item.remind_at);
+      if (error) {
+        ({ error } = await supabase
           .from("reminder_runs")
-          .update({ status: "completed", completed_at: new Date().toISOString() })
+          .update(update)
           .eq("item_id", item.id)
-          .eq("remind_at", item.remind_at);
+          .eq("remind_at", item.remind_at));
       }
-    } catch (error) {
-      if (!force) {
-        await supabase
-          .from("reminder_runs")
-          .update({ status: "failed", error: String(error) })
-          .eq("item_id", item.id)
-          .eq("remind_at", item.remind_at);
-      }
-      throw error;
+      if (error) throw error;
     }
   }
 
