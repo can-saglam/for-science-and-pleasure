@@ -137,6 +137,31 @@ struct AddToLibraryIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        let outcome = try await Self.add(what) { question in
+            try await requestConfirmation(actionName: .add, dialog: "\(question)")
+        }
+        return .result(dialog: "\(outcome.sentence)")
+    }
+
+    enum Outcome {
+        case alreadySaved(Item)
+        case added(ParseClient.Card, id: UUID)
+
+        @MainActor
+        var sentence: String {
+            switch self {
+            case .alreadySaved(let twin):
+                "\u{201c}\(twin.title)\u{201d} is already in your saves. \(DuplicateFinder.describe(twin))"
+            case .added(let card, _):
+                "Added \u{201c}\(card.title)\u{201d}."
+            }
+        }
+    }
+
+    /// Looks it up, answers an exact duplicate with who saved it, asks
+    /// (naming any near-match), and on a yes parks it in the inbox.
+    @MainActor
+    static func add(_ what: String, confirm: (String) async throws -> Void) async throws -> Outcome {
         guard SupabaseAuth.shared.signedIn, let userId = SupabaseAuth.shared.userId else {
             throw SaveIntentError.signedOut
         }
@@ -147,16 +172,16 @@ struct AddToLibraryIntent: AppIntent {
         if let twin = DuplicateFinder.match(
             url: card.url, title: card.title, startsOn: card.starts_on, kind: card.kind, in: library
         ) {
-            return .result(dialog: "\u{201c}\(twin.title)\u{201d} is already in your saves. \(DuplicateFinder.describe(twin))")
+            return .alreadySaved(twin)
         }
-        let question = if let similar = Self.lookalike(of: card, in: library) {
-            "I found \(Self.spoken(card)). You already have \u{201c}\(similar.title)\u{201d} saved. Add this one too?"
+        if let similar = lookalike(of: card, in: library) {
+            try await confirm("I found \(spoken(card)). You already have \u{201c}\(similar.title)\u{201d} saved. Add this one too?")
         } else {
-            "I found \(Self.spoken(card)). Add it?"
+            try await confirm("I found \(spoken(card)). Add it?")
         }
-        try await requestConfirmation(actionName: .add, dialog: "\(question)")
-        try SaveInbox.park(card, url: card.url, userId: userId)
-        return .result(dialog: "Added \u{201c}\(card.title)\u{201d}.")
+        let id = UUID()
+        try SaveInbox.park(card, url: card.url, userId: userId, id: id)
+        return .added(card, id: id)
     }
 
     /// A save that's probably the same thing under another title ("Jaga
@@ -212,8 +237,9 @@ enum SaveInbox {
         }
     }
 
-    static func park(_ card: ParseClient.Card, url: String?, userId: UUID) throws {
+    static func park(_ card: ParseClient.Card, url: String?, userId: UUID, id: UUID? = nil) throws {
         var pending = SharedInbox.PendingSave(kind: card.kind, title: card.title)
+        pending.id = id
         pending.summary = card.summary
         pending.venue = card.venue
         pending.area = card.area

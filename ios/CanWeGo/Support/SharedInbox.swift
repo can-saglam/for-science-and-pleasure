@@ -38,6 +38,9 @@ enum SharedInbox {
         /// account on the same phone must not claim it.
         var userId: String?
         var groupId: String?
+        /// Set when whoever parked it already told someone the save's id
+        /// (Siri answers with the save it added).
+        var id: UUID?
     }
 
     struct Claim {
@@ -104,6 +107,7 @@ extension Item {
     /// Materialise a pending share-extension save as a real model object.
     convenience init(pending: SharedInbox.PendingSave) {
         self.init()
+        if let id = pending.id { self.id = id }
         kind = pending.kind
         title = pending.title
         summary = pending.summary
