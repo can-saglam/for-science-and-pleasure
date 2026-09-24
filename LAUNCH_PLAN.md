@@ -528,12 +528,12 @@ Deployment target stays **iOS 26**, with iOS 27 features behind
 both, and only the semantic index, view annotations, image prompts and
 Private Cloud Compute need 27. Revisit if the gating gets noisy.
 
-- **5.1 Widgets you configure.** `AppIntentConfiguration` with one
-  parameter, "Show": a random save (today's widget), Closing soon, This
-  week, Places near home, or one category. A **Been there** button on the
-  widget (`MarkBeenIntent`, shared with Siri in 5.2) and deep links to the
-  save. Check full-colour, tinted and clear rendering; photos keep colour
-  via `widgetAccentedRenderingMode`.
+- **5.1 Widgets you configure — dropped (24 Sep).** The widget stays as
+  it is in build 78, plus a **next** button on medium and large
+  (`NextSaveIntent`, runs in the widget, steps the hour's pick on by one
+  for every size). The "Show" picker (events / closing soon / this week /
+  places / one category) was built and is shelved in `git stash`
+  ("Phase 5.1 widget filters (shelved)"); no Been there button.
 - **5.2 Siri and Spotlight know your saves.** A `SaveEntity`
   (`AppEntity` + `IndexedEntity`, id = the item's server UUID, so it is
   also a `SyncableEntity` across devices) replaces `SpotlightIndex`'s
@@ -685,14 +685,14 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [ ] External TestFlight beta, then launch
 
 ### Phase 5
-- [ ] 5.1 Configurable widget ("Show": random / closing soon / this week / near home / category), Been there button, deep links, tinted + clear checked
+- [x] ~~5.1 Configurable widget~~ — dropped; widget as build 78 plus a next button on medium and large
 - [ ] 5.2 `SaveEntity` in the semantic index (replaces `SpotlightIndex`), open / mark been / remind / save-link intents, App Shortcuts, on-screen annotations; `AppIntentsTesting` suite
 - [ ] 5.3 Visual Intelligence: matching saves + "Save to Can We Go" from a camera capture or screenshot; `semanticContentSearch` into in-app search
 - [ ] 5.4 On-device instant draft for screenshots and text; offline drafts parse later
 - [ ] 5.5 Plan our day on Private Cloud Compute, with an Evaluations suite; decide free vs Plus
 - [ ] 5.6 Live Activity on reminder / "going today" days, push-started by `send-reminders`; landscape Dynamic Island
 - [ ] 5.7 Localisation: String Catalog, six languages reviewed by native speakers, summaries in the saver's language, localised listing
-- [ ] Featuring Nomination filed in App Store Connect once 5.1–5.3 are in TestFlight
+- [ ] Featuring Nomination filed in App Store Connect once 5.2–5.3 are in TestFlight
 
 ## Post-launch backlog (cut from launch, not forgotten)
 

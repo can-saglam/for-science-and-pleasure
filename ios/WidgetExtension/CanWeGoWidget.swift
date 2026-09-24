@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -63,6 +64,30 @@ enum Snapshot {
         else { return nil }
         return UIImage(cgImage: cg)
     }
+
+    /// How many saves the next button has stepped past the hour's pick.
+    /// Shared by every widget on the home screen, so sizes stay in step.
+    private static let skipKey = "widgetSkip"
+
+    static var skip: Int {
+        UserDefaults(suiteName: groupID)?.integer(forKey: skipKey) ?? 0
+    }
+
+    static func advance() {
+        UserDefaults(suiteName: groupID)?.set((skip + 1) % 10_000, forKey: skipKey)
+    }
+}
+
+/// The next button. Runs here in the widget; WidgetKit reloads the
+/// timeline once it returns, and the shifted pick comes up.
+struct NextSaveIntent: AppIntent {
+    static let title: LocalizedStringResource = "Next save"
+    static let isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        Snapshot.advance()
+        return .result()
+    }
 }
 
 // MARK: - Timeline
@@ -115,6 +140,7 @@ struct SaveEntry: TimelineEntry {
     let item: SnapshotItem?
     let image: UIImage?
     let theme: ThemeSnapshot
+    var canSkip = false
 }
 
 struct Provider: TimelineProvider {
@@ -162,13 +188,13 @@ struct Provider: TimelineProvider {
         // Seeded by the hour so every size of the widget shows the same
         // pick, scrambled so consecutive hours jump around the list.
         let hour = Int(date.timeIntervalSince1970 / 3600)
-        let index = abs(hour &* 2654435761 % all.count)
+        let index = (abs(hour &* 2654435761 % all.count) + Snapshot.skip) % all.count
         let item = all[index]
         // Decode at the widget's real pixel size: displaySize is in points,
         // and current iPhones are 3x displays.
         let side = max(context.displaySize.width, context.displaySize.height) * 3
         let image = item.hasImage ? Snapshot.image(for: item.id, maxSide: side) : nil
-        return SaveEntry(date: date, item: item, image: image, theme: theme)
+        return SaveEntry(date: date, item: item, image: image, theme: theme, canSkip: all.count > 1)
     }
 }
 
@@ -186,6 +212,9 @@ struct RandomSaveView: View {
         Group {
             if let item = entry.item {
                 content(item)
+                    .overlay(alignment: .topTrailing) {
+                        if family != .systemSmall, entry.canSkip { nextButton }
+                    }
                     .widgetURL(URL(string: "canwego://item/\(item.id.uuidString)"))
             } else {
                 empty
@@ -272,6 +301,23 @@ struct RandomSaveView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .shadow(color: .black.opacity(entry.image == nil ? 0 : 0.35), radius: 3, y: 1)
+    }
+
+    private var nextButton: some View {
+        Button(intent: NextSaveIntent()) {
+            Image(systemName: "chevron.forward")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(typeColor)
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle().fill(entry.image != nil ? Color.black.opacity(0.45) : entry.theme.ink.opacity(0.2))
+                )
+                .overlay(
+                    Circle().strokeBorder(typeColor.opacity(entry.image != nil ? 0.3 : 0.18), lineWidth: 0.75)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Next save")
     }
 
     /// Photo sits on a dark scrim, so type stays white. Empty and no-photo
