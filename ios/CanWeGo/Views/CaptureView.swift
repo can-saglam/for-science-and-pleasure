@@ -105,6 +105,11 @@ struct CaptureView: View {
             withAnimation(.snappy) { detent = now }
         }
         .onAppear {
+            // A picture from Visual Intelligence is read straight away.
+            if imageJPEG == nil, draft == nil, let picture = CaptureGate.take() {
+                imageJPEG = picture
+                Task { await parse() }
+            }
             // CWG_BLANK is only set by automated screenshot runs; it jumps
             // straight to the blank-card edit stage.
             if ProcessInfo.processInfo.environment["CWG_BLANK"] != nil, draft == nil {

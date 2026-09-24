@@ -73,6 +73,7 @@
 				"Resources/seed-items.json",
 				Support/SaveEntity.swift,
 				Support/SaveIntents.swift,
+				Support/VisualSearch.swift,
 				Views/OnboardingView.swift,
 			);
 			target = CA00000000000000000F0002 /* CanWeGoShare */;

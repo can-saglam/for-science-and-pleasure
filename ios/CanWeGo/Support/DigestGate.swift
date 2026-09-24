@@ -7,6 +7,23 @@ enum ItemGate {
     static var pending: UUID?
 }
 
+/// A picture sent from Visual Intelligence to be looked up and saved,
+/// parked until the composer opens and takes it.
+enum CaptureGate {
+    static var pendingImage: Data?
+
+    static func take() -> Data? {
+        defer { pendingImage = nil }
+        return pendingImage
+    }
+}
+
+/// A search asked for from outside ("More results" in Visual Intelligence):
+/// which tab, and what to type.
+enum SearchGate {
+    static var pending: (kind: String, text: String)?
+}
+
 /// An invite link (`canwego://join/KV7P2M`, or `https://canwego.app/join/…`
 /// once the domain exists) names a code to join with. Parked here until
 /// whichever screen can act on it is up: the first-run's code page for a
@@ -40,4 +57,8 @@ extension Notification.Name {
     static let cwgLibraryWillSwap = Notification.Name("cwgLibraryWillSwap")
     /// Siri or Shortcuts parked a save in the shared inbox.
     static let cwgInboxChanged = Notification.Name("cwgInboxChanged")
+    /// `CaptureGate` holds a picture for the composer.
+    static let cwgCaptureImage = Notification.Name("cwgCaptureImage")
+    /// `SearchGate` holds a search for one of the tabs.
+    static let cwgSearchSaves = Notification.Name("cwgSearchSaves")
 }

@@ -235,6 +235,10 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cwgInboxChanged)) { _ in
             if scenePhase == .active { drainInbox() }
         }
+        // Visual Intelligence: a picture to save, or a search to show.
+        .onReceive(Self.visualHandoffs) { _ in
+            takeVisualHandoff()
+        }
         // A save tapped in iOS system search.
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             if let raw = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
@@ -257,6 +261,7 @@ struct ContentView: View {
         }
         .task {
             if let code = JoinGate.pendingCode { joinCode = code }
+            await readVisualProbe()
         }
         .sheet(isPresented: Binding(
             get: { joinCode != nil },
@@ -401,6 +406,7 @@ struct ContentView: View {
         if let pending = ItemGate.pending {
             openItem(pending)
         }
+        takeVisualHandoff()
         let claimedURLs = drainInbox()
         let listed = items.filter { !$0.isDeleted }
         SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
@@ -498,6 +504,42 @@ struct ContentView: View {
 
     private func announceUndo(_ message: String) {
         UIAccessibility.post(notification: .announcement, argument: message)
+    }
+
+    private static let visualHandoffs = NotificationCenter.default.publisher(for: .cwgCaptureImage)
+        .merge(with: NotificationCenter.default.publisher(for: .cwgSearchSaves))
+
+    /// CWG_VISUAL is only set by automated test runs: a picture file read
+    /// the way Visual Intelligence's frames are, then handed in.
+    private func readVisualProbe() async {
+        #if !APP_EXTENSION
+        guard let path = ProcessInfo.processInfo.environment["CWG_VISUAL"],
+              let picture = UIImage(contentsOfFile: path)?.cgImage
+        else { return }
+        try? await Task.sleep(for: .seconds(1.5))
+        let seen = await VisualCapture.read(picture)
+        print("CWG_VISUAL read \(seen.lines) matched \(SaveLibrary.matching(seen: seen.lines).map(\.title))")
+        VisualCapture.hand(seen)
+        #endif
+    }
+
+    /// Visual Intelligence handed something over: a picture opens the
+    /// composer on it; a search moves to its tab, where the list opens it.
+    private func takeVisualHandoff() {
+        if CaptureGate.pendingImage != nil {
+            if captureOpen {
+                // A composer already open keeps what's being typed there.
+                CaptureGate.pendingImage = nil
+            } else {
+                deepLinked = nil
+                captureOpen = true
+            }
+        }
+        if let search = SearchGate.pending {
+            deepLinked = nil
+            let target = search.kind == Item.Kind.place ? 1 : 0
+            if tab != target { tab = target }
+        }
     }
 
     /// Deep link from a notification, the widget or Spotlight: present the

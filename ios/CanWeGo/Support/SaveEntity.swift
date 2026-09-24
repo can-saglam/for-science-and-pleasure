@@ -13,6 +13,8 @@ struct SaveEntity: IndexedEntity {
 
     let id: UUID
     let glyph: String
+    /// A photo for results that are shown as pictures (Visual Intelligence).
+    var thumbnail: Data?
 
     @Property(title: "Title")
     var title: String
@@ -65,7 +67,7 @@ struct SaveEntity: IndexedEntity {
         return DisplayRepresentation(
             title: "\(title)",
             subtitle: detail.isEmpty ? nil : "\(detail)",
-            image: .init(systemName: glyph)
+            image: thumbnail.map { .init(data: $0) } ?? .init(systemName: glyph)
         )
     }
 }
@@ -194,6 +196,48 @@ enum SaveLibrary {
         let running = open.filter { ($0.startsOn ?? "") < from }
             .sorted { ($0.endsOn ?? "9999-12-31", $0.title) < ($1.endsOn ?? "9999-12-31", $1.title) }
         return starting + running
+    }
+
+    /// Saves a poster or screenshot is about, from the words read off it.
+    /// A title counts when all its telling words are there (three in four
+    /// for a long title) or it appears whole; naming the venue too, or
+    /// still being to do, puts it higher.
+    static func matching(seen lines: [String]) -> [Item] {
+        let seenText = " \(fold(lines.joined(separator: " "))) "
+        let seenWords = Set(seenText.split(separator: " ").map(String.init))
+        guard !seenWords.isEmpty else { return [] }
+        let scored: [(item: Item, score: Double)] = all().compactMap { item in
+            let words = telling(item.title)
+            guard !words.isEmpty else { return nil }
+            let hits = words.filter(seenWords.contains).count
+            let whole = seenText.contains(" \(fold(item.title)) ")
+            let enough = words.count <= 3
+                ? hits == words.count
+                : Double(hits) >= Double(words.count) * 0.75
+            guard whole || enough else { return nil }
+            let venue = telling(item.venue ?? "")
+            let venueSeen = !venue.isEmpty && venue.allSatisfy(seenWords.contains)
+            let score = Double(hits) / Double(words.count)
+                + (whole ? 1 : 0)
+                + (venueSeen ? 0.5 : 0)
+                - (item.isDone || item.isMissed ? 0.25 : 0)
+            return (item, score)
+        }
+        return scored
+            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.item.createdAt > $1.item.createdAt }
+            .prefix(5)
+            .map(\.item)
+    }
+
+    /// Words that pick a title out: three letters or more, and not the
+    /// ones every listing shares.
+    private static let filler: Set<String> = [
+        "the", "and", "for", "with", "from", "now", "new", "live", "presents",
+        "exhibition", "show", "tour", "festival", "london", "museum", "gallery",
+    ]
+
+    private static func telling(_ s: String) -> [String] {
+        Array(Set(fold(s).split(separator: " ").map(String.init).filter { $0.count >= 3 && !filler.contains($0) }))
     }
 
     private static func fold(_ s: String) -> String {

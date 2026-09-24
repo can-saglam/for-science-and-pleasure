@@ -24,6 +24,11 @@ enum WidgetStore {
             .appending(path: "Widget", directoryHint: .isDirectory)
     }
 
+    /// The small photo parked for the widget, when this save has one.
+    static func photo(for id: UUID) -> Data? {
+        directory.flatMap { try? Data(contentsOf: $0.appending(path: "\(id.uuidString).jpg")) }
+    }
+
     /// Call on the main actor with live models; the heavy lifting (image
     /// fetch, JPEG encode, disk writes) hops off it.
     /// The widget's empty state and no-photo wash follow the app theme.

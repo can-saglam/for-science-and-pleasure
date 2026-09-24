@@ -383,6 +383,10 @@ struct LibraryView: View {
                 if ProcessInfo.processInfo.environment["CWG_SEARCH"] != nil {
                     searchOpen = true
                 }
+                takeSearch()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .cwgSearchSaves)) { _ in
+                takeSearch()
             }
             .sheet(item: $selected) { ItemDetailView(item: $0) }
             // The library is about to be replaced: the open item won't exist.
@@ -447,6 +451,19 @@ struct LibraryView: View {
             searchOpenedAt = .now
         }
         .onDisappear { searchFocused = false }
+    }
+
+    /// A search asked for from outside, if it's for this tab.
+    private func takeSearch() {
+        guard let search = SearchGate.pending, search.kind == kind else { return }
+        SearchGate.pending = nil
+        selected = nil
+        mode.showMap = false
+        category = nil
+        area = nil
+        query = search.text
+        searchOpenedAt = .now
+        withAnimation(.snappy) { searchOpen = true }
     }
 
     private func closeSearch() {
