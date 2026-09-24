@@ -686,7 +686,8 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 
 ### Phase 5
 - [x] ~~5.1 Configurable widget~~ — dropped; widget as build 78 plus a next button on medium and large
-- [ ] 5.2 `SaveEntity` in the semantic index (replaces `SpotlightIndex`), open / mark been / remind / save-link intents, App Shortcuts, on-screen annotations; `AppIntentsTesting` suite
+- [x] 5.2 Siri and Spotlight know your saves (24 Sep, after build 78). `SaveEntity` (IndexedEntity) linked to each existing Spotlight result (`associateAppEntity`, results themselves unchanged) so it reaches the semantic index; `SaveQuery` searches title / venue / area / category / who saved it. Intents: Open Save (the reminder-tap route), What's On (today / this weekend / this week / closing soon, on the home calendar and the Events page's 21-day window), What's Closing Soon, Save a Link (parse, then the share extension's inbox, so duplicate and category checks apply). App Shortcuts phrases for all four. The detail sheet carries `.appEntityIdentifier` for on-screen "this". All iOS 18.4+ API, so iOS 26 gets it too. `CanWeGoIntentTests` (UI-test target, own scheme, not in the archive): 8 `AppIntentsTesting` tests against the installed app, all passing. Left out: mark been (widget button was dropped; ask before adding it to Siri) and remind me
+- [ ] 5.2 follow-ups: Remind Me intent; try the phrases with real Siri on a device
 - [ ] 5.3 Visual Intelligence: matching saves + "Save to Can We Go" from a camera capture or screenshot; `semanticContentSearch` into in-app search
 - [ ] 5.4 On-device instant draft for screenshots and text; offline drafts parse later
 - [ ] 5.5 Plan our day on Private Cloud Compute, with an Evaluations suite; decide free vs Plus

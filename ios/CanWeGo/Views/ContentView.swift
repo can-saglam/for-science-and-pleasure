@@ -230,6 +230,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cwgOpenItem)) { note in
             if let id = note.object as? UUID { openItem(id) }
         }
+        // A link saved through Siri while the app is on screen: land it now
+        // rather than on the next foreground.
+        .onReceive(NotificationCenter.default.publisher(for: .cwgInboxChanged)) { _ in
+            if scenePhase == .active { drainInbox() }
+        }
         // A save tapped in iOS system search.
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             if let raw = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,

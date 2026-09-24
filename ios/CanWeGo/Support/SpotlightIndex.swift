@@ -8,6 +8,7 @@ import Foundation
 enum SpotlightIndex {
     private static let domain = "saves"
 
+    @MainActor
     static func sync(items: [Item]) {
         let entries = items
             .filter { !$0.isDeleted && !$0.isDone }
@@ -20,6 +21,11 @@ enum SpotlightIndex {
                 .compactMap(\.self)
                 .joined(separator: " · ")
                 attributes.keywords = [item.category, item.area, item.venue].compactMap(\.self)
+                #if !APP_EXTENSION
+                // Same result, now also the save Siri and Apple
+                // Intelligence can reason about.
+                attributes.associateAppEntity(SaveEntity(item))
+                #endif
                 return CSSearchableItem(
                     uniqueIdentifier: item.id.uuidString,
                     domainIdentifier: domain,
@@ -30,5 +36,9 @@ enum SpotlightIndex {
         index.deleteSearchableItems(withDomainIdentifiers: [domain]) { _ in
             index.indexSearchableItems(entries, completionHandler: nil)
         }
+        #if !APP_EXTENSION
+        // "Open <save> in Can We Go" matches against the current titles.
+        CanWeGoShortcuts.updateAppShortcutParameters()
+        #endif
     }
 }

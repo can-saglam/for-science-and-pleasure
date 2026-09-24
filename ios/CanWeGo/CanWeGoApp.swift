@@ -11,6 +11,22 @@ struct CanWeGoApp: App {
         // Sets the home clock from the cache before any time label renders.
         _ = HomeStore.shared
         ShareTip.configure()
+        container = LibraryStore.container
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            RootGate()
+        }
+        .modelContainer(container)
+    }
+}
+
+/// The one library store, shared by the scene and by Siri and Shortcuts,
+/// which can run with no screen up.
+@MainActor
+enum LibraryStore {
+    static let container: ModelContainer = {
         // The store is local only. Supabase is the sync — one source of
         // truth, scoped to the signed-in account's group by RLS. This store
         // used to be mirrored to the user's private iCloud database as well,
@@ -20,25 +36,18 @@ struct CanWeGoApp: App {
         // back as duplicates). Same store name, so existing data opens as-is.
         do {
             let local = ModelConfiguration("CanWeGo", cloudKitDatabase: .none)
-            container = try ModelContainer(for: Item.self, configurations: local)
+            return try ModelContainer(for: Item.self, configurations: local)
         } catch {
             // A store this build can't open (corrupt file, downgrade): keep
             // the app usable on a fresh one; the next sync refills it.
             do {
                 let fallback = ModelConfiguration("CanWeGo-local", cloudKitDatabase: .none)
-                container = try ModelContainer(for: Item.self, configurations: fallback)
+                return try ModelContainer(for: Item.self, configurations: fallback)
             } catch {
                 fatalError("Could not create any model container: \(error)")
             }
         }
-    }
-
-    var body: some Scene {
-        WindowGroup {
-            RootGate()
-        }
-        .modelContainer(container)
-    }
+    }()
 }
 
 /// Sign-in gate: the shared library needs a member session before anything

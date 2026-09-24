@@ -26,6 +26,13 @@
 			remoteGlobalIDString = CA00000000000000000F0003;
 			remoteInfo = CanWeGoWidget;
 		};
+		CA00000000000000001C0003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CA0000000000000000130001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CA00000000000000000F0001;
+			remoteInfo = CanWeGo;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -47,6 +54,7 @@
 		CA00000000000000000E0001 /* CanWeGo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CanWeGo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA00000000000000000E0002 /* CanWeGoShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CanWeGoShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA00000000000000000E0003 /* CanWeGoWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CanWeGoWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA00000000000000000E0004 /* CanWeGoIntentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanWeGoIntentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -63,6 +71,8 @@
 				Assets.xcassets,
 				CanWeGoApp.swift,
 				"Resources/seed-items.json",
+				Support/SaveEntity.swift,
+				Support/SaveIntents.swift,
 				Views/OnboardingView.swift,
 			);
 			target = CA00000000000000000F0002 /* CanWeGoShare */;
@@ -101,6 +111,11 @@
 			path = WidgetExtension;
 			sourceTree = "<group>";
 		};
+		CA00000000000000000A0007 /* CanWeGoIntentTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CanWeGoIntentTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -125,6 +140,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CA00000000000000000B0004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -134,6 +156,7 @@
 				CA00000000000000000A0001 /* CanWeGo */,
 				CA00000000000000000A0002 /* ShareExtension */,
 				CA00000000000000000A0005 /* WidgetExtension */,
+				CA00000000000000000A0007 /* CanWeGoIntentTests */,
 				CA00000000000000000D0001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -144,6 +167,7 @@
 				CA00000000000000000E0001 /* CanWeGo.app */,
 				CA00000000000000000E0002 /* CanWeGoShare.appex */,
 				CA00000000000000000E0003 /* CanWeGoWidget.appex */,
+				CA00000000000000000E0004 /* CanWeGoIntentTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -215,6 +239,27 @@
 			productReference = CA00000000000000000E0003 /* CanWeGoWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		CA00000000000000000F0004 /* CanWeGoIntentTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CA0000000000000000100004 /* Build configuration list for PBXNativeTarget "CanWeGoIntentTests" */;
+			buildPhases = (
+				CA0000000000000000110004 /* Sources */,
+				CA00000000000000000B0004 /* Frameworks */,
+				CA0000000000000000120004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CA00000000000000001B0003 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CA00000000000000000A0007 /* CanWeGoIntentTests */,
+			);
+			name = CanWeGoIntentTests;
+			productName = CanWeGoIntentTests;
+			productReference = CA00000000000000000E0004 /* CanWeGoIntentTests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -227,6 +272,10 @@
 				TargetAttributes = {
 					CA00000000000000000F0001 = {
 						CreatedOnToolsVersion = 26.0;
+					};
+					CA00000000000000000F0004 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = CA00000000000000000F0001;
 					};
 				};
 			};
@@ -247,6 +296,7 @@
 				CA00000000000000000F0001 /* CanWeGo */,
 				CA00000000000000000F0002 /* CanWeGoShare */,
 				CA00000000000000000F0003 /* CanWeGoWidget */,
+				CA00000000000000000F0004 /* CanWeGoIntentTests */,
 			);
 		};
 /* End PBXProject section */
@@ -267,6 +317,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CA0000000000000000120003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA0000000000000000120004 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -297,6 +354,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CA0000000000000000110004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -309,6 +373,11 @@
 			isa = PBXTargetDependency;
 			target = CA00000000000000000F0003 /* CanWeGoWidget */;
 			targetProxy = CA00000000000000001C0002 /* PBXContainerItemProxy */;
+		};
+		CA00000000000000001B0003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CA00000000000000000F0001 /* CanWeGo */;
+			targetProxy = CA00000000000000001C0003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -492,6 +561,20 @@
 			};
 			name = Debug;
 		};
+		CA0000000000000000170004 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cansaglam.CanWeGo.IntentTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CanWeGo;
+			};
+			name = Debug;
+		};
 		CA0000000000000000180001 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -564,6 +647,20 @@
 			};
 			name = Release;
 		};
+		CA0000000000000000180004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cansaglam.CanWeGo.IntentTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CanWeGo;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -590,6 +687,15 @@
 			buildConfigurations = (
 				CA0000000000000000170003 /* Debug */,
 				CA0000000000000000180003 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CA0000000000000000100004 /* Build configuration list for PBXNativeTarget "CanWeGoIntentTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CA0000000000000000170004 /* Debug */,
+				CA0000000000000000180004 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

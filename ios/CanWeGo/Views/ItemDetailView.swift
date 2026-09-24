@@ -1,3 +1,6 @@
+#if !APP_EXTENSION
+import AppIntents
+#endif
 import MapKit
 import SwiftData
 import SwiftUI
@@ -119,6 +122,9 @@ struct ItemDetailView: View {
                 }
             }
             .background { ThemeFill(color: AppBackground.sheet) }
+            #if !APP_EXTENSION
+            .appEntityIdentifier(EntityIdentifier(for: SaveEntity.self, identifier: item.id))
+            #endif
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

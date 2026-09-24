@@ -38,4 +38,6 @@ extension Notification.Name {
     /// The local library is about to be wiped and replaced (membership
     /// change) — any sheet showing an item should close first.
     static let cwgLibraryWillSwap = Notification.Name("cwgLibraryWillSwap")
+    /// Siri or Shortcuts parked a save in the shared inbox.
+    static let cwgInboxChanged = Notification.Name("cwgInboxChanged")
 }
