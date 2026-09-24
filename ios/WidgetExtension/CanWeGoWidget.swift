@@ -8,6 +8,7 @@ import WidgetKit
 struct CanWeGoWidgets: WidgetBundle {
     var body: some Widget {
         RandomSaveWidget()
+        DayActivityWidget()
     }
 }
 

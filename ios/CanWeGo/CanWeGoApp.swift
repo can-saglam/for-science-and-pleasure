@@ -286,6 +286,7 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        LiveDay.listen()
         return true
     }
 

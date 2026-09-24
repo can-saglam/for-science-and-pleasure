@@ -71,6 +71,7 @@
 				Assets.xcassets,
 				CanWeGoApp.swift,
 				"Resources/seed-items.json",
+				Support/LiveDay.swift,
 				Support/SaveEntity.swift,
 				Support/SaveIntents.swift,
 				Support/SiriLists.swift,

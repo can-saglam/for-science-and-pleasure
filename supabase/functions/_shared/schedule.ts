@@ -58,6 +58,23 @@ export function isDue(sched: Pick<Schedule, "day_of_week" | "hour" | "minute">, 
   return now >= start && now <= start + 59;
 }
 
+/**
+ * The instant `hour`:00 falls on `date` (YYYY-MM-DD) in `timeZone`, e.g.
+ * 18:00 in London on a BST day is 17:00 UTC. Two passes so a day when the
+ * clocks change still lands on the hour.
+ */
+export function homeInstant(timeZone: string, date: string, hour: number): Date {
+  const [y, m, d] = date.split("-").map(Number);
+  const wall = Date.UTC(y, m - 1, d, hour);
+  let guess = wall;
+  for (let i = 0; i < 2; i++) {
+    const c = localClock(timeZone, new Date(guess));
+    const shown = Date.UTC(Number(c.year), Number(c.month) - 1, Number(c.day), Number(c.hour), Number(c.minute));
+    guess += wall - shown;
+  }
+  return new Date(guess);
+}
+
 /** Fixed 10:00–10:59 home hour — when shared reminders fire. */
 export function isMorningHour(clock: LocalClock, hour = 10): boolean {
   const now = Number(clock.hour) * 60 + Number(clock.minute);

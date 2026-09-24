@@ -88,3 +88,41 @@ export async function sendApnsAlert(
   }
   return judgedBadEverywhere ? "gone" : "failed";
 }
+
+/** Starts or ends a Live Activity: `token` is a push-to-start token for a
+ * start, the activity's own update token otherwise. Same host fallback and
+ * pruning rules as alerts. */
+export async function sendLiveActivity(
+  token: string,
+  aps: Record<string, unknown>,
+): Promise<ApnsResult> {
+  const payload = JSON.stringify({ aps: { timestamp: Math.floor(Date.now() / 1000), ...aps } });
+  const auth = await providerToken();
+  let judgedBadEverywhere = true;
+
+  for (const host of ["api.push.apple.com", "api.sandbox.push.apple.com"]) {
+    const response = await fetch(`https://${host}/3/device/${token}`, {
+      method: "POST",
+      headers: {
+        authorization: `bearer ${auth}`,
+        "apns-topic": `${TOPIC}.push-type.liveactivity`,
+        "apns-push-type": "liveactivity",
+        "apns-priority": "10",
+        "content-type": "application/json",
+      },
+      body: payload,
+    });
+    if (response.ok) return "sent";
+    if (response.status === 410) return "gone";
+
+    const text = await response.text();
+    if (response.status === 400 && text.includes("BadDeviceToken")) continue;
+    if (response.status === 403 && text.includes("BadEnvironmentKeyInToken")) {
+      judgedBadEverywhere = false;
+      continue;
+    }
+    console.error("apns live activity failed", host, response.status, text);
+    return "failed";
+  }
+  return judgedBadEverywhere ? "gone" : "failed";
+}

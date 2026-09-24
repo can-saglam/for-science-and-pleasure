@@ -1,4 +1,4 @@
-import { isDue, isMorningHour, localClock, localDate, weekMonday } from "./schedule.ts";
+import { homeInstant, isDue, isMorningHour, localClock, localDate, weekMonday } from "./schedule.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -65,4 +65,17 @@ Deno.test("isDue: a schedule near midnight does not spill into the next day", ()
   const clock = (weekday: string, hour: string, minute: string) => ({ weekday, hour, minute, year: "2026", month: "09", day: "13" });
   assert(isDue(sched, clock("Sun", "23", "45")), "same day, inside window");
   assert(!isDue(sched, clock("Mon", "00", "10")), "next day, even though < 59 min later");
+});
+
+Deno.test("homeInstant: 18:00 on the home clock, either side of the clocks changing", () => {
+  const summer = homeInstant("Europe/London", "2026-09-24", 18);
+  assert(summer.toISOString() === "2026-09-24T17:00:00.000Z", summer.toISOString());
+  const winter = homeInstant("Europe/London", "2026-12-10", 18);
+  assert(winter.toISOString() === "2026-12-10T18:00:00.000Z", winter.toISOString());
+  const changeDay = homeInstant("Europe/London", "2026-10-25", 18);
+  assert(changeDay.toISOString() === "2026-10-25T18:00:00.000Z", changeDay.toISOString());
+  const tokyo = homeInstant("Asia/Tokyo", "2026-09-24", 9);
+  assert(tokyo.toISOString() === "2026-09-24T00:00:00.000Z", tokyo.toISOString());
+  const ny = homeInstant("America/New_York", "2026-03-08", 18);
+  assert(ny.toISOString() === "2026-03-08T22:00:00.000Z", ny.toISOString());
 });

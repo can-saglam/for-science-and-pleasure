@@ -411,6 +411,9 @@ struct ContentView: View {
         OfflineDrafts.watch(context: context)
         Task { await OfflineDrafts.resume(context: context) }
         let listed = items.filter { !$0.isDeleted }
+        #if !APP_EXTENSION
+        Task { await LiveDay.refresh(items: listed) }
+        #endif
         SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
         SpotlightIndex.sync(items: listed)
         // Fill the in-memory image cache from disk before the cards

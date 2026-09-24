@@ -694,7 +694,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [ ] 5.3 follow-up: try Visual Intelligence with a real poster and a screenshot on a device
 - [x] 5.4 On-device instant draft for screenshots and text; offline drafts parse later (build 83: "First look" card while the parser works, ~2–5 s on the simulator; every field checked against the written text; offline: "Save draft" goes into the library and gets the parser's card on reconnect, or "Save for later" without Apple Intelligence goes through the inbox. Follow-up: on the phone, save a draft in Airplane Mode and check it fills in when back online)
 - [ ] 5.5 Plan our day on Private Cloud Compute, with an Evaluations suite; decide free vs Plus
-- [ ] 5.6 Live Activity on reminder / "going today" days, push-started by `send-reminders`; landscape Dynamic Island
+- [x] 5.6 Live Activity on reminder days, push-started by `send-reminders` (build 83; migration 0032 and send-reminders deployed 24 Sep). Decided: reminder days only, every group member, 09:00–18:00 home time, one "Open" button, no "going today" button, no opening hours. Apple requires an alert on a push start, so it's a silent one; the reminder push is unchanged. iOS caps an activity at 8 hours, so the end push at 17:00 keeps it on the Lock Screen until 18:00. No landscape API in the iOS 27 SDK (the system lays it out); `.small` added for Apple Watch / CarPlay. Follow-up: on the phone, check the Lock Screen and Dynamic Island on the next reminder day
 - [ ] 5.7 Localisation: String Catalog, six languages reviewed by native speakers, summaries in the saver's language, localised listing
 - [ ] Featuring Nomination filed in App Store Connect once 5.2–5.3 are in TestFlight
 

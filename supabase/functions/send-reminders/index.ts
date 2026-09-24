@@ -11,6 +11,7 @@
 import { apnsConfigured, sendApnsAlert } from "../_shared/apns.ts";
 import { admin, groupTokens } from "../_shared/groups.ts";
 import { groupHome, homeToday } from "../_shared/home.ts";
+import { type ActivityResult, runActivities } from "../_shared/live_activity.ts";
 import {
   CUSTOM_REMINDER_TITLE,
   customReminderBody,
@@ -173,7 +174,12 @@ Deno.serve(async (req) => {
     groupIds = (data ?? []).map((g: { id: string }) => g.id);
   }
 
+  // Live Activities go after the reminders and in their own try, so a
+  // failure there can never cost a reminder. Forced test runs leave them
+  // alone unless asked.
+  const withActivities = apnsConfigured() && (!force || body.activities === true);
   const results: GroupResult[] = [];
+  const activities: ActivityResult[] = [];
   for (const groupId of groupIds) {
     try {
       results.push(await runGroup(supabase, groupId, at, force));
@@ -181,6 +187,13 @@ Deno.serve(async (req) => {
       console.error(e);
       results.push({ group_id: groupId, error: force ? String(e).slice(0, 300) : "internal error" });
     }
+    if (!withActivities) continue;
+    try {
+      activities.push(await runActivities(supabase, groupId, at));
+    } catch (e) {
+      console.error("live activities", e);
+      activities.push({ group_id: groupId, error: force ? String(e).slice(0, 300) : "internal error" });
+    }
   }
-  return Response.json({ groups: results });
+  return Response.json({ groups: results, activities });
 });
