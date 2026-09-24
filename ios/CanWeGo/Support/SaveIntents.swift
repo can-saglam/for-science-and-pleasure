@@ -113,12 +113,106 @@ struct SaveLinkIntent: AppIntent {
         if SavedURLIndex.contains(link.absoluteString) {
             return .result(dialog: "That one's already in your saves.")
         }
-        let card: ParseClient.Card
+        let card = try await SaveInbox.lookUp(link.absoluteString)
+        try SaveInbox.park(card, url: card.url ?? link.absoluteString, userId: userId)
+        return .result(dialog: "Saved \u{201c}\(card.title)\u{201d}.")
+    }
+}
+
+/// "Add the new Anish Kapoor show at the Hayward to Can We Go." Looks the
+/// description up the way the composer does typed text, reads back what it
+/// found, and on a yes parks it in the inbox like a shared link.
+struct AddToLibraryIntent: AppIntent {
+    static let title: LocalizedStringResource = "Add to Can We Go"
+    static let description = IntentDescription("Looks up an event or place from a description, like \u{201c}the new Anish Kapoor show at the Hayward\u{201d}, and adds it to your saves.")
+
+    @Parameter(title: "What", requestValueDialog: "What should I add?")
+    var what: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add \(\.$what) to Can We Go")
+    }
+
+    init() {}
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard SupabaseAuth.shared.signedIn, let userId = SupabaseAuth.shared.userId else {
+            throw SaveIntentError.signedOut
+        }
+        let asked = what.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !asked.isEmpty else { throw SaveIntentError.nothingAsked }
+        let card = try await SaveInbox.lookUp(asked)
+        let library = SaveLibrary.all()
+        if let twin = DuplicateFinder.match(
+            url: card.url, title: card.title, startsOn: card.starts_on, kind: card.kind, in: library
+        ) {
+            return .result(dialog: "\u{201c}\(twin.title)\u{201d} is already in your saves. \(DuplicateFinder.describe(twin))")
+        }
+        let question = if let similar = Self.lookalike(of: card, in: library) {
+            "I found \(Self.spoken(card)). You already have \u{201c}\(similar.title)\u{201d} saved. Add this one too?"
+        } else {
+            "I found \(Self.spoken(card)). Add it?"
+        }
+        try await requestConfirmation(actionName: .add, dialog: "\(question)")
+        try SaveInbox.park(card, url: card.url, userId: userId)
+        return .result(dialog: "Added \u{201c}\(card.title)\u{201d}.")
+    }
+
+    /// A save that's probably the same thing under another title ("Jaga
+    /// Jazzist" for "Jaga Jazzist at the Barbican"). Named in the question
+    /// rather than blocking it: it may be a new date or a new show.
+    static func lookalike(of card: ParseClient.Card, in items: [Item]) -> Item? {
+        let found = " \(DuplicateFinder.normalizeTitle(card.title)) "
+        return items.first { item in
+            let saved = DuplicateFinder.normalizeTitle(item.title)
+            guard item.kind == card.kind, saved.count >= 4 else { return false }
+            return found.contains(" \(saved) ") || " \(saved) ".contains(found)
+        }
+    }
+
+    /// "Anish Kapoor at Hayward Gallery, on until 18 October", so a wrong
+    /// guess (last year's show, the other branch) is caught before it's saved.
+    static func spoken(_ card: ParseClient.Card) -> String {
+        var line = card.title
+        let title = DuplicateFinder.normalizeTitle(card.title)
+        if let venue = card.venue, !venue.isEmpty, DuplicateFinder.normalizeTitle(venue) != title {
+            line += " at \(venue)"
+        } else if let area = card.area, !area.isEmpty {
+            line += " in \(area)"
+        }
+        let today = DayString.today()
+        func day(_ s: String?) -> String? {
+            guard let s else { return nil }
+            let long = Date.FormatStyle.dateTime.day().month(.wide)
+            return DayString.text(s, s.prefix(4) == today.prefix(4) ? long : long.year())
+        }
+        let startsOn = card.starts_on, endsOn = card.ends_on ?? card.starts_on
+        if let endsOn, endsOn < today, let end = day(endsOn) {
+            line += startsOn == endsOn ? ", which was on \(end)" : ", which ended on \(end)"
+        } else if let startsOn, let endsOn, startsOn != endsOn, let start = day(startsOn), let end = day(endsOn) {
+            line += startsOn <= today ? ", on until \(end)" : ", \(start) to \(end)"
+        } else if let start = day(startsOn) {
+            line += ", on \(start)"
+        }
+        return line
+    }
+}
+
+/// The share sheet's route for anything Siri or Shortcuts looks up: the
+/// parser, then the App Group inbox, claimed with the usual duplicate and
+/// category checks next time the app is on screen, or straight away if it is.
+@MainActor
+enum SaveInbox {
+    static func lookUp(_ text: String) async throws -> ParseClient.Card {
         do {
-            card = try await ParseClient.parse(text: link.absoluteString, imageJPEG: nil)
+            return try await ParseClient.parse(text: text, imageJPEG: nil)
         } catch {
             throw SaveIntentError.lookup((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message)
         }
+    }
+
+    static func park(_ card: ParseClient.Card, url: String?, userId: UUID) throws {
         var pending = SharedInbox.PendingSave(kind: card.kind, title: card.title)
         pending.summary = card.summary
         pending.venue = card.venue
@@ -128,7 +222,7 @@ struct SaveLinkIntent: AppIntent {
         pending.price = card.price
         pending.startsOn = card.starts_on
         pending.endsOn = card.ends_on
-        pending.url = card.url ?? link.absoluteString
+        pending.url = url
         pending.lat = card.lat
         pending.lng = card.lng
         pending.colorHex = card.color
@@ -138,19 +232,20 @@ struct SaveLinkIntent: AppIntent {
         pending.groupId = GroupStore.shared.card?.groupId.uuidString
         try SharedInbox.write(pending)
         NotificationCenter.default.post(name: .cwgInboxChanged, object: nil)
-        return .result(dialog: "Saved \u{201c}\(card.title)\u{201d}.")
     }
 }
 
 enum SaveIntentError: Error, CustomLocalizedStringResourceConvertible {
     case signedOut
     case notALink
+    case nothingAsked
     case lookup(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .signedOut: "Sign in to Can We Go first."
         case .notALink: "That isn't a web link."
+        case .nothingAsked: "Tell me what to add, like \u{201c}the new Anish Kapoor show at the Hayward\u{201d}."
         case .lookup(let why): "\(why)"
         }
     }
@@ -201,6 +296,19 @@ struct CanWeGoShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Save a Link",
             systemImageName: "link"
+        )
+        AppShortcut(
+            intent: AddToLibraryIntent(),
+            phrases: [
+                "Add something to \(.applicationName)",
+                "Save something to \(.applicationName)",
+                "Add an event to \(.applicationName)",
+                "Add an exhibition to \(.applicationName)",
+                "Add a place to \(.applicationName)",
+                "Add to \(.applicationName)",
+            ],
+            shortTitle: "Add Something",
+            systemImageName: "plus.circle"
         )
     }
 }

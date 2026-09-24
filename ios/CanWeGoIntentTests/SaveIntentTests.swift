@@ -116,6 +116,15 @@ final class SaveIntentTests: XCTestCase {
         } catch {}
     }
 
+    /// Only the path that looks nothing up: an empty request. The rest ends
+    /// in a spoken confirmation, which this harness can't answer.
+    func testAddNeedsSomethingToAdd() async throws {
+        do {
+            try await definitions.intents["AddToLibraryIntent"].makeIntent(what: "  ").run()
+            XCTFail("an empty request adds nothing")
+        } catch {}
+    }
+
     func testSpotlightKnowsTheSaves() async throws {
         let suggested = try await saves.suggestedEntities()
         let first: String = try XCTUnwrap(suggested.first).title
