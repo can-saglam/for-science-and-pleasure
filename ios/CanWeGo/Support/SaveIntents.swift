@@ -238,24 +238,8 @@ enum SaveInbox {
     }
 
     static func park(_ card: ParseClient.Card, url: String?, userId: UUID, id: UUID? = nil) throws {
-        var pending = SharedInbox.PendingSave(kind: card.kind, title: card.title)
+        var pending = SharedInbox.PendingSave(card: card, url: url, userId: userId)
         pending.id = id
-        pending.summary = card.summary
-        pending.venue = card.venue
-        pending.area = card.area
-        pending.address = card.address
-        pending.category = card.category
-        pending.price = card.price
-        pending.startsOn = card.starts_on
-        pending.endsOn = card.ends_on
-        pending.url = url
-        pending.lat = card.lat
-        pending.lng = card.lng
-        pending.colorHex = card.color
-        pending.imageUrl = card.image_url
-        pending.source = card.source
-        pending.userId = userId.uuidString
-        pending.groupId = GroupStore.shared.card?.groupId.uuidString
         try SharedInbox.write(pending)
         NotificationCenter.default.post(name: .cwgInboxChanged, object: nil)
     }

@@ -408,6 +408,8 @@ struct ContentView: View {
         }
         takeVisualHandoff()
         let claimedURLs = drainInbox()
+        OfflineDrafts.watch(context: context)
+        Task { await OfflineDrafts.resume(context: context) }
         let listed = items.filter { !$0.isDeleted }
         SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
         SpotlightIndex.sync(items: listed)

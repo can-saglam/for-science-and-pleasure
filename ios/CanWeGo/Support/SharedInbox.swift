@@ -103,6 +103,31 @@ enum SharedInbox {
     }
 }
 
+extension SharedInbox.PendingSave {
+    /// A parsed card as Siri, Shortcuts or a finished offline draft hand it
+    /// to the inbox, tagged with who and which group it's for.
+    @MainActor
+    init(card: ParseClient.Card, url: String?, userId: UUID) {
+        self.init(kind: card.kind, title: card.title)
+        summary = card.summary
+        venue = card.venue
+        area = card.area
+        address = card.address
+        category = card.category
+        price = card.price
+        startsOn = card.starts_on
+        endsOn = card.ends_on
+        self.url = url
+        lat = card.lat
+        lng = card.lng
+        colorHex = card.color
+        imageUrl = card.image_url
+        source = card.source
+        self.userId = userId.uuidString
+        groupId = GroupStore.shared.card?.groupId.uuidString
+    }
+}
+
 extension Item {
     /// Materialise a pending share-extension save as a real model object.
     convenience init(pending: SharedInbox.PendingSave) {

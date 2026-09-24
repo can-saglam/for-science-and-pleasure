@@ -35,6 +35,10 @@ struct CaptureView: View {
     @State private var confirmDiscard = false
     /// Set when Save meets a full category: the card stays, Plus is offered.
     @State private var paywall: PlusReason?
+    /// The on-device model's quick read, shown while the parser works.
+    @State private var firstLook: Item?
+    /// The last parse failed for want of a connection.
+    @State private var offline = false
 
     private var inputDetent: PresentationDetent {
         guard inputHeight > 0 else { return .medium }
@@ -127,7 +131,9 @@ struct CaptureView: View {
         .onChange(of: text) { _, _ in
             existing = nil
             saveAnyway = false
+            forgetFirstLook()
         }
+        .onChange(of: imageJPEG) { _, _ in forgetFirstLook() }
         .sheet(item: $paywall) { reason in
             PlusPaywall(reason: reason) {
                 if let draft { commit(draft) }
@@ -145,7 +151,14 @@ struct CaptureView: View {
             Task { await parse() }
         }
 
-        if let errorMessage {
+        if let firstLook, busy || offline {
+            firstLookCard(firstLook)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+
+        if offline, firstLook == nil, canParse {
+            laterNotice
+        } else if let errorMessage, !(offline && firstLook != nil) {
             // The input is still in the field above — nothing is lost — so
             // the way forward is one tap, not a re-paste.
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -175,6 +188,89 @@ struct CaptureView: View {
             }
             .transition(.opacity)
         }
+    }
+
+    /// The quick read: faint while the parser checks it, and the thing to
+    /// save when there's no connection to check it with.
+    private func firstLookCard(_ look: Item) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                offline ? "You're offline. Save this draft and it'll be finished when you're back online." : "First look, from your iPhone",
+                systemImage: offline ? "wifi.slash" : "sparkles"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            ItemCard(item: look, compact: true)
+                .opacity(offline ? 1 : 0.75)
+                .allowsHitTesting(false)
+
+            if offline {
+                Button {
+                    saveDraft(look)
+                } label: {
+                    SaveMorphLabel("Save draft", systemImage: "tray.and.arrow.down", saved: saved)
+                }
+                .prominentGlass()
+                .controlSize(.large)
+                .allowsHitTesting(!saved)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Offline with nothing drafted: keep the input and look it up later.
+    private var laterNotice: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("You're offline. Keep this and it'll be looked up and added when you're back online.", systemImage: "wifi.slash")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                saveForLater()
+            } label: {
+                SaveMorphLabel("Save for later", systemImage: "tray.and.arrow.down", saved: saved)
+            }
+            .prominentGlass()
+            .controlSize(.large)
+            .allowsHitTesting(!saved)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+    }
+
+    private func saveDraft(_ look: Item) {
+        OfflineDrafts.enqueue(id: look.id, text: trimmedText, imageJPEG: imageJPEG, inLibrary: true)
+        save(look)
+    }
+
+    private func saveForLater() {
+        OfflineDrafts.enqueue(id: UUID(), text: trimmedText, imageJPEG: imageJPEG, inLibrary: false)
+        Haptics.success()
+        withAnimation(.easeInOut(duration: 0.25)) { saved = true }
+        Task {
+            try? await Task.sleep(for: .seconds(0.6))
+            dismiss()
+        }
+    }
+
+    /// A changed input makes the quick read (and the offline offer) stale.
+    private func forgetFirstLook() {
+        guard !busy, firstLook != nil || offline else { return }
+        withAnimation(.snappy) {
+            firstLook = nil
+            offline = false
+        }
+    }
+
+    private var trimmedText: String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Skip the parser: a blank card straight into the form.
@@ -430,6 +526,8 @@ struct CaptureView: View {
     private func parse() async {
         busy = true
         errorMessage = nil
+        offline = false
+        firstLook = nil
         defer { busy = false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Known URL? Say so before spending a parse — unless they've already
@@ -438,11 +536,18 @@ struct CaptureView: View {
             withAnimation(.snappy) { existing = twin }
             return
         }
+        let look = Task { await InstantDraft.make(text: trimmed, imageJPEG: imageJPEG) }
+        Task {
+            guard let quick = await look.value, busy, draft == nil else { return }
+            withAnimation(.snappy) { firstLook = quick.item }
+        }
+        defer { look.cancel() }
         do {
             let card = try await ParseClient.parse(
                 text: trimmed.isEmpty ? nil : trimmed,
                 imageJPEG: imageJPEG
             )
+            firstLook = nil
             let item = Item()
             item.kind = card.kind
             item.title = card.title
@@ -465,6 +570,17 @@ struct CaptureView: View {
             // ParseError already speaks to a person; everything else
             // (URLError, decoding) gets the same translation sync uses.
             errorMessage = (error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message
+            if OfflineDrafts.isOffline(error) {
+                // No connection fails fast, usually before the quick read
+                // is back: wait for it, it's what gets saved.
+                let quick = await look.value
+                withAnimation(.snappy) {
+                    firstLook = quick?.item
+                    offline = true
+                }
+            } else {
+                firstLook = nil
+            }
         }
     }
 
