@@ -512,6 +512,78 @@ than a hope.
   the existing image-less Maps cards once it's live. New customers get a
   $300 credit for 90 days; enrol when the beta opens, not before.
 
+## Phase 5 — iOS 27 (before launch, for featuring)
+
+Apple features apps that make early, good use of what it just shipped, and
+WWDC26's push is Siri through App Intents and the Foundation Models
+framework. The app uses almost none of it today (one static widget, a plain
+`CSSearchableItem` index, TipKit, StoreKit). Seven pieces, in build order:
+each one reuses the last, so the entity work in 5.2 pays for 5.3, 5.4 and
+5.7. Once the set is in TestFlight, file a **Featuring Nomination** in App
+Store Connect (App → Nominations) naming the iOS 27 features, as far ahead
+of the launch date as possible.
+
+Deployment target stays **iOS 26**, with iOS 27 features behind
+`#available(iOS 27, *)`: App Intents, widgets and Live Activities work on
+both, and only the semantic index, view annotations, image prompts and
+Private Cloud Compute need 27. Revisit if the gating gets noisy.
+
+- **5.1 Widgets you configure.** `AppIntentConfiguration` with one
+  parameter, "Show": a random save (today's widget), Closing soon, This
+  week, Places near home, or one category. A **Been there** button on the
+  widget (`MarkBeenIntent`, shared with Siri in 5.2) and deep links to the
+  save. Check full-colour, tinted and clear rendering; photos keep colour
+  via `widgetAccentedRenderingMode`.
+- **5.2 Siri and Spotlight know your saves.** A `SaveEntity`
+  (`AppEntity` + `IndexedEntity`, id = the item's server UUID, so it is
+  also a `SyncableEntity` across devices) replaces `SpotlightIndex`'s
+  hand-built items and lands in the semantic index: "What's on this
+  weekend from Can We Go?", "Open the ramen place Laura saved", "What's
+  closing soon?". Intents: open (the `system.open` schema), mark been,
+  remind me, save a link. App Shortcuts phrases for the common ones.
+  `.appEntityIdentifier` on library rows and `userActivity` on the detail
+  sheet, so "remind me about this" works on what's on screen. No schema
+  domain covers events and places (calendar is for calendar apps), so
+  these are plain intents over indexed entities; adopt a domain if Apple
+  adds one. Tested with `AppIntentsTesting`, then Shortcuts, Spotlight,
+  Siri.
+- **5.3 Save a poster with Visual Intelligence.** Point the camera at a
+  gig poster or exhibition banner, or screenshot one: Can We Go appears in
+  the results with the saves that match it (labels and on-image text
+  against titles and venues) and a **Save to Can We Go** result whose open
+  intent drops the image into the composer — the existing screenshot
+  parse, so it counts against the AI quota like any save. A
+  `semanticContentSearch` intent gives "More results" in the app's search.
+- **5.4 Instant draft while saving.** On Apple Intelligence devices, a
+  screenshot or pasted text gets an on-device draft card at once (the
+  on-device model, with the image as an attachment, filling a `@Generable`
+  card: title, venue, dates), replaced by the server's card when it
+  lands. Offline, the draft is kept and parsed when the phone is back
+  online. Other devices keep today's flow.
+- **5.5 Plan our day.** "Saturday afternoon in Soho": a
+  `LanguageModelSession` on `PrivateCloudComputeLanguageModel` with tools
+  over the group's saves (dates, hours, area, pins, distance) returns a
+  `@Generable` plan of two to four stops with times and walking gaps,
+  shareable as text or a card. Free at our size: PCC costs nothing to
+  Small Business Program apps under 2M first-time downloads (so enrol
+  early, already in Phase 4). Hidden on devices without Apple
+  Intelligence. Checked with the Evaluations framework (stops really
+  open, in range, from the library) before it ships. Open question:
+  free, or Plus.
+- **5.6 A Live Activity on the day.** On a day with a reminder, or after
+  "We're going today", the Lock Screen and Dynamic Island show the venue,
+  opening hours or last entry, and a Directions button (the transport app
+  from Settings), ending when the venue closes. `send-reminders` can
+  push-start it with a push-to-start token, so it appears even if the app
+  isn't open. Includes the new landscape Dynamic Island layout.
+- **5.7 Localisation.** String Catalog for the app and extensions, first
+  translations by Xcode 27's agent into French, German, Spanish, Italian,
+  Portuguese and Japanese, each read by a native speaker before release.
+  The parser writes summaries in the saver's language (the prompt already
+  carries the home), and the App Store listing is localised too. Last in
+  the order, once the strings from 5.1–5.6 have settled. Each language
+  also opens featuring in that region's App Store.
+
 ## What stays untouched
 
 The existing Can + Joyce library, history, digest, and sign-ins keep working
@@ -521,8 +593,10 @@ paywall never appears for the founding group.
 
 ## Suggested order
 
-Phases are sequential (0 → 1a → 1b → 2 → 3 → 4); each leaves the app
+Phases are sequential (0 → 1a → 1b → 2 → 3 → 4 → 5); each leaves the app
 shippable to TestFlight, so daily use continues while it transforms.
+Phase 5 can start alongside Phase 4's paperwork: it touches only the app
+and one function (`send-reminders`).
 
 ## Checklist
 
@@ -603,12 +677,22 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 
 ### Phase 4
 - [ ] Legal pages, App Store assets, privacy labels
-- [ ] Export my data (JSON)
+- [x] Export my data — build 77, as three files people can open anywhere rather than JSON: a spreadsheet (CSV, every field), a calendar (ICS of dated events) and a readable list (Markdown), behind a half-height sheet explaining each; also offered before account deletion
 - [ ] App Review kit: free-tier demo group seeded to the cap, permanent invite code, nightly reset; review notes carry the code only — never an account password
 - [ ] Apple Small Business Program enrolment
 - [ ] Production APNs key check
-- [ ] Google Places photo fallback for image-less Maps pins: Cloud project + restricted key as `GOOGLE_PLACES_KEY` (quota cap, budget alert); IDs-only Text Search → `photos` → Place Photos media in `extractCard`; `image_attribution` column + attribution line on the detail page; backfill existing blank Maps cards. Cost: free to 1,000 photos/month, then 0.7¢ each
+- [x] Google Places as the last resort — build 78, 24 Sep. Key `GOOGLE_MAPS_API_KEY` (restricted to Places API (New)). Every saved place gets Google's address and pin when the name matches; events ask only when nothing else could pin the venue; locate tries Google before web search. Photos only after the page, the official site and Wikipedia all miss, stored as a signed link to `place-photo` (fresh photo per load, so only the place ID is kept) with the credit in the link and on the detail page; the phone's thumbnail refresh still replaces a Google photo with the page's own. Existing blank places backfilled (`scripts/backfill-place-photos.ts`: 2 of 2). Still to do by hand: daily quota caps and a budget alert on the key
 - [ ] External TestFlight beta, then launch
+
+### Phase 5
+- [ ] 5.1 Configurable widget ("Show": random / closing soon / this week / near home / category), Been there button, deep links, tinted + clear checked
+- [ ] 5.2 `SaveEntity` in the semantic index (replaces `SpotlightIndex`), open / mark been / remind / save-link intents, App Shortcuts, on-screen annotations; `AppIntentsTesting` suite
+- [ ] 5.3 Visual Intelligence: matching saves + "Save to Can We Go" from a camera capture or screenshot; `semanticContentSearch` into in-app search
+- [ ] 5.4 On-device instant draft for screenshots and text; offline drafts parse later
+- [ ] 5.5 Plan our day on Private Cloud Compute, with an Evaluations suite; decide free vs Plus
+- [ ] 5.6 Live Activity on reminder / "going today" days, push-started by `send-reminders`; landscape Dynamic Island
+- [ ] 5.7 Localisation: String Catalog, six languages reviewed by native speakers, summaries in the saver's language, localised listing
+- [ ] Featuring Nomination filed in App Store Connect once 5.1–5.3 are in TestFlight
 
 ## Post-launch backlog (cut from launch, not forgotten)
 
@@ -631,4 +715,3 @@ Add these in response to real users, not guesses:
 - **Family Sharing** on Plus.
 - **Ask for a review** after the third "We did go".
 - **Rate-limit invite-code attempts** if codes ever see brute-force traffic.
-- **Localization** of the UI.
