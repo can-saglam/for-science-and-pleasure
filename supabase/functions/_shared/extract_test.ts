@@ -1,4 +1,29 @@
-import { cleanLink, isAnchored, linkKey } from "./extract.ts";
+import { cleanLink, isAnchored, isThisRun, linkKey, mentionsDate } from "./extract.ts";
+
+Deno.test("another year's page at the same address isn't this run", () => {
+  const nov13 = ["2026-11-13"];
+  assert(!isThisRun(`<p>13-22 November</p><p>Thu 19 November 2020</p><footer>© 2026</footer>`, nov13), "2020 gig");
+  assert(isThisRun(`<p>Fri 13 November 2026</p>`, nov13), "this year's");
+  // The model's end date was 17 Jan; the page says 3 Jan. Still this run.
+  assert(isThisRun(`<span>Until 3 Jan 2027</span>`, ["2026-07-09", "2027-01-17"]), "dates a little off");
+  assert(isThisRun(`<div id="app"></div><footer>© 2026</footer>`, nov13), "no dates to judge by");
+  assert(isThisRun(`<p>19 November 2020</p>`, []), "places have no dates");
+  assert(!isThisRun(`<p>March 3rd, 2024</p>`, ["2026-03-03"]), "month-first, old year");
+});
+
+Deno.test("an event's page has to name its date", () => {
+  const page = (body: string) => `<html><body><footer>© 2026</footer>${body}</body></html>`;
+  assert(mentionsDate(page("<h2>Fri 13 November 2026</h2>"), "2026-11-13"), "13 November");
+  assert(mentionsDate(page("Nov 13th, doors 7pm"), "2026-11-13"), "Nov 13th");
+  assert(mentionsDate(page("<p>13/11/2026</p>"), "2026-11-13"), "numeric");
+  assert(mentionsDate(`<script type="application/ld+json">{"startDate":"2026-11-13T19:30"}</script>`, "2026-11-13"), "JSON-LD");
+  assert(mentionsDate(page("16 Jun – 18 Oct 2026"), "2026-06-16"), "exhibition run");
+  assert(mentionsDate(page("Sat 26 Sept"), "2026-09-26"), "Sept");
+  // The same address's 2020 gig, and a different day that month.
+  assert(!mentionsDate(`<p>13-22 November</p><p>Thu 19 November 2020</p>`, "2026-11-13"), "2020 page");
+  assert(!mentionsDate(page("Fri 23 November"), "2026-11-13"), "23 is not 3");
+  assert(!mentionsDate(page("Nothing about dates"), "2026-11-13"), "no date");
+});
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);

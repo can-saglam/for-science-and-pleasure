@@ -212,6 +212,52 @@ export function linkKey(raw: string): string | null {
   return `${u.hostname.toLowerCase().replace(/^www\./, "")}${u.pathname.replace(/\/+$/, "")}${u.search}`;
 }
 
+const MONTHS = [
+  "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+];
+
+function pageText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ");
+}
+
+/// Does a page name this date — "13 November", "Nov 13th", "13/11/2026",
+/// or 2026-11-13 in its markup?
+export function mentionsDate(html: string, iso: string): boolean {
+  if (html.includes(iso)) return true;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d || m > 12) return false;
+  const text = pageText(html);
+  if (!text.includes(String(y))) return false;
+  const day = `0?${d}(?:st|nd|rd|th)?`;
+  const month = `${MONTHS[m - 1]}[a-z]*\\.?`;
+  return new RegExp(
+    `\\b${day}\\s+${month}(?![a-z])|\\b${month}\\s+${day}\\b|\\b0?${d}[/.]0?${m}[/.](?:${y}|${y % 100})\\b`,
+    "i",
+  ).test(text);
+}
+
+const MONTH_NAME = `(?:${MONTHS.join("|")})[a-z]*\\.?`;
+const FULL_DATE_RE = new RegExp(
+  `\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_NAME},?\\s+(20\\d\\d)\\b|\\b${MONTH_NAME}\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+(20\\d\\d)\\b`,
+  "gi",
+);
+
+/// Is this page about this run of the event? Sites reuse an event's
+/// address for other years' runs (`/sarathy-korwar` is the 2020 gig, `-4`
+/// this year's). A page naming the event's date is; one whose full dates
+/// are all in other years isn't — even when the model's dates are a little
+/// off, the right page still dates it in the right years. A page with no
+/// full dates can't say, so it's kept.
+export function isThisRun(html: string, dates: string[]): boolean {
+  if (!dates.length || dates.some((d) => mentionsDate(html, d))) return true;
+  const years = new Set(dates.map((d) => d.slice(0, 4)));
+  const found = [...pageText(html).matchAll(FULL_DATE_RE)].map((m) => m[1] ?? m[2]);
+  return !found.length || found.some((y) => years.has(y));
+}
+
 function isSiteRoot(url: string): boolean {
   return new URL(url).pathname.replace(/\/+$/, "") === "";
 }
@@ -224,6 +270,7 @@ function isSiteRoot(url: string): boolean {
 async function ownPage(
   candidate: string,
   seen: Set<string>,
+  dates: string[],
 ): Promise<{ url: string; html: string | null } | null> {
   const clean = cleanLink(candidate);
   if (!clean || !isFetchable(clean) || isMapsUrl(clean)) return null;
@@ -250,6 +297,7 @@ async function ownPage(
     const final = cleanLink(res.url || clean) ?? clean;
     // Sites that answer a missing page by redirecting home.
     if (isSiteRoot(final) && !isSiteRoot(clean)) return null;
+    if (!isThisRun(html, dates)) return null;
     return { url: final, html };
   } catch {
     return vouched();
@@ -549,7 +597,10 @@ export async function extractCard(
   // The save's link: a pasted one as is; for typed names and screenshots,
   // the thing's own page, so the save opens somewhere and "Fetch again"
   // reads a page instead of searching from scratch.
-  const own = !url && proposedLink ? await ownPage(proposedLink, seen) : null;
+  const eventDates = card.kind === "event"
+    ? [card.starts_on, card.ends_on].filter((d): d is string => Boolean(d))
+    : [];
+  const own = !url && proposedLink ? await ownPage(proposedLink, seen, eventDates) : null;
   const savedUrl = url ?? own?.url ?? null;
 
   let imageUrl = page?.ogImage ??
