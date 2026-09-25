@@ -4,18 +4,13 @@ import UIKit
 
 /// Native map of everything with a pin — each one wearing its item's color.
 /// Zoomed out, nearby pins merge into counted bubbles; tapping one dives in.
-/// Tapping a pin raises a peek card at the foot of the map; tapping the
-/// card opens the save, so you can hop pin to pin without leaving the map.
+/// Tapping a pin opens the save's details.
 struct MapPinsView: View {
     let items: [Item]
     /// Events not open yet, kept off the map unless `showsUpcoming`.
     var upcoming = 0
     var showsUpcoming: Binding<Bool> = .constant(false)
     let onSelect: (Item) -> Void
-
-    /// The pin with the peek card up. Its face grows a little to say so.
-    @State private var peeked: Item?
-    @State private var peekDrag: CGFloat = 0
 
     // An explicit region, never .automatic: the automatic camera re-frames
     // whenever annotations change, and clustering changes annotations with
@@ -135,29 +130,18 @@ struct MapPinsView: View {
                     // distant offset and can't be styled — we render our own
                     // chip hugging the pin instead.
                     Annotation("", coordinate: pin.coordinate) {
-                        let isPeeked = peeked?.id == pin.item.id
                         Button {
                             Haptics.tap()
-                            if isPeeked {
-                                onSelect(pin.item)
-                            } else {
-                                withAnimation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.25)) {
-                                    peeked = pin.item
-                                    peekDrag = 0
-                                }
-                            }
+                            onSelect(pin.item)
                         } label: {
                             pinFace(pin.item)
-                                .shadow(color: .black.opacity(isPeeked ? 0.5 : 0.4), radius: isPeeked ? 7 : 4, y: 2)
-                                // The peeked pin stands up out of the crowd.
-                                .scaleEffect(isPeeked ? 1.3 : 1, anchor: .center)
+                                .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
                                 // The visible dot is below Apple's 44 pt
                                 // minimum — pad the tappable area out to it.
                                 .padding(8)
                                 .contentShape(.circle)
                         }
                         .buttonStyle(.plain)
-                        .zIndex(isPeeked ? 1 : 0)
                         // The chip hangs off the button as an overlay so the
                         // dot itself stays exactly on the coordinate.
                         .overlay(alignment: .bottom) {
@@ -183,6 +167,7 @@ struct MapPinsView: View {
                                 .allowsHitTesting(false)
                         }
                         .accessibilityLabel(pin.item.title)
+                        .accessibilityHint("Opens the details")
                     }
                 } else {
                     Annotation("", coordinate: cluster.center) {
@@ -219,20 +204,10 @@ struct MapPinsView: View {
                 }
             }
         }
-        // A tap on bare map puts the peek card away. Pins are buttons and
-        // take their own taps first, so this only fires between them.
-        .onTapGesture {
-            guard peeked != nil else { return }
-            withAnimation(reduceMotion ? nil : .snappy) { peeked = nil }
-        }
         .onAppear {
             let region = Self.region(fitting: openingCoordinates)
             camera = .region(region)
             span = region.span
-        }
-        // The peeked save left the map (filtered out, marked done…).
-        .onChange(of: items.map(\.id)) { _, ids in
-            if let peeked, !ids.contains(peeked.id) { self.peeked = nil }
         }
         .onMapCameraChange(frequency: .onEnd) { context in
             // Panning can't change the (absolute) grid — only meaningful
@@ -266,7 +241,7 @@ struct MapPinsView: View {
         .overlay {
             GeometryReader { geo in
                 let plus = PlusButtonFrame.shared.best
-                let show = (upcoming > 0 || locations.denied) && peeked == nil
+                let show = upcoming > 0 || locations.denied
                 if show, plus != .zero {
                     let local = geo.frame(in: .global)
                     VStack(alignment: .leading, spacing: 8) {
@@ -289,45 +264,6 @@ struct MapPinsView: View {
                 }
             }
         }
-        // The peek card: the tapped save, as its own card, at the foot of
-        // the map. Tap to open; drag down, tap the map or another pin to
-        // put it away. Locate-me and the footer step aside while it's up.
-        .overlay {
-            GeometryReader { geo in
-                let plus = PlusButtonFrame.shared.best
-                if let peeked, plus != .zero {
-                    let local = geo.frame(in: .global)
-                    Button {
-                        Haptics.tap()
-                        onSelect(peeked)
-                    } label: {
-                        ItemCard(item: peeked)
-                            .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
-                    }
-                    .buttonStyle(PressableCardStyle())
-                    .padding(.horizontal, 20)
-                    .offset(y: max(peekDrag, 0))
-                    .gesture(
-                        DragGesture(minimumDistance: 8)
-                            .onChanged { peekDrag = $0.translation.height }
-                            .onEnded { value in
-                                if value.translation.height > 40 || value.predictedEndTranslation.height > 120 {
-                                    withAnimation(reduceMotion ? nil : .snappy) { self.peeked = nil }
-                                } else {
-                                    withAnimation(.snappy) { peekDrag = 0 }
-                                }
-                            }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, max(local.maxY - plus.minY + 12, 0))
-                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-                    .accessibilityHint("Opens the details")
-                    .accessibilityAction(named: "Dismiss") { self.peeked = nil }
-                    .id(peeked.id)
-                }
-            }
-        }
-        .animation(reduceMotion ? nil : .snappy, value: peeked?.id)
         // Locate-me docks directly above the add button, at its exact size —
         // the bar reads the system circle's real frame, so the two stay
         // aligned on every device. Our own button, not
@@ -336,7 +272,7 @@ struct MapPinsView: View {
         .overlay {
             GeometryReader { geo in
                 let plus = PlusButtonFrame.shared.best
-                if plus != .zero, peeked == nil {
+                if plus != .zero {
                     let local = geo.frame(in: .global)
                     Button {
                         Haptics.tap()

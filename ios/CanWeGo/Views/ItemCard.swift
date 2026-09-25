@@ -367,20 +367,6 @@ private struct LandingGlow: ViewModifier {
     }
 }
 
-/// Things-style tactility: cards settle slightly under the finger,
-/// with a soft haptic tick on touch-down. Used on the map peek, not in
-/// the scrolling list — there the press spring fights the drag.
-struct PressableCardStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect((!reduceMotion && configuration.isPressed) ? 0.975 : 1)
-            .opacity(configuration.isPressed ? 0.92 : 1)
-            .animation(reduceMotion ? nil : .spring(duration: 0.28), value: configuration.isPressed)
-    }
-}
-
 extension View {
     /// Card rows inside a plain List: invisible chrome, our own spacing.
     func cardListRow() -> some View {
