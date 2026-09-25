@@ -64,8 +64,9 @@ export class VagueInputError extends Error {
 }
 
 /// What the model returns: the card plus its own reading of whether the
-/// input pointed at one real thing. The flag never leaves this module.
-type ModelCard = ParsedCard & { is_specific: boolean };
+/// input pointed at one real thing, and the thing's own page. Neither
+/// leaves this module as is — the page becomes the save's url once checked.
+type ModelCard = ParsedCard & { is_specific: boolean; link: string | null };
 
 // The schema carries the home in its examples (area, price, address), so
 // it is built per call rather than once.
@@ -75,7 +76,7 @@ const cardSchema = (home: Home) => ({
     is_specific: {
       type: "boolean",
       description:
-        "true if the user's input points at one particular, real, named event or place (a venue, an exhibition, a restaurant, a gig). Also true when they name one venue or institution and ask for its current, latest, or highlighted exhibition or show — that is a save: resolve it to the exhibition the venue's own site is currently featuring that is still open today. A postponed, cancelled, or already-closed show is not that. false when it is a category, a list, or an unbounded search that names no particular place — 'modern art museums in London', 'good brunch spots', 'things to do this weekend', 'exhibitions in Singapore' — even if web search turned up candidates; never pick one museum or gig to stand in for a request that named no venue.",
+        "true if the user's input points at one particular, real, named event or place (a venue, an exhibition, a restaurant, a gig). Also true when they name one venue or institution and ask for its current, latest, or highlighted exhibition or show — that is a save: resolve it to the exhibition the venue's own site is currently featuring that is still open today. A postponed, cancelled, or already-closed show is not that. Likewise one named artist, performer or company plus 'latest', 'current' or 'next' show: resolve it to that show (still open or upcoming), preferring one in or near the user's home city. false when it is a category, a list, or an unbounded search that names no particular place — 'modern art museums in London', 'good brunch spots', 'things to do this weekend', 'exhibitions in Singapore' — even if web search turned up candidates; never pick one museum or gig to stand in for a request that named no venue.",
     },
     kind: {
       type: "string",
@@ -83,7 +84,11 @@ const cardSchema = (home: Home) => ({
       description:
         "'event' if it has dates or a run (exhibition, gig, festival, pop-up); 'place' if it's evergreen (cafe, restaurant, bar, shop, park)",
     },
-    title: { type: "string", description: "Short name of the event or place" },
+    title: {
+      type: "string",
+      description:
+        "Short name of the event or place, as its organiser or venue lists it — for an exhibition, the show's official title (often just the artist's name). Never append the venue, city or dates ('… at Hayward Gallery'); those have their own fields.",
+    },
     summary: {
       type: ["string", "null"],
       description: "One sentence on what it is and why it's interesting",
@@ -125,10 +130,15 @@ const cardSchema = (home: Home) => ({
       description:
         "Official homepage URL for this exact event or place — the venue's own site, not an aggregator, social media, or maps link; null unless confidently known",
     },
+    link: {
+      type: ["string", "null"],
+      description:
+        "The web page for this exact event or place, opened when someone taps the save. An event: its own main page — its listing on the venue's or organiser's site, the homepage of a festival or fair with a site of its own, or the official ticket page when that is where the organiser lists it. A place: its official homepage (for one branch of a chain, that branch's page). Never a sub-page such as about, FAQs, visitor information or checkout. Only a URL that appeared in the input, the fetched page, or your search results — never one you constructed. null when there is no such page: never a venue homepage or what's-on list standing in for an event, an aggregator, social media, or a maps link.",
+    },
   },
   required: [
     "is_specific", "kind", "title", "summary", "venue", "area", "address",
-    "category", "price", "booking_url", "starts_on", "ends_on", "website",
+    "category", "price", "booking_url", "starts_on", "ends_on", "website", "link",
   ],
   additionalProperties: false,
 }) as const;
@@ -174,6 +184,76 @@ const BLOCK_PAGE_RE =
 
 function looksBlocked(pageText: string): boolean {
   return pageText.length < 4000 && BLOCK_PAGE_RE.test(pageText);
+}
+
+// Query parameters that only say where a click came from.
+const TRACKING_PARAM_RE =
+  /^(utm_\w+|fbclid|gclid|dclid|msclkid|mc_cid|mc_eid|_gl|_ga|igsh|igshid|ref_src|aff|sg)$/i;
+
+export function cleanLink(raw: string): string | null {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    for (const key of [...u.searchParams.keys()]) {
+      if (TRACKING_PARAM_RE.test(key)) u.searchParams.delete(key);
+    }
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/// Two spellings of one page compare equal: no www, trailing slash,
+/// fragment or tracking.
+export function linkKey(raw: string): string | null {
+  const clean = cleanLink(raw);
+  if (!clean) return null;
+  const u = new URL(clean);
+  return `${u.hostname.toLowerCase().replace(/^www\./, "")}${u.pathname.replace(/\/+$/, "")}${u.search}`;
+}
+
+function isSiteRoot(url: string): boolean {
+  return new URL(url).pathname.replace(/\/+$/, "") === "";
+}
+
+/// The model's `link`, kept only if it leads somewhere real: the page
+/// loads, or the site walls off servers but search showed the model that
+/// exact page. A dead or guessed deep link is dropped, never swapped for
+/// the site's homepage — two shows at one venue would then share a link
+/// and read as duplicates of each other.
+async function ownPage(
+  candidate: string,
+  seen: Set<string>,
+): Promise<{ url: string; html: string | null } | null> {
+  const clean = cleanLink(candidate);
+  if (!clean || !isFetchable(clean) || isMapsUrl(clean)) return null;
+  const vouched = () => {
+    const key = linkKey(clean);
+    return key && seen.has(key) ? { url: clean, html: null } : null;
+  };
+  try {
+    const res = await fetch(clean, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+    });
+    if (!res.ok) {
+      await res.body?.cancel();
+      return res.status === 404 || res.status === 410 ? null : vouched();
+    }
+    const html = (await res.text()).slice(0, 600_000);
+    if (looksBlocked(html.replace(/<[^>]+>/g, " "))) return vouched();
+    const final = cleanLink(res.url || clean) ?? clean;
+    // Sites that answer a missing page by redirecting home.
+    if (isSiteRoot(final) && !isSiteRoot(clean)) return null;
+    return { url: final, html };
+  } catch {
+    return vouched();
+  }
 }
 
 async function fetchPage(
@@ -310,7 +390,7 @@ export async function extractCard(
     `The user lives in ${where}: assume that city when the source doesn't say where something is, and read prices, dates and place names with that in mind. But trust the source — if it clearly places the event or venue somewhere else, keep it there (with the city in the address); never move it home.`,
     "Resolve relative or partial dates to absolute YYYY-MM-DD dates (if a month is named without a year, assume the next occurrence from today).",
     "If a field is genuinely unknown, use null — do not guess venues, prices, or dates.",
-    "If the input is a category, a list, or a search that names no particular venue — 'modern art museums in London', 'gigs this weekend' — set is_specific to false and do not choose a candidate to stand in for it. If they name one venue and ask for the current, latest, or highlighted exhibition or show there, that is specific: set is_specific true and fill the card for a special exhibition the venue's own website currently lists as on. Source of truth is the official 'ongoing' / 'what's on' list, not a highlights carousel, yearly lineup, TimeOut page, or news of a planned show. The show must still be open today (started on or before today, not yet closed); postponed, cancelled, or 404 pages do not count. If they said 'latest' or 'newest', pick the most recently opened special exhibition that is still open; otherwise pick the first special exhibition on that official list. Prefer that over a permanent collection. Fill website with that exhibition's own page on the venue's domain, not the venue homepage. Do not refuse it as a search.",
+    "If the input is a category, a list, or a search that names no particular venue — 'modern art museums in London', 'gigs this weekend' — set is_specific to false and do not choose a candidate to stand in for it. If they name one venue and ask for the current, latest, or highlighted exhibition or show there, that is specific: set is_specific true and fill the card for a special exhibition the venue's own website currently lists as on. Source of truth is the official 'ongoing' / 'what's on' list, not a highlights carousel, yearly lineup, TimeOut page, or news of a planned show. The show must still be open today (started on or before today, not yet closed); postponed, cancelled, or 404 pages do not count. If they said 'latest' or 'newest', pick the most recently opened special exhibition that is still open; otherwise pick the first special exhibition on that official list. Prefer that over a permanent collection. Fill website with that exhibition's own page on the venue's domain, not the venue homepage. Do not refuse it as a search. The same goes for one named artist, performer or company and their latest, current or next show: pick the one still open (or next upcoming), preferring one in or near home, and title it as its host venue does.",
     "Fill 'website' with the official homepage of the event or place (the venue's own site — never an aggregator, social media, Reddit, or a maps link). If you used web search and its results name or link the official site, use that; leave null only when no official site turns up.",
   ];
   if (text) parts.push(`User's saved input:\n${text}`);
@@ -352,7 +432,9 @@ export async function extractCard(
         `Use the web search tool to identify this exact event or place — search with ${
           url ? "the names from the URL slug" : "the names you can see in the input"
         }${home.locality ? ` plus "${home.locality}"` : ""} — and fill in verified details, especially start/end dates, venue, and price.`,
-        "If they asked for the current or latest exhibition at a named venue, open that venue's own homepage or what's-on / ongoing-exhibitions list (not a listings site). Pick the most recently opened special exhibition still open today if they said 'latest' or 'newest', otherwise the first special exhibition on that list. Confirm the official exhibition page is live and the dates include today; fill website with that page. Save the show (kind 'event'), not the venue as a place and not a postponed, cancelled, or closed one.",
+        `An event named without a date means the run that's on now or its next date: search for upcoming dates, and never save one that ended before today (${today}) — if only past dates turn up, leave the dates null.`,
+        "If they asked for the current or latest exhibition at a named venue, open that venue's own homepage or what's-on / ongoing-exhibitions list (not a listings site). Pick the most recently opened special exhibition still open today if they said 'latest' or 'newest', otherwise the first special exhibition on that list. Confirm the official exhibition page is live and the dates include today; fill website with that page. Save the show (kind 'event'), not the venue as a place and not a postponed, cancelled, or closed one. If they named an artist or performer rather than a venue, find that show on its host venue's own site the same way.",
+        url ? "" : "There is no link to save, so find this exact event's or place's own page for 'link'.",
         input.image_base64 ? "Combine that with what the screenshot shows." : "",
         "Also find the official website and fill 'website' — the app fetches the thumbnail photo from it.",
         "If search doesn't confirm a detail, leave it null; never guess.",
@@ -405,8 +487,16 @@ export async function extractCard(
   if (!textBlock || textBlock.type !== "text") {
     throw new Error("No structured output returned");
   }
-  const { is_specific, ...card } = JSON.parse(textBlock.text) as ModelCard;
+  const { is_specific, link: proposedLink, ...card } = JSON.parse(textBlock.text) as ModelCard;
   card.category = normaliseCategory(card.kind, card.category);
+  const seen = new Set<string>();
+  for (const block of response.content) {
+    if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;
+    for (const result of block.content) {
+      const key = linkKey(result.url);
+      if (key) seen.add(key);
+    }
+  }
 
   // The pin in a Maps URL is exact — trust it over geocoding the name.
   const pin = mapsLink && mapsLink.lat !== null && mapsLink.lng !== null
@@ -456,10 +546,19 @@ export async function extractCard(
   // its largest content picture). If that's still empty, try the official
   // website the model named — Reddit tips, blocked ticketing pages, maps
   // pins, and bare typed names all get a real venue photo this way.
-  let imageUrl = page?.ogImage ?? null;
+  // The save's link: a pasted one as is; for typed names and screenshots,
+  // the thing's own page, so the save opens somewhere and "Fetch again"
+  // reads a page instead of searching from scratch.
+  const own = !url && proposedLink ? await ownPage(proposedLink, seen) : null;
+  const savedUrl = url ?? own?.url ?? null;
+
+  let imageUrl = page?.ogImage ??
+    (own?.html ? heroImageFromHtml(own.html, own.url) : null);
+  const ownTried = !url && proposedLink ? linkKey(proposedLink) : null;
   if (
     !imageUrl && card.website && isFetchable(card.website) &&
-    !isMapsUrl(card.website) && card.website !== url
+    !isMapsUrl(card.website) && card.website !== url &&
+    (ownTried === null || linkKey(card.website) !== ownTried)
   ) {
     imageUrl = await heroImageFromUrl(card.website);
   }
@@ -494,7 +593,7 @@ export async function extractCard(
 
   return {
     ...card,
-    url,
+    url: savedUrl,
     source: input.image_base64 ? "image" : url ? "link" : "text",
     lat: coords?.lat ?? null,
     lng: coords?.lng ?? null,
