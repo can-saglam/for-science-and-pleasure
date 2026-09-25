@@ -528,7 +528,7 @@ export async function extractCard(
   }
   // An event at a venue nothing else could place: ask Google for the venue.
   if (!coords && card.kind === "event" && card.venue) {
-    google = await findPlace(card.venue, card, home);
+    google = await findPlace(card.venue, card, home, null, { samePostcode: true });
     if (google?.lat != null && google.lng != null) {
       coords = { lat: google.lat, lng: google.lng };
       card.address ??= google.address;

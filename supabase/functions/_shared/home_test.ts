@@ -161,3 +161,17 @@ Deno.test("geocodeNearHome: falls back to the postcode when both queries miss", 
   assertEquals(await geocodeNearHome(geocoder, "Somewhere vague", LONDON), null);
   assertEquals(calls.length, 2, "no postcode → no third call");
 });
+
+Deno.test("geocodeNearHome: an address that already names its town still gets the postcode try", async () => {
+  const calls: string[] = [];
+  const binfield = { lat: 51.42, lng: -0.79 };
+  const geocoder = (q: string) => {
+    calls.push(q);
+    return Promise.resolve(q === "RG42 4AN, United Kingdom" ? binfield : null);
+  };
+  assertEquals(
+    await geocodeNearHome(geocoder, "Saint Mark's Road, Popeswood, RG42 4AN, England", LONDON),
+    binfield,
+  );
+  assertEquals(calls, ["Saint Mark's Road, Popeswood, RG42 4AN, England", "RG42 4AN, United Kingdom"]);
+});

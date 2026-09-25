@@ -11,7 +11,7 @@
 // Everything here is best-effort: no key, a quota hit or a miss all
 // return null and the save carries on as before.
 import type { Home } from "./home.ts";
-import { namesCity } from "./home.ts";
+import { namesCity, ukPostcode } from "./home.ts";
 
 const API = "https://places.googleapis.com/v1";
 
@@ -116,6 +116,7 @@ export async function findPlace(
   hint: { address?: string | null; area?: string | null },
   home: Home,
   pin: { lat: number; lng: number } | null = null,
+  { samePostcode = false }: { samePostcode?: boolean } = {},
 ): Promise<PlaceMatch | null> {
   const key = apiKey();
   if (!key || !name.trim()) return null;
@@ -158,9 +159,14 @@ export async function findPlace(
       return null;
     }
     const { places = [] } = await res.json() as { places?: SearchPlace[] };
+    const postcode = samePostcode && hint.address ? ukPostcode(hint.address) : null;
     for (const p of places) {
       const found = p.displayName?.text ?? "";
-      if (!p.id || !sameName(name, found)) continue;
+      // A venue under a nickname ("V&A South Kensington" for the Victoria
+      // and Albert Museum) still counts when it sits at the saved postcode.
+      const atPostcode = postcode !== null &&
+        ukPostcode(p.formattedAddress ?? "") === postcode;
+      if (!p.id || !(sameName(name, found) || atPostcode)) continue;
       const lat = p.location?.latitude ?? null;
       const lng = p.location?.longitude ?? null;
       if (pin && (lat == null || lng == null || metresBetween(pin, { lat, lng }) > 400)) continue;

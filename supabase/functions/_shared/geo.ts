@@ -1,37 +1,156 @@
 // Small, dependency-free helpers shared by functions. Kept separate from
 // extract.ts so that functions which only geocode (e.g. locate) don't pull in
 // the imagescript dependency, whose native codec loading crashes the worker.
+import { metresBetween } from "./places.ts";
 
-// Free OSM geocoder — used only server-side to attach coordinates so the app
-// can do distance-based "nearby" suggestions and Google Maps directions.
-// Nominatim allows one request per second per app; a second query fired
-// straight after a miss (the home-suffixed try, then the bare address) was
-// being refused, which is how a place with a full postcode ended up with no
-// pin. Space the calls out.
-let lastCall = 0;
+// Free OpenStreetMap geocoding — used only server-side to attach coordinates
+// so the app can do distance-based "nearby" suggestions and directions.
+// Nominatim (openstreetmap.org) refuses Supabase's servers outright (403),
+// so addresses go to Photon, which serves the same OpenStreetMap data, and
+// bare UK postcodes to postcodes.io. Nominatim is only asked when Photon
+// itself is down.
+const GEO_UA = "CanWeGo/1.0 (https://canwego.app; geocoding)";
+type LatLng = { lat: number; lng: number };
+
+// Nominatim allows one request per second per app.
+let lastNominatim = 0;
 async function politely(): Promise<void> {
-  const wait = lastCall + 1_100 - Date.now();
+  const wait = lastNominatim + 1_100 - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastCall = Date.now();
+  lastNominatim = Date.now();
 }
 
-export async function geocode(query: string): Promise<{ lat: number; lng: number } | null> {
+function normAddress(s: string): string {
+  const words = s
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\brd\b/g, "road")
+    .replace(/\bst\b/g, "street")
+    .replace(/\bave\b/g, "avenue")
+    .replace(/\bln\b/g, "lane")
+    .replace(/\bsq\b/g, "square")
+    .replace(/\s+/g, " ")
+    .trim();
+  return ` ${words} `;
+}
+
+export interface PhotonProps {
+  name?: string;
+  street?: string;
+  type?: string;
+}
+
+/// Photon always answers with its nearest guess — "12 Rue de Rivoli,
+/// London" comes back as a Piccadilly bar. A hit counts only when the
+/// street it's on (or, for a street, district or town, its own name)
+/// is in the address that was asked for.
+export function photonMatches(props: PhotonProps, query: string): boolean {
+  const q = normAddress(query);
+  const named = (s?: string) => Boolean(s && normAddress(s).trim() && q.includes(normAddress(s)));
+  return props.street ? named(props.street) : named(props.name);
+}
+
+/// `road` marks a hit that is a whole street rather than a door on it.
+async function photon(
+  query: string,
+  near?: LatLng,
+): Promise<(LatLng & { road: boolean }) | null | undefined> {
+  const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : "";
+  try {
+    const res = await fetch(
+      `https://photon.komoot.io/api/?limit=5${bias}&q=${encodeURIComponent(query)}`,
+      { headers: { "User-Agent": GEO_UA }, signal: AbortSignal.timeout(8_000) },
+    );
+    if (!res.ok) {
+      await res.body?.cancel();
+      console.warn("photon refused", res.status);
+      return undefined;
+    }
+    const { features = [] } = await res.json() as {
+      features?: { geometry?: { coordinates?: number[] }; properties?: PhotonProps }[];
+    };
+    for (const f of features) {
+      const [lng, lat] = f.geometry?.coordinates ?? [];
+      const props = f.properties ?? {};
+      if (lat != null && lng != null && photonMatches(props, query)) {
+        return { lat, lng, road: props.type === "street" };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn("photon failed", String(e));
+    return undefined;
+  }
+}
+
+async function nominatim(query: string): Promise<LatLng | null> {
   try {
     await politely();
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`,
-      {
-        headers: { "User-Agent": "for-science-and-pleasure/1.0" },
-        signal: AbortSignal.timeout(8_000),
-      },
+      { headers: { "User-Agent": GEO_UA }, signal: AbortSignal.timeout(8_000) },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      await res.body?.cancel();
+      console.warn("nominatim refused", res.status);
+      return null;
+    }
     const arr = await res.json();
     if (!arr?.[0]?.lat) return null;
     return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
-  } catch {
+  } catch (e) {
+    console.warn("nominatim failed", String(e));
     return null;
   }
+}
+
+async function ukPostcodeCentre(postcode: string): Promise<LatLng | null> {
+  try {
+    const res = await fetch(
+      `https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`,
+      { headers: { "User-Agent": GEO_UA }, signal: AbortSignal.timeout(8_000) },
+    );
+    if (!res.ok) {
+      await res.body?.cancel();
+      return null;
+    }
+    const { result } = await res.json() as { result?: { latitude?: number; longitude?: number } };
+    return result?.latitude != null && result.longitude != null
+      ? { lat: result.latitude, lng: result.longitude }
+      : null;
+  } catch (e) {
+    console.warn("postcodes.io failed", String(e));
+    return null;
+  }
+}
+
+const BARE_UK_POSTCODE_RE =
+  /^\s*([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*(?:,\s*(?:united kingdom|uk|gb|england|scotland|wales|northern ireland))?\s*$/i;
+const UK_POSTCODE_RE = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b/;
+
+export async function geocode(query: string, near?: LatLng): Promise<LatLng | null> {
+  const bare = query.match(BARE_UK_POSTCODE_RE)?.[1];
+  if (bare) {
+    const centre = await ukPostcodeCentre(bare);
+    if (centre) return centre;
+  }
+  const found = await photon(query, near);
+  const hit: LatLng | null = found === undefined
+    ? await nominatim(query)
+    : found && { lat: found.lat, lng: found.lng };
+  // A full postcode pins an address to a few doors; a street match alone
+  // can be the far end of a long road ("Cromwell Road, SW7 2RL" is the V&A,
+  // not Earl's Court). The postcode wins over a whole-street hit, and over
+  // any hit more than 300m from it.
+  const pc = bare ? null : query.toUpperCase().match(UK_POSTCODE_RE);
+  if (pc) {
+    const centre = await ukPostcodeCentre(`${pc[1]} ${pc[2]}`);
+    if (centre && (!hit || found?.road || metresBetween(hit, centre) > 300)) return centre;
+  }
+  return hit;
 }
 
 export interface MapsLinkInfo {

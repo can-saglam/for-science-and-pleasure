@@ -108,23 +108,36 @@ export function geocodeQuery(address: string, home: Home): string {
 /**
  * Geocode with the home as context, trusting an out-of-home match: the
  * suffixed query first when the address doesn't name a city, and the bare
- * address as the fallback (Nominatim returns nothing for "Rue de Rivoli,
+ * address as the fallback (the geocoder won't match "Rue de Rivoli,
  * London", so a mislabelled foreign address still lands where it is).
+ * A query that names the home city is searched near it: "Bermondsey
+ * Street, London SE1" otherwise ranks London Bridge first.
  */
 export async function geocodeNearHome(
-  geocode: (q: string) => Promise<{ lat: number; lng: number } | null>,
+  geocode: (
+    q: string,
+    near?: { lat: number; lng: number },
+  ) => Promise<{ lat: number; lng: number } | null>,
   address: string,
   home: Home,
 ): Promise<{ lat: number; lng: number } | null> {
+  const centre = home.lat != null && home.lng != null ? { lat: home.lat, lng: home.lng } : null;
+  const near = (q: string) =>
+    centre && home.locality && q.toLowerCase().includes(home.locality.toLowerCase())
+      ? centre
+      : undefined;
   const query = geocodeQuery(address, home);
-  const hit = await geocode(query);
-  if (hit || query === address) return hit;
-  const bare = await geocode(address);
-  if (bare) return bare;
+  const hit = await geocode(query, near(query));
+  if (hit) return hit;
+  if (query !== address) {
+    const bare = await geocode(address, near(address));
+    if (bare) return bare;
+  }
   // Last resort: a postcode alone. Geocoders know every UK postcode even
-  // when they've never heard of the estate or venue in front of it.
+  // when they've never heard of the estate or venue in front of it
+  // ("Saint Mark's Road, Popeswood" is "St Mark's Road" to OpenStreetMap).
   const postcode = ukPostcode(address);
-  return postcode ? await geocode(`${postcode}, ${home.country}`) : null;
+  return postcode ? await geocode(`${postcode}, United Kingdom`) : null;
 }
 
 /** The UK postcode in an address, normalised to "PO18 0PX" form; null if none. */
