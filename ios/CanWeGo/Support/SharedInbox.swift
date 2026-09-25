@@ -41,6 +41,11 @@ enum SharedInbox {
         /// Set when whoever parked it already told someone the save's id
         /// (Siri answers with the save it added).
         var id: UUID?
+
+        /// Whether `url` is the link the saver pasted or shared, rather
+        /// than the page the parser found for a typed name or screenshot.
+        /// Only theirs proves a duplicate: two shows can share a found page.
+        var urlIsTheirs: Bool { source == nil || source == "link" }
     }
 
     struct Claim {

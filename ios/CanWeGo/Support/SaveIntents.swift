@@ -176,12 +176,17 @@ struct AddToLibraryIntent: AppIntent {
         guard !asked.isEmpty else { throw SaveIntentError.nothingAsked }
         let card = try await SaveInbox.lookUp(asked)
         let library = SaveLibrary.all()
+        // A page the parser found for a description is a lead, not proof:
+        // it goes through the lookalike question below instead.
         if let twin = DuplicateFinder.match(
-            url: card.url, title: card.title, startsOn: card.starts_on, kind: card.kind, in: library
+            url: card.source == "link" ? card.url : nil,
+            title: card.title, startsOn: card.starts_on, kind: card.kind, in: library
         ) {
             return .alreadySaved(twin)
         }
-        if let similar = lookalike(of: card, in: library) {
+        let samePage = card.source == "link" ? nil
+            : DuplicateFinder.match(url: card.url, title: nil, startsOn: nil, kind: nil, in: library)
+        if let similar = samePage ?? lookalike(of: card, in: library) {
             try await confirm("I found \(spoken(card)). You already have \u{201c}\(similar.title)\u{201d} saved. Add this one too?")
         } else {
             try await confirm("I found \(spoken(card)). Add it?")

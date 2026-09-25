@@ -456,7 +456,7 @@ struct ContentView: View {
         if !group.libraryIsForeign {
             for claim in SharedInbox.claim(for: SupabaseAuth.shared.userId) {
                 let save = claim.save
-                if save.allowDuplicate != true,
+                if save.allowDuplicate != true, save.urlIsTheirs,
                    let url = save.url, existing.contains(SavedURLIndex.normalize(url)) {
                     SharedInbox.acknowledge(claim)
                     continue
