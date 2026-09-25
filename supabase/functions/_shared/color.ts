@@ -281,9 +281,11 @@ export function largestImageCandidate(
   if (srcset) {
     // Candidates are "URL descriptor" pairs. Matched rather than split on
     // commas: Wix transform paths carry commas (`w_638,h_646`), and a URL
-    // never carries whitespace.
+    // never carries whitespace. Some sites skip the space after the
+    // separator (`320w,https://…`), leaving that comma on the next URL.
     for (const m of srcset.matchAll(/(\S+)\s+(\d+(?:\.\d+)?)([wx])(?=\s*,|\s*$)/g)) {
-      const [, url, n, unit] = m;
+      const [, raw, n, unit] = m;
+      const url = raw.replace(/^,+/, "");
       if (unit === "w") {
         sawWidthDescriptor = true;
         if (Number(n) > width) {

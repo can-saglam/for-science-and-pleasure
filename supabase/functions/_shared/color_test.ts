@@ -157,6 +157,15 @@ Deno.test("a real w descriptor beats a density guess", () => {
   assertEquals(largestImageCandidate(tag), { src: "/a-600.jpg", width: 600 });
 });
 
+Deno.test("srcset with no space after its commas (goodwoodartfoundation.org)", () => {
+  const tag =
+    `<img srcset="https://x.org/gw.jpg?rxy=0.5,0.5&width=320&height=180 320w,https://x.org/gw.jpg?rxy=0.5,0.5&width=1920&height=1080 1920w" src="https://x.org/gw.jpg">`;
+  assertEquals(largestImageCandidate(tag), {
+    src: "https://x.org/gw.jpg?rxy=0.5,0.5&width=1920&height=1080",
+    width: 1920,
+  });
+});
+
 Deno.test("Wix transform paths name the width when nothing else does", () => {
   assertEquals(
     largestImageCandidate(`<img src="https://static.wixstatic.com/media/x~mv2.jpg/v1/fill/w_1200,h_800,al_c/x.jpg">`),
