@@ -1,3 +1,4 @@
+import EventKit
 import SwiftData
 import SwiftUI
 
@@ -48,6 +49,15 @@ struct SettingsView: View {
     private var transportApp = TransportApp.google.rawValue
     /// Same key `LiveDay` reads; on until switched off.
     @AppStorage("liveActivities") private var liveActivities = true
+    #if !APP_EXTENSION
+    /// Same key `CalendarChoice` reads; empty is the iPhone's default calendar.
+    @AppStorage(CalendarChoice.key) private var calendarID = ""
+    @State private var calendarAccess = EKEventStore.authorizationStatus(for: .event)
+    @State private var calendars: [CalendarChoice.Option] = []
+    @State private var calendarRefused = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
+    #endif
 
     private var version: String {
         let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -120,6 +130,8 @@ struct SettingsView: View {
                 .listRowBackground(Self.rowBackground)
 
                 #if !APP_EXTENSION
+                calendarSection
+
                 Section {
                     Toggle(isOn: $liveActivities) {
                         row("Live Activity on the day", icon: "platter.filled.top.iphone")
@@ -332,6 +344,23 @@ struct SettingsView: View {
             .onChange(of: syncStatus.syncing) { _, now in
                 if !now { pending = SupabaseSync.pendingCount(context: context) }
             }
+            #if !APP_EXTENSION
+            .task { refreshCalendars() }
+            // Back from the Settings app, where access may have changed.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { refreshCalendars() }
+            }
+            .alert("Choose a calendar in Settings", isPresented: $calendarRefused) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+                Button("Not now", role: .cancel) {}
+            } message: {
+                Text(calendarAccess == .writeOnly
+                    ? "To list your calendars, Can We Go needs Full Access under Calendars. Until then, events go to your iPhone's default calendar."
+                    : "Turn on Calendars for Can We Go and choose Full Access to pick where your events go.")
+            }
+            #endif
             .sheet(item: $legal) { page in
                 LegalSheet(page: page)
             }
@@ -424,6 +453,71 @@ struct SettingsView: View {
         .frame(height: 34)
         .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
     }
+
+    #if !APP_EXTENSION
+    /// Everyone starts on the iPhone's default calendar with add-only
+    /// access; the list, and the full-access prompt it needs, are only for
+    /// someone who taps here asking for them.
+    private var calendarSection: some View {
+        Section {
+            if calendarAccess == .fullAccess {
+                menuRow("Add events to", icon: "calendar") {
+                    Picker(selection: $calendarID) {
+                        Text("iPhone default").tag("")
+                        ForEach(calendars) { calendar in
+                            Text(calendar.name).tag(calendar.id)
+                        }
+                    } label: { EmptyView() }
+                }
+                .sensoryFeedback(.selection, trigger: calendarID)
+            } else {
+                Button {
+                    Haptics.tap()
+                    Task {
+                        _ = await CalendarChoice.requestFullAccess()
+                        refreshCalendars()
+                        calendarRefused = calendarAccess != .fullAccess
+                    }
+                } label: {
+                    // Dressed as the picker it turns into once allowed.
+                    LabeledContent {
+                        HStack(spacing: 5) {
+                            Text("iPhone default")
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.footnote.weight(.medium))
+                        }
+                        .foregroundStyle(themes.current.ink)
+                    } label: {
+                        row("Add events to", icon: "calendar")
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Choose a calendar. iOS will ask to let Can We Go see your calendars.")
+                .frame(height: 34)
+                .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
+            }
+        } header: {
+            Text("Calendar").id("calendar")
+        } footer: {
+            Text(calendarAccess == .fullAccess
+                ? "Where Add to calendar puts your events. Can We Go only lists your calendars here; it never reads what's in them."
+                : "Add to calendar uses your iPhone's default calendar. To pick another, tap above and let iOS show Can We Go your calendars.")
+                .font(.footnote)
+        }
+        .listRowBackground(Self.rowBackground)
+    }
+
+    /// A calendar that's gone falls back to the default, so the picker
+    /// never shows a blank value.
+    private func refreshCalendars() {
+        calendarAccess = EKEventStore.authorizationStatus(for: .event)
+        calendars = CalendarChoice.options()
+        if calendarAccess == .fullAccess, !calendarID.isEmpty,
+           !calendars.contains(where: { $0.id == calendarID }) {
+            calendarID = ""
+        }
+    }
+    #endif
 
     /// Writes the store; the window cross-fades in one step, and the
     /// home-screen icon follows right away. iOS confirms every icon change

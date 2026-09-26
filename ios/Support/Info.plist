@@ -32,6 +32,8 @@
 	<string>Snap a poster or flyer to save it straight to your list.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>Adds events you choose to your calendar.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Lists your calendars so you can choose which one your events go into. Can We Go never reads your events.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Post-TRIAL-Medium.otf</string>

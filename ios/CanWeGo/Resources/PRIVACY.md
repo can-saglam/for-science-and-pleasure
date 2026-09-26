@@ -13,6 +13,8 @@ Can We Go? is a shared list of places and events you mean to go to.
 
 Your phone’s own location stays on your phone. It is only used there, to show how far away a place is.
 
+Add to calendar only adds the event you tapped. If you choose a calendar in Settings, iOS asks to let the app see your calendars; it only lists their names, on your phone, and never reads your events or sends anything about them to us.
+
 We do not sell this. We do not run ads. We do not track you across other apps.
 
 ## Who can see a save

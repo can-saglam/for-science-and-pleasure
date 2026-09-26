@@ -92,7 +92,7 @@ extension Item {
         event.endDate = endsOn.flatMap(DayString.date) ?? start
         event.location = [venue, area].compactMap(\.self).joined(separator: ", ")
         event.notes = [summary, url].compactMap(\.self).joined(separator: "\n\n")
-        event.calendar = store.defaultCalendarForNewEvents
+        event.calendar = CalendarChoice.calendar(in: store) ?? store.defaultCalendarForNewEvents
         try store.save(event, span: .thisEvent)
     }
 }
