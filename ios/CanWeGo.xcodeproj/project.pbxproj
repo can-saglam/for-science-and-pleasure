@@ -74,6 +74,7 @@
 				Support/LiveDay.swift,
 				Support/SaveEntity.swift,
 				Support/SaveIntents.swift,
+				Support/SiriEvents.swift,
 				Support/SiriLists.swift,
 				Support/VisualSearch.swift,
 				Views/OnboardingView.swift,

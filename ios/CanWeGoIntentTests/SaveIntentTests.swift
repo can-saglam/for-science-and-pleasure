@@ -136,6 +136,20 @@ final class SaveIntentTests: XCTestCase {
         } catch {}
     }
 
+    /// iOS 27's "add the … exhibition to Can We Go", heard as an event:
+    /// Can We Go is the one calendar, and an empty title is refused before
+    /// anything is looked up.
+    func testSiriCalendarIsCanWeGo() async throws {
+        let calendars = try await definitions.entities["SaveCalendarEntity"].suggestedEntities()
+        XCTAssertEqual(try calendars.map { try $0.title as String }, ["Can We Go"])
+        do {
+            try await definitions.intents["AddEventByVoiceIntent"].makeIntent(
+                title: " ", startDate: Date.now, isAllDay: true, calendar: try XCTUnwrap(calendars.first)
+            ).run()
+            XCTFail("an empty title adds nothing")
+        } catch {}
+    }
+
     func testSpotlightKnowsTheSaves() async throws {
         let suggested = try await saves.suggestedEntities()
         let first: String = try XCTUnwrap(suggested.first).title
