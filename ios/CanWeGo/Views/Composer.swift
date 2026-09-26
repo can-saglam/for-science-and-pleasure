@@ -16,6 +16,9 @@ struct Composer: View {
     /// The parent is reading what was sent; the tool row shows the
     /// parsing phrases and the send button spins.
     var busy = false
+    /// No connection: the send button becomes Save, which keeps the input
+    /// to be finished later instead of reading it now.
+    var offline = false
     /// Optional third tool after the camera: start a blank card by hand,
     /// skipping the parser. Nil hides it (the first-run page has no
     /// manual path).
@@ -93,12 +96,12 @@ struct Composer: View {
             }
 
             HStack(spacing: 8) {
-                if busy {
+                if busy && !offline {
                     // The send button is already spinning; the copy alone
                     // says what's happening.
                     ParsingPhrases(text: text, hasImage: imageJPEG != nil)
                         .padding(.leading, 6)
-                } else {
+                } else if !busy {
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         toolIcon("photo")
                     }
@@ -142,16 +145,25 @@ struct Composer: View {
                     onSend()
                 } label: {
                     Group {
-                        if busy {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(AppBackground.onProminent)
+                        if offline {
+                            // The spinner sits over the hidden label, so the
+                            // pill keeps its width while the draft is made.
+                            // Worded, no glyph: with one, "Add manually"
+                            // no longer fits beside it.
+                            Text("Save")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 16)
+                                .opacity(busy ? 0 : 1)
+                                .overlay { if busy { sendSpinner } }
+                        } else if busy {
+                            sendSpinner.frame(width: 34)
                         } else {
                             Image(systemName: "arrow.up")
                                 .font(.body.weight(.semibold))
+                                .frame(width: 34)
                         }
                     }
-                    .frame(width: 34, height: 34)
+                    .frame(height: 34)
                     // Lit (white pill, dark glyph) whenever there's something
                     // to send — including while it's being sent, so the
                     // spinner stays dark-on-white in every theme.
@@ -161,26 +173,27 @@ struct Composer: View {
                             : AnyShapeStyle(AppBackground.ink.opacity(0.45))
                     )
                     .background(
-                        Circle().fill(canSend
+                        Capsule().fill(canSend
                             ? Color.white.opacity(0.92)
                             : AppBackground.wash(0.16))
                     )
                     // On cream the lit white disc sits on a near-white
                     // field; a hairline gives it an edge.
                     .overlay(
-                        Circle().strokeBorder(
+                        Capsule().strokeBorder(
                             AppBackground.ink.opacity(
                                 canSend && AppBackground.theme.isLight ? 0.22 : 0),
                             lineWidth: 1)
                     )
-                    .contentShape(.circle)
+                    .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
                 .disabled(busy || !canSend)
-                .accessibilityLabel("Add something")
+                .accessibilityLabel(offline ? "Save for later" : "Add something")
             }
             .padding(10)
             .animation(.snappy, value: busy)
+            .animation(.snappy, value: offline)
         }
         .background(AppBackground.wash(0.08), in: .rect(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -210,6 +223,12 @@ struct Composer: View {
             }
             .ignoresSafeArea()
         }
+    }
+
+    private var sendSpinner: some View {
+        ProgressView()
+            .controlSize(.small)
+            .tint(AppBackground.onProminent)
     }
 
     /// Small round tool button in the bottom row.

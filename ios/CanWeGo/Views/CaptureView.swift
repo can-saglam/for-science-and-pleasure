@@ -40,6 +40,9 @@ struct CaptureView: View {
     @State private var firstLook: Item?
     /// The last parse failed for want of a connection.
     @State private var offline = false
+    @State private var sync = SyncStatus.shared
+    /// Making the on-device draft for an offline save.
+    @State private var savingOffline = false
     /// What the duplicate checks compare against. Read on opening and after
     /// each parse, not per render: the card's check runs on every keystroke.
     @State private var library: [Item] = []
@@ -52,6 +55,9 @@ struct CaptureView: View {
     private var canParse: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
     }
+
+    /// Known offline before sending, or found out by a send that failed.
+    private var offlineMode: Bool { offline || !sync.online }
 
     var body: some View {
         NavigationStack {
@@ -124,6 +130,14 @@ struct CaptureView: View {
             if ProcessInfo.processInfo.environment["CWG_BLANK"] != nil, draft == nil {
                 startManual()
             }
+            // CWG_OFFLINE (screenshot runs): the offline composer, typed into.
+            if let typed = ProcessInfo.processInfo.environment["CWG_OFFLINE"] {
+                text = typed
+                Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    offline = true
+                }
+            }
             // CWG_DUPE (screenshot runs): type in a link already in the
             // library and send it, to photograph the duplicate notice.
             if ProcessInfo.processInfo.environment["CWG_DUPE"] != nil,
@@ -139,6 +153,15 @@ struct CaptureView: View {
             forgetFirstLook()
         }
         .onChange(of: imageJPEG) { _, _ in forgetFirstLook() }
+        // Back online mid-draft: the button goes back to reading it now.
+        .onChange(of: sync.online) { _, online in
+            guard online, offline, !saved, !savingOffline else { return }
+            withAnimation(.snappy) {
+                offline = false
+                firstLook = nil
+                errorMessage = nil
+            }
+        }
         .sheet(item: $paywall) { reason in
             PlusPaywall(reason: reason) {
                 if let draft { commit(draft) }
@@ -152,18 +175,36 @@ struct CaptureView: View {
     private var inputStage: some View {
         // The shared composer (also the first-run's save page), here with
         // the blank-card tool next to the photo and camera buttons.
-        Composer(text: $text, imageJPEG: $imageJPEG, busy: busy, onManual: startManual) {
-            Task { await parse() }
+        Composer(
+            text: $text, imageJPEG: $imageJPEG,
+            busy: busy || savingOffline, offline: offlineMode, onManual: startManual
+        ) {
+            Task {
+                if offlineMode { await saveOffline() } else { await parse() }
+            }
         }
 
-        if let firstLook, busy || offline {
+        // Offline is said once, under the field, and the field's own button
+        // becomes Save — no second copy of the input.
+        if offlineMode {
+            Label(
+                saved ? "Saved. It'll be finished when you're back online." : "You're offline. Save it now and it'll be finished when you're back.",
+                systemImage: saved ? "checkmark" : "wifi.slash"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+            .contentTransition(.opacity)
+            .transition(.opacity)
+        }
+
+        if let firstLook, busy {
             firstLookCard(firstLook)
                 .transition(.opacity.combined(with: .move(edge: .top)))
         }
 
-        if offline, firstLook == nil, canParse {
-            laterNotice
-        } else if let errorMessage, !(offline && firstLook != nil) {
+        if let errorMessage, !offlineMode {
             // The input is still in the field above — nothing is lost — so
             // the way forward is one tap, not a re-paste.
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -195,58 +236,36 @@ struct CaptureView: View {
         }
     }
 
-    /// The quick read: faint while the parser checks it, and the thing to
-    /// save when there's no connection to check it with.
+    /// The quick read, faint while the parser checks it.
     private func firstLookCard(_ look: Item) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(
-                offline ? "You're offline. Save this draft and it'll be finished when you're back online." : "First look, from your iPhone",
-                systemImage: offline ? "wifi.slash" : "sparkles"
-            )
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            Label("First look, from your iPhone", systemImage: "sparkles")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             ItemCard(item: look, compact: true)
-                .opacity(offline ? 1 : 0.75)
+                .opacity(0.75)
                 .allowsHitTesting(false)
-
-            if offline {
-                Button {
-                    saveDraft(look)
-                } label: {
-                    SaveMorphLabel("Save draft", systemImage: "tray.and.arrow.down", saved: saved)
-                }
-                .prominentGlass()
-                .controlSize(.large)
-                .allowsHitTesting(!saved)
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
     }
 
-    /// Offline with nothing drafted: keep the input and look it up later.
-    private var laterNotice: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("You're offline. Keep this and it'll be looked up and added when you're back online.", systemImage: "wifi.slash")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Button {
-                saveForLater()
-            } label: {
-                SaveMorphLabel("Save for later", systemImage: "tray.and.arrow.down", saved: saved)
-            }
-            .prominentGlass()
-            .controlSize(.large)
-            .allowsHitTesting(!saved)
+    /// With the phone's quick read, the save goes into the library now and
+    /// is finished later; without one (no Apple Intelligence, or nothing
+    /// it could stand behind) the input waits and is looked up later.
+    private func saveOffline() async {
+        guard canParse, !saved, !savingOffline else { return }
+        savingOffline = true
+        defer { savingOffline = false }
+        let look: Item? = if let firstLook {
+            firstLook
+        } else {
+            await InstantDraft.make(text: trimmedText, imageJPEG: imageJPEG)?.item
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+        if let look { saveDraft(look) } else { saveForLater() }
     }
 
     private func saveDraft(_ look: Item) {
