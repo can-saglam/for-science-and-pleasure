@@ -756,12 +756,12 @@ enum SupabaseSync {
     /// last saw it and could overwrite a partner's fresher edit. Values are
     /// JSON-ready (String, Double, NSNull). Returns whether the write landed.
     @discardableResult
-    static func patch(_ id: UUID, _ fields: [String: Any]) async -> Bool {
+    static func patch(_ id: UUID, _ fields: [String: Any], only filters: [URLQueryItem] = []) async -> Bool {
         guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return false }
         do {
             var request = try await request(
                 path: "rest/v1/items",
-                query: [.init(name: "id", value: "eq.\(id.uuidString.lowercased())")]
+                query: [.init(name: "id", value: "eq.\(id.uuidString.lowercased())")] + filters
             )
             request.httpMethod = "PATCH"
             request.setValue("return=minimal", forHTTPHeaderField: "Prefer")

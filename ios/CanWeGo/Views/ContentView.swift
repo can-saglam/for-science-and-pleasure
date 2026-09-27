@@ -433,6 +433,7 @@ struct ContentView: View {
             // rotates through the freshest library.
             WidgetStore.sync(items: items.filter { !$0.isDeleted })
             CategoryCap.publish(items)
+            await LocationBackfill.run(context: context)
         }
         Task { await MembersStore.shared.refresh() }
         Task { await GroupStore.shared.refresh() }
