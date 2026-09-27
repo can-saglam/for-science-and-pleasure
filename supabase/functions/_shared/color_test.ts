@@ -201,6 +201,36 @@ Deno.test("Wikipedia queries try the hall and the centre of a bracketed venue", 
   );
 });
 
+Deno.test("Wikipedia queries try the first part of a comma-listed venue, never the last", () => {
+  assertEquals(
+    wikipediaQueries({
+      title: "Dua Lipa & Patti Smith: Bread of Angels",
+      venue: "Royal Festival Hall, Southbank Centre",
+    }),
+    [
+      "Royal Festival Hall, Southbank Centre",
+      "Royal Festival Hall",
+      "Dua Lipa & Patti Smith: Bread of Angels",
+    ],
+  );
+  assertEquals(
+    wikipediaQueries({ title: "Late at the Barbican", venue: "Barbican Centre, London" }),
+    ["Barbican Centre, London", "Barbican Centre", "Late at the Barbican"],
+  );
+});
+
+Deno.test("a site's bare address is not a picture (Wallace Collection)", () => {
+  const page = "https://www.wallacecollection.org/";
+  const html = `<meta property="og:image" content="https://www.wallacecollection.org">
+    <meta name="twitter:image" content="https://www.wallacecollection.org">
+    <img src="/media/churchill-hero.jpg" width="1600" height="900">`;
+  assertEquals(heroImageFromHtml(html, page), "https://www.wallacecollection.org/media/churchill-hero.jpg");
+  assertEquals(
+    heroImageFromHtml(`<meta property="og:image" content="https://cdn.example.org/?id=7">`, PAGE),
+    "https://cdn.example.org/?id=7",
+  );
+});
+
 Deno.test("Wikipedia summary: keep a matching original image, drop disambiguation", () => {
   const page = {
     type: "standard",

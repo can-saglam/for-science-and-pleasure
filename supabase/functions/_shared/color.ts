@@ -180,6 +180,9 @@ function imageUrl(raw: string, pageUrl: string): string | null {
     let url = new URL(decodeEntities(raw.trim()), pageUrl);
     const inner = url.pathname.endsWith("/_next/image") ? url.searchParams.get("url") : null;
     if (inner) url = new URL(inner, url);
+    // A site's bare address is never a picture: the Wallace Collection's
+    // og:image is "https://www.wallacecollection.org".
+    if (url.pathname.replace(/\/+$/, "") === "" && !url.search) return null;
     return httpsOnly(url.toString());
   } catch {
     return null;
@@ -365,13 +368,18 @@ export function wikipediaQueries(card: { title?: string | null; venue?: string |
   add(card.venue);
   // "Southbank Centre (Royal Festival Hall)" is no Wikipedia title; the
   // hall inside the brackets and the centre outside them both are.
-  const qualified = (card.venue ?? "").match(/^(.+?)\s*\((.+)\)\s*$/);
+  const venue = card.venue ?? "";
+  const qualified = venue.match(/^(.+?)\s*\((.+)\)\s*$/);
+  // "Royal Festival Hall, Southbank Centre": the hall on its own. Only the
+  // first part — the last is as often a city, and "London" is a skyline.
+  const listed = qualified ? null : venue.match(/^([^,]+),\s*[^,]+$/);
   if (qualified) {
     add(qualified[2]);
     add(qualified[1]);
   }
+  if (listed) add(listed[1]);
   add(card.title);
-  return out.slice(0, qualified ? 4 : 2);
+  return out.slice(0, qualified ? 4 : listed ? 3 : 2);
 }
 
 /// True when query and Wikipedia title share a real word — stops "Kin"

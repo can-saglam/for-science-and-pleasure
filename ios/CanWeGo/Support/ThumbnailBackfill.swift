@@ -96,6 +96,10 @@ enum ThumbnailBackfill {
         return false
     }
 
+    private static func isSiteRoot(_ url: URL) -> Bool {
+        url.path().trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty && url.query() == nil
+    }
+
     /// The generic Google Maps app icon once poisoned saves with
     /// rainbow-streak thumbnails — never store any maps-branded asset.
     private static func isMapsBrandedImage(_ url: String) -> Bool {
@@ -140,10 +144,13 @@ enum ThumbnailBackfill {
             let raw = String(html[range])
                 .replacingOccurrences(of: "&amp;", with: "&")
                 .replacingOccurrences(of: "\\/", with: "/")
-            // Relative paths resolve against the page they came from.
-            if let absolute = URL(string: raw, relativeTo: url)?.absoluteString,
-               !isMapsBrandedImage(absolute) {
-                return absolute
+            // Relative paths resolve against the page they came from. A
+            // site's bare address is never a picture (the Wallace
+            // Collection's og:image is its homepage) — try the next source.
+            if let resolved = URL(string: raw, relativeTo: url)?.absoluteURL,
+               !isSiteRoot(resolved),
+               !isMapsBrandedImage(resolved.absoluteString) {
+                return resolved.absoluteString
             }
         }
         return nil
