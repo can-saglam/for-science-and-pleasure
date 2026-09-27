@@ -65,8 +65,8 @@ Secrets (DB password, feed secret, keys) live in `.supabase.env` (not in
 git). Supabase CLI is linked: `supabase db push`, `supabase functions
 deploy`, `supabase config push`.
 
-- `FEED_SECRET` — dedicated key for the `/calendar` feed of the founding
-  group. Per-group feeds use each group's `feed_token`.
+- The `/calendar` feed opens only with a group's `feed_token` (rotated
+  when a member leaves). The old shared `FEED_SECRET` is retired.
   Parse, locate, suggest, notify-save, group-membership and delete-account
   require a signed-in user JWT.
 

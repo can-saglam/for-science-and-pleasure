@@ -1,6 +1,7 @@
 // notify-save: called by the app right after a confirmed in-app save.
 // Pushes "X added: …" to the other members of the caller's group (never
 // the caller's own devices, never anyone outside the group).
+import { internalErrorBody } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/geo.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { notifyPartnersOfSave } from "../_shared/notify.ts";
@@ -73,7 +74,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error(e);
-    return new Response(JSON.stringify({ error: String(e) }), {
+    return new Response(internalErrorBody(), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

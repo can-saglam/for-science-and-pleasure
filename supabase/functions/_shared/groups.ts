@@ -2,7 +2,6 @@
 // the caller's group: RLS scopes every table by it, and these helpers give
 // functions the same answer RLS would.
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-
 export interface Caller {
   /** RLS-scoped client carrying the caller's JWT. */
   client: SupabaseClient;
@@ -46,9 +45,8 @@ export function admin(): SupabaseClient {
 }
 
 /**
- * Which group a calendar URL key belongs to. Each group has its own
- * feed_token. A dedicated FEED_SECRET still opens the founding group for
- * the subscriptions added before per-group tokens.
+ * Which group a calendar URL key belongs to: each group's own feed_token
+ * (rotated when someone leaves). Nothing else opens a feed.
  */
 export async function groupForFeedKey(
   db: SupabaseClient,
@@ -60,19 +58,7 @@ export async function groupForFeedKey(
     .select("id")
     .eq("feed_token", key)
     .maybeSingle();
-  if (byToken?.id) return byToken.id;
-
-  const feed = Deno.env.get("FEED_SECRET");
-  if (feed && key === feed) {
-    const { data: founding } = await db
-      .from("groups")
-      .select("id")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    return founding?.id ?? null;
-  }
-  return null;
+  return byToken?.id ?? null;
 }
 
 /** Display name for a user, from profiles; falls back to the email's local part. */

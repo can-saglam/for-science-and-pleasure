@@ -9,6 +9,7 @@
 // overrides the clock (tests). `force` bypasses the windows and the run
 // table so a real send is unaffected.
 import { apnsConfigured, sendApnsAlert } from "../_shared/apns.ts";
+import { sameSecret } from "../_shared/auth.ts";
 import { admin, groupTokens } from "../_shared/groups.ts";
 import { groupHome, homeToday } from "../_shared/home.ts";
 import { type ActivityResult, runActivities } from "../_shared/live_activity.ts";
@@ -173,7 +174,7 @@ async function runGroup(
 Deno.serve(async (req) => {
   const suppliedSecret = req.headers.get("x-cron-secret");
   const expectedSecret = Deno.env.get("REMINDERS_CRON_SECRET");
-  if (!suppliedSecret || !expectedSecret || suppliedSecret !== expectedSecret) {
+  if (!expectedSecret || !sameSecret(suppliedSecret, expectedSecret)) {
     return new Response("unauthorized", { status: 401 });
   }
 

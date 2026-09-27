@@ -14,6 +14,8 @@
 // reading on-screen text and picking the accent colour *now*, never for
 // storing as the thumbnail — the venue's own site supplies that.
 
+import { publicFetch } from "./netguard.ts";
+
 export type SocialPlatform = "instagram" | "tiktok" | "facebook";
 
 export interface SocialPost {
@@ -58,7 +60,7 @@ export async function resolveShortLink(url: string): Promise<string> {
   let current = url;
   for (let hop = 0; hop < 4; hop++) {
     try {
-      const res = await fetch(current, {
+      const res = await publicFetch(current, {
         method: "HEAD",
         redirect: "manual",
         signal: AbortSignal.timeout(6_000),
@@ -131,7 +133,7 @@ async function fetchInstagram(url: string): Promise<SocialPost | null> {
   const postUrl = instagramPostUrl(url);
   if (!postUrl) return null;
   try {
-    const res = await fetch(postUrl, {
+    const res = await publicFetch(postUrl, {
       redirect: "follow",
       signal: AbortSignal.timeout(10_000),
       headers: { "User-Agent": MOBILE_UA, Accept: "text/html" },
@@ -203,7 +205,7 @@ export async function fetchImageBase64(
   url: string,
 ): Promise<{ base64: string; mediaType: string } | null> {
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       signal: AbortSignal.timeout(8_000),
       headers: { "User-Agent": MOBILE_UA },
     });

@@ -1,7 +1,7 @@
 // calendar: subscribable ICS feed of the shared library. Add it once to
 // Google/Apple Calendar and opening/closing markers stay in sync automatically.
 // Auth via ?key= (calendar apps need URL-embedded auth): the group's
-// feed_token, or FEED_SECRET for the founding group.
+// feed_token.
 import { admin, groupForFeedKey } from "../_shared/groups.ts";
 import { groupHome } from "../_shared/home.ts";
 
@@ -30,8 +30,7 @@ function allDay(uid: string, date: string, summary: string, url?: string | null)
 }
 
 Deno.serve(async (req) => {
-  // The key in the URL is the group's feed_token (or the pre-groups
-  // secret, which still maps to the founding group). It picks the group;
+  // The key in the URL is the group's feed_token. It picks the group;
   // everything below is scoped to it.
   const supabase = admin();
   const groupId = await groupForFeedKey(supabase, new URL(req.url).searchParams.get("key"));
@@ -46,7 +45,10 @@ Deno.serve(async (req) => {
     .eq("group_id", groupId)
     .is("deleted_at", null)
     .in("status", ["saved", "planned"]);
-  if (error) return new Response(String(error.message), { status: 500 });
+  if (error) {
+    console.error(error);
+    return new Response("internal error", { status: 500 });
+  }
 
   const events: string[] = [];
   for (const i of items ?? []) {

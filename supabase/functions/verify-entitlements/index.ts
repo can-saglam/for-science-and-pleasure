@@ -4,6 +4,7 @@
 //
 // Called by pg_cron (0031_plus_jobs.sql) with the shared cron secret.
 // Founder and promo rows are never touched.
+import { sameSecret } from "../_shared/auth.ts";
 import { admin } from "../_shared/groups.ts";
 import { appStoreConfigured, entitlementRow, subscriptionStatus } from "../_shared/appstore.ts";
 
@@ -12,7 +13,7 @@ const json = (body: unknown, status = 200) =>
 
 Deno.serve(async (req) => {
   const expected = Deno.env.get("REMINDERS_CRON_SECRET");
-  if (!expected || req.headers.get("x-cron-secret") !== expected) return json({ error: "forbidden" }, 403);
+  if (!expected || !sameSecret(req.headers.get("x-cron-secret"), expected)) return json({ error: "forbidden" }, 403);
   if (!appStoreConfigured()) return json({ error: "not_configured" }, 503);
 
   const db = admin();

@@ -36,19 +36,16 @@ const groups = [
   { id: "g-new", feed_token: "tok-new", created_at: "2026-09-01" },
 ];
 
-Deno.test("groupForFeedKey: token picks its group; FEED_SECRET → founding; anything else never", async () => {
+Deno.test("groupForFeedKey: a token picks its group; anything else never", async () => {
   Deno.env.set("FEED_SECRET", "legacy-feed");
   const db = stub({ groups });
   assert(await groupForFeedKey(db, "tok-new") === "g-new", "new group's token");
   assert(await groupForFeedKey(db, "tok-old") === "g-old", "old group's token");
-  assert(await groupForFeedKey(db, "legacy-feed") === "g-old", "FEED_SECRET → founding group");
-  assert(await groupForFeedKey(db, "some-other-secret") === null, "a non-feed secret is not a feed key");
+  assert(await groupForFeedKey(db, "legacy-feed") === null, "the retired shared secret opens nothing");
   assert(await groupForFeedKey(db, "nope") === null, "unknown key");
   assert(await groupForFeedKey(db, null) === null, "missing key");
   assert(await groupForFeedKey(db, "") === null, "empty key");
-
   Deno.env.delete("FEED_SECRET");
-  assert(await groupForFeedKey(db, "legacy-feed") === null, "no FEED_SECRET → the old value opens nothing");
 });
 
 Deno.test("groupTokens: every member's devices except the excluded user", async () => {

@@ -1,6 +1,7 @@
 // Small, dependency-free helpers shared by functions. Kept separate from
 // extract.ts so that functions which only geocode (e.g. locate) don't pull in
 // the imagescript dependency, whose native codec loading crashes the worker.
+import { publicFetch } from "./netguard.ts";
 import { metresBetween } from "./places.ts";
 
 // Free OpenStreetMap geocoding — used only server-side to attach coordinates
@@ -198,7 +199,7 @@ export async function resolveMapsLink(url: string): Promise<MapsLinkInfo | null>
     // Short links now serve a client-side interstitial instead of an HTTP
     // redirect; _imcp=1 is what that page appends to force the real redirect.
     short.searchParams.set("_imcp", "1");
-    const res = await fetch(short.toString(), {
+    const res = await publicFetch(short.toString(), {
       redirect: "follow",
       signal: AbortSignal.timeout(10_000),
       // Without a browser UA, Google serves bot pages instead of redirecting.

@@ -44,7 +44,7 @@ s, b = call("/functions/v1/parse", "POST", {"text": "x"}); check("parse: no JWT 
 s, tok = call(f"/functions/v1/calendar?key={g['feed_token']}");            check("calendar: group feed_token → ICS", s == 200 and "BEGIN:VCALENDAR" in tok, f"{s} {tok[:80]}")
 feed = os.environ.get("STG_FEED_SECRET")
 if feed:
-    s, leg = call(f"/functions/v1/calendar?key={feed}"); check("calendar: FEED_SECRET → founding group's ICS", s == 200 and leg == tok, f"{s}")
+    s, leg = call(f"/functions/v1/calendar?key={feed}"); check("calendar: retired FEED_SECRET → 401", s == 401, f"{s}")
 s, b = call("/functions/v1/calendar?key=nope");                            check("calendar: bad key → 401", s == 401, f"{s}")
 s, b = call("/functions/v1/calendar");                                     check("calendar: no key → 401", s == 401, f"{s}")
 

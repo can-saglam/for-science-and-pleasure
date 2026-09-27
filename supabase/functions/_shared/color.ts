@@ -6,6 +6,7 @@
 // function down. imagescript was abandoned — its npm build requires native
 // FFI codecs, which edge workers refuse (it crashed boots and every decode).
 import { Buffer } from "node:buffer";
+import { publicFetch } from "./netguard.ts";
 
 interface Rgba {
   data: Uint8Array;
@@ -106,7 +107,7 @@ export async function colorFromImageBytes(bytes: Uint8Array): Promise<string | n
 
 export async function colorFromImageUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(10_000),
       // Prefer formats imagescript can decode; content-negotiating CDNs
@@ -334,7 +335,7 @@ function widthFromUrl(src: string): number {
 /// the saved link itself had none.
 export async function heroImageFromUrl(pageUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(pageUrl, {
+    const res = await publicFetch(pageUrl, {
       redirect: "follow",
       signal: AbortSignal.timeout(10_000),
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
@@ -422,7 +423,7 @@ export async function wikipediaImage(query: string): Promise<string | null> {
 
 export async function colorFromPageUrl(pageUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(pageUrl, {
+    const res = await publicFetch(pageUrl, {
       redirect: "follow",
       signal: AbortSignal.timeout(10_000),
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },

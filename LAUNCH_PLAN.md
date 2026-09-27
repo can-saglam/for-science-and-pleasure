@@ -629,7 +629,7 @@ and one function (`send-reminders`).
 - [x] Down-migration written and tested — `supabase/rollback/0017_groups_flip_down.sql`; on staging: 1a green → up → 1b green → down → 1a green → up → 1b green
 - [x] Raise `min_build` once both phones report build ≥ 43 — raised to 60 on 19 Sep (phones on 62 and 64). From build 43 each device registers its build (`select user_id, max(build) from apns_tokens group by 1`), so this no longer needs asking in person
 - [x] Scope edge functions by group — `_shared/groups.ts` (`resolveCaller`, `groupForFeedKey`, `groupForEmail`, `groupTokens`); notify, notify-save, parse, locate, suggest, ingest, calendar, digest, send-digest (per-group runs in the group's timezone, `digest_runs` keyed by group + week); 23-check function battery on staging
-- [x] Per-group ICS token (`groups.feed_token`); the old key still resolves to the founding group so existing calendar subscriptions keep updating — rotation on leave lands with Phase 2b
+- [x] Per-group ICS token (`groups.feed_token`); the old shared key is retired (27 Sep: it opened the oldest group and couldn't rotate), so only a group's own token opens its feed — rotation on leave lands with Phase 2b
 - [x] iOS build 41: `digest_schedules` per group, `created_by` synced, "Added by" from profiles, `members` gone from the client
 
 Post-flip hardening, 7 Sep evening (all green):

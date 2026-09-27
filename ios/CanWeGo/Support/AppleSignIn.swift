@@ -1,6 +1,7 @@
 import AuthenticationServices
 import CryptoKit
 import Foundation
+import SwiftUI
 
 /// The Sign in with Apple handshake, from nonce to Supabase session.
 ///
@@ -59,6 +60,24 @@ enum AppleSignIn {
             formatter.style = .short // "Can", not "Can Saglam" — that's how partners refer to each other
             let name = formatter.string(from: components)
             if !name.isEmpty { await MembersStore.shared.claimDisplayName(name) }
+        }
+    }
+
+    /// A fresh one-time code from Apple, for account deletion to revoke the
+    /// app's Sign in with Apple access. Nil when Apple can't give one (the
+    /// deletion goes ahead without it); throws only when the person cancels.
+    static func codeForDeletion(using controller: AuthorizationController) async throws -> String? {
+        do {
+            let result = try await controller.performRequest(ASAuthorizationAppleIDProvider().createRequest())
+            guard case .appleID(let credential) = result,
+                  credential.user == SupabaseAuth.appleUserID,
+                  let data = credential.authorizationCode
+            else { return nil }
+            return String(data: data, encoding: .utf8)
+        } catch where isCancellation(error) {
+            throw error
+        } catch {
+            return nil
         }
     }
 

@@ -5,6 +5,7 @@
 // helpers first, then the two refreshes.
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { cleanLink, linkKey, ownPage } from "./extract.ts";
+import { publicFetch } from "./netguard.ts";
 import { AGGREGATOR_RE } from "./starters.ts";
 
 export type SuggestionKind = "event" | "place";
@@ -312,7 +313,7 @@ export async function refreshPlaces(locality: string, country: string, today: st
 /// dead domain or a 404 doesn't.
 async function resolves(url: string): Promise<boolean> {
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(8_000),
       headers: {

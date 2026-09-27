@@ -26,7 +26,8 @@ final class MembersStore {
     /// otherwise derived from the legacy email. Nil when there's neither.
     func saverName(for item: Item) -> String? {
         if let id = item.createdBy, let name = name(forUser: id) { return name }
-        if let email = item.addedByEmail { return name(for: email) }
+        // Blank once the saver deleted their account.
+        if let email = item.addedByEmail, !email.isEmpty { return name(for: email) }
         return nil
     }
 

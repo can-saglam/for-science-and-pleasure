@@ -24,6 +24,7 @@ import {
   socialPlatform,
   SocialUnreadableError,
 } from "./social.ts";
+import { publicFetch } from "./netguard.ts";
 
 export { corsHeaders, geocode, SocialUnreadableError };
 
@@ -279,7 +280,7 @@ export async function ownPage(
     return key && seen.has(key) ? { url: clean, html: null } : null;
   };
   try {
-    const res = await fetch(clean, {
+    const res = await publicFetch(clean, {
       redirect: "follow",
       signal: AbortSignal.timeout(8_000),
       headers: {
@@ -308,7 +309,7 @@ async function fetchPage(
   url: string,
 ): Promise<{ text: string; ogImage: string | null } | null> {
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       redirect: "follow",
       signal: AbortSignal.timeout(15_000),
       headers: {

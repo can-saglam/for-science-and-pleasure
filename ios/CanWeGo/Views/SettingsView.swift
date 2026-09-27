@@ -1,3 +1,4 @@
+import AuthenticationServices
 import EventKit
 import SwiftData
 import SwiftUI
@@ -11,6 +12,7 @@ struct SettingsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Environment(\.authorizationController) private var authorizationController
     @Query private var items: [Item]
     @State private var auth = SupabaseAuth.shared
     @State private var themes = ThemeStore.shared
@@ -553,13 +555,21 @@ struct SettingsView: View {
         deleteBusy = true
         defer { deleteBusy = false }
         do {
+            var payload: [String: String] = [:]
+            if SupabaseAuth.appleUserID != nil {
+                do {
+                    payload["apple_code"] = try await AppleSignIn.codeForDeletion(using: authorizationController)
+                } catch {
+                    return // cancelled the Apple sheet: nothing deleted
+                }
+            }
             let jwt = try await SupabaseAuth.shared.validToken()
             var request = URLRequest(url: SupabaseAuth.baseURL.appending(path: "functions/v1/delete-account"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(SupabaseAuth.anonKey, forHTTPHeaderField: "apikey")
             request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-            request.httpBody = Data("{}".utf8)
+            request.httpBody = try JSONEncoder().encode(payload)
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200 else {
