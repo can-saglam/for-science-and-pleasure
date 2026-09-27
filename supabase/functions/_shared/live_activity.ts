@@ -3,8 +3,9 @@
 // Dynamic Island at the moment its reminder goes off (push-to-start). It
 // runs up to eight hours, the system's cap, and is gone by midnight: the
 // end push goes out in the last dispatcher tick before then, with the
-// dismissal at the exact time. Runs beside the reminder push, never
-// instead of it: nothing here touches reminder_runs or the alert.
+// dismissal at the exact time. It runs before the reminder push and stands
+// in for it on each phone it reached (see `startedOn`); nothing here
+// touches reminder_runs, and any phone it didn't reach still gets the alert.
 import { sendLiveActivity } from "./apns.ts";
 import type { admin } from "./groups.ts";
 import { groupHome, homeToday } from "./home.ts";
@@ -40,6 +41,29 @@ export interface ActivityItem {
 export type ActivityResult =
   | { group_id: string; started: number; ended: number; sent: number; gone: number; failed: number }
   | { group_id: string; error: string };
+
+/** The phones a start push was accepted for in this run, per save, as
+ * `deviceKey`s. The day's reminder alert skips them: the activity's own
+ * alert is their reminder. */
+export type StartedOn = Map<string, Set<string>>;
+
+export function deviceKey(userId: string, deviceId: string): string {
+  return `${userId}:${deviceId}`;
+}
+
+/** The APNs tokens a save's reminder alert still goes to: every phone but
+ * those its Live Activity reached. A token with no device on record can't
+ * be matched, so it gets the alert. */
+export function alertTokens(
+  devices: { token: string; user_id: string; device_id: string | null }[],
+  itemId: string,
+  startedOn: StartedOn,
+): string[] {
+  const reached = startedOn.get(itemId);
+  return devices
+    .filter((d) => !(reached && d.device_id && reached.has(deviceKey(d.user_id, d.device_id))))
+    .map((d) => d.token);
+}
 
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -97,8 +121,8 @@ export function activityEnd(timeZone: string, today: string, at: Date): Date {
 
 /** The start push. `attributes` and `content-state` mirror the app's
  * `DayActivityAttributes` field for field; the alert is required for a
- * push-to-start, and carries no sound so the reminder push stays the only
- * one that makes a noise. */
+ * push-to-start, and makes the reminder's sound since it replaces the
+ * reminder push on that phone. */
 export function startAps(item: ActivityItem, today: string, endsAt: Date): Record<string, unknown> {
   const label = activityLabel(item.kind, item.starts_on, item.ends_on, today);
   const place = activityPlace(item);
@@ -119,7 +143,7 @@ export function startAps(item: ActivityItem, today: string, endsAt: Date): Recor
     "attributes-type": "DayActivityAttributes",
     attributes,
     "stale-date": end,
-    alert: { title: item.title, body: place ? `${label} · ${place}` : label },
+    alert: { title: item.title, body: place ? `${label} · ${place}` : label, sound: "default" },
   };
 }
 
@@ -133,7 +157,12 @@ async function send(token: string, aps: Record<string, unknown>, expiresAt?: Dat
   }
 }
 
-export async function runActivities(db: Db, groupId: string, at: Date): Promise<ActivityResult> {
+export async function runActivities(
+  db: Db,
+  groupId: string,
+  at: Date,
+  startedOn: StartedOn = new Map(),
+): Promise<ActivityResult> {
   const home = await groupHome(db, groupId, true);
   const clock = localClock(home.timezone, at);
   const today = homeToday(home, at);
@@ -215,9 +244,9 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
   const userIds = (members ?? []).map((m: { user_id: string }) => m.user_id);
   if (!userIds.length) return result;
   const { data: tokenRows, error: tokenError } = await db
-    .from("activity_tokens").select("token").in("user_id", userIds);
+    .from("activity_tokens").select("token, user_id, device_id").in("user_id", userIds);
   if (tokenError) throw tokenError;
-  const tokens = ((tokenRows ?? []) as { token: string }[]).map((t) => t.token);
+  const tokens = (tokenRows ?? []) as { token: string; user_id: string; device_id: string }[];
   if (!tokens.length) return result;
 
   const { data: startedRows, error: startedError } = await db
@@ -239,12 +268,15 @@ export async function runActivities(db: Db, groupId: string, at: Date): Promise<
     if (claim) throw claim;
     const aps = startAps(item, today, endsAt);
     let failed = 0;
-    for (const token of tokens) {
+    const reached = new Set<string>();
+    for (const { token, user_id, device_id } of tokens) {
       const r = await send(token, aps, endsAt);
       tally(r);
+      if (r === "sent") reached.add(deviceKey(user_id, device_id));
       if (r === "gone") await db.from("activity_tokens").delete().eq("token", token);
       if (r === "failed") failed++;
     }
+    if (reached.size) startedOn.set(item.id, reached);
     // Nobody got it: let the next tick start it instead.
     if (failed === tokens.length) {
       await db.from("live_activity_runs").delete().eq("item_id", item.id).eq("remind_at", today);

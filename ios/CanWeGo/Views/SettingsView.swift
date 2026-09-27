@@ -147,7 +147,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Reminders").id("reminders")
                 } footer: {
-                    Text("When a reminder goes off on the day itself, the save stays on your Lock Screen and in the Dynamic Island for the rest of the day. Just for this iPhone.")
+                    Text("When a reminder goes off on the day itself, the save stays on your Lock Screen and in the Dynamic Island for the rest of the day, instead of a notification. Just for this iPhone.")
                         .font(.footnote)
                 }
                 .listRowBackground(Self.rowBackground)

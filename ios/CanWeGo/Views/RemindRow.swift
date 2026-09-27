@@ -287,7 +287,7 @@ struct ReminderPickerSheet: View {
                     .tint(AppBackground.ink)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("A notification goes out at that moment to every phone on this library.")
+                        Text("Every phone on this library gets it at that moment.")
                         if awayFromHome {
                             Text("Times are in \(homeZoneName) time, the library\u{2019}s home.")
                         }

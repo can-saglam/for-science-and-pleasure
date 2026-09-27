@@ -10,9 +10,9 @@
 // table so a real send is unaffected.
 import { apnsConfigured, sendApnsAlert } from "../_shared/apns.ts";
 import { sameSecret } from "../_shared/auth.ts";
-import { admin, groupTokens } from "../_shared/groups.ts";
+import { admin, groupDevices } from "../_shared/groups.ts";
 import { groupHome, homeToday } from "../_shared/home.ts";
-import { type ActivityResult, runActivities } from "../_shared/live_activity.ts";
+import { type ActivityResult, alertTokens, runActivities, type StartedOn } from "../_shared/live_activity.ts";
 import {
   CUSTOM_REMINDER_TITLE,
   customReminderBody,
@@ -44,6 +44,7 @@ async function runGroup(
   groupId: string,
   at: Date,
   force: boolean,
+  startedOn: StartedOn = new Map(),
 ): Promise<GroupResult> {
   // Without push there's nothing to send, and a reminder marked done here
   // would never go out once it's fixed.
@@ -82,9 +83,10 @@ async function runGroup(
   let apnsGone = 0;
   let apnsFailed = 0;
 
-  const tokens = await groupTokens(supabase, groupId);
+  const devices = await groupDevices(supabase, groupId);
 
   for (const item of due) {
+    const tokens = alertTokens(devices, item.id, startedOn);
     if (!force) {
       const { data: existingRun, error: runError } = await supabase
         .from("reminder_runs")
@@ -204,25 +206,28 @@ Deno.serve(async (req) => {
     groupIds = (data ?? []).map((g: { id: string }) => g.id);
   }
 
-  // Live Activities go after the reminders and in their own try, so a
-  // failure there can never cost a reminder. Forced test runs leave them
-  // alone unless asked.
+  // Live Activities go first, in their own try: a phone a start reached
+  // skips that save's reminder push, since the activity's alert is its
+  // reminder. A failure there only means fewer phones skip — it can never
+  // cost a reminder. Forced test runs leave them alone unless asked.
   const withActivities = apnsConfigured() && (!force || body.activities === true);
   const results: GroupResult[] = [];
   const activities: ActivityResult[] = [];
   for (const groupId of groupIds) {
+    const startedOn: StartedOn = new Map();
+    if (withActivities) {
+      try {
+        activities.push(await runActivities(supabase, groupId, at, startedOn));
+      } catch (e) {
+        console.error("live activities", e);
+        activities.push({ group_id: groupId, error: force ? String(e).slice(0, 300) : "internal error" });
+      }
+    }
     try {
-      results.push(await runGroup(supabase, groupId, at, force));
+      results.push(await runGroup(supabase, groupId, at, force, startedOn));
     } catch (e) {
       console.error(e);
       results.push({ group_id: groupId, error: force ? String(e).slice(0, 300) : "internal error" });
-    }
-    if (!withActivities) continue;
-    try {
-      activities.push(await runActivities(supabase, groupId, at));
-    } catch (e) {
-      console.error("live activities", e);
-      activities.push({ group_id: groupId, error: force ? String(e).slice(0, 300) : "internal error" });
     }
   }
   return Response.json({ groups: results, activities });

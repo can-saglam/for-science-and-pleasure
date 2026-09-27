@@ -101,4 +101,24 @@ export async function groupTokens(
   return (tokens ?? []).map((t: { token: string }) => t.token);
 }
 
+/** The group's APNs tokens with the phone each belongs to. */
+export async function groupDevices(
+  db: SupabaseClient,
+  groupId: string,
+): Promise<{ token: string; user_id: string; device_id: string | null }[]> {
+  const { data: members, error: membersError } = await db
+    .from("group_members")
+    .select("user_id")
+    .eq("group_id", groupId);
+  if (membersError) throw membersError;
+  const ids = (members ?? []).map((m: { user_id: string }) => m.user_id);
+  if (ids.length === 0) return [];
+  const { data: tokens, error: tokensError } = await db
+    .from("apns_tokens")
+    .select("token, user_id, device_id")
+    .in("user_id", ids);
+  if (tokensError) throw tokensError;
+  return (tokens ?? []) as { token: string; user_id: string; device_id: string | null }[];
+}
+
 export const jsonHeaders = { "Content-Type": "application/json" };

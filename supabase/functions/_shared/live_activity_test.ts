@@ -1,4 +1,13 @@
-import { activityEnd, activityLabel, activityPlace, isDayOf, startAps, startDue } from "./live_activity.ts";
+import {
+  activityEnd,
+  activityLabel,
+  activityPlace,
+  alertTokens,
+  deviceKey,
+  isDayOf,
+  startAps,
+  startDue,
+} from "./live_activity.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -51,7 +60,26 @@ Deno.test("activityEnd: eight hours on, or midnight at home", () => {
   assert(evening.toISOString() === "2026-09-24T23:00:00.000Z", `17:30 BST → midnight: ${evening.toISOString()}`);
 });
 
-Deno.test("startAps matches DayActivityAttributes and stays silent", () => {
+Deno.test("a phone the Live Activity reached skips the reminder alert; every other phone gets it", () => {
+  const devices = [
+    { token: "can-iphone", user_id: "can", device_id: "phone-1" },
+    { token: "can-ipad", user_id: "can", device_id: "pad-1" },
+    { token: "joyce-iphone", user_id: "joyce", device_id: "phone-2" },
+    { token: "legacy", user_id: "joyce", device_id: null },
+  ];
+  const startedOn = new Map([["save-1", new Set([deviceKey("can", "phone-1"), deviceKey("joyce", "phone-2")])]]);
+  assert(
+    JSON.stringify(alertTokens(devices, "save-1", startedOn)) === JSON.stringify(["can-ipad", "legacy"]),
+    "reached phones skip; the rest and unmatched tokens get it",
+  );
+  assert(alertTokens(devices, "save-2", startedOn).length === 4, "another save: everyone");
+  assert(alertTokens(devices, "save-1", new Map()).length === 4, "no activity started: everyone");
+  // Same device id under another account (a shared iPad) is not the same phone.
+  const other = new Map([["save-1", new Set([deviceKey("sam", "pad-1")])]]);
+  assert(alertTokens(devices, "save-1", other).length === 4, "account and device both match");
+});
+
+Deno.test("startAps matches DayActivityAttributes and sounds like the reminder it replaces", () => {
   const endsAt = new Date("2026-09-24T17:00:00Z");
   const aps = startAps({
     id: "3f1c0a52-0000-4000-8000-000000000001",
@@ -76,6 +104,6 @@ Deno.test("startAps matches DayActivityAttributes and stays silent", () => {
   assert(attributes.imageURL === "https://example.org/kapoor.jpg", "photo");
   assert(JSON.stringify(aps["content-state"]) === JSON.stringify({ label: "Last day" }), "state");
   const alert = aps.alert as Record<string, unknown>;
-  assert(alert.body === "Last day · Hayward Gallery" && !("sound" in alert) && !("sound" in aps), "silent alert");
+  assert(alert.body === "Last day · Hayward Gallery" && alert.sound === "default" && !("sound" in aps), "alert sound");
   assert(aps["stale-date"] === 1790269200, "stale at the end");
 });

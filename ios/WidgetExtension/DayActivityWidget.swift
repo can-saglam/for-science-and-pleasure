@@ -218,10 +218,12 @@ struct DayActivityView: View {
     }
 }
 
-/// The card's photo melt: the sharp photo fading in from the left, a
-/// multiply pass pulling bright posters toward the card colour, and an
-/// eased wash of the card on top. Same stops as `ItemCard`'s `MeltImage`,
-/// minus the blurred underlay.
+/// The card's photo melt: a multiply pass pulling bright posters toward the
+/// card colour and an eased wash of the card on top, the whole strip then
+/// fading in from the left. Same stops as `ItemCard`'s `MeltImage`, minus
+/// the blurred underlay. The fade is on the strip, not just the photo: the
+/// system draws `activityBackgroundTint` its own way, so any card colour
+/// painted here at full strength shows as an edge against it.
 private struct Melt: View {
     let photo: UIImage
     let card: Color
@@ -235,12 +237,6 @@ private struct Melt: View {
                 .scaledToFill()
                 .frame(width: 150)
                 .clipped()
-                .mask(
-                    LinearGradient(
-                        stops: [.init(color: .clear, location: 0.2), .init(color: .black, location: 0.8)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                )
             LinearGradient(
                 stops: [
                     .init(color: card, location: 0),
@@ -264,6 +260,18 @@ private struct Melt: View {
             )
         }
         .compositingGroup()
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.15),
+                    .init(color: .black.opacity(0.12), location: 0.3),
+                    .init(color: .black.opacity(0.4), location: 0.45),
+                    .init(color: .black.opacity(0.75), location: 0.62),
+                    .init(color: .black, location: 0.8),
+                ],
+                startPoint: .leading, endPoint: .trailing
+            )
+        )
         .frame(width: 150)
         .frame(maxHeight: .infinity)
         .clipped()

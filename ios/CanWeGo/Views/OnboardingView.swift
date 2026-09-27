@@ -2015,8 +2015,8 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             headline("Want a nudge before\nit closes?")
             lede(partnerName == nil
-                 ? "Ask for a reminder on anything you save and one ping arrives before it ends. Never a nag, nothing else. Yours to change any time in iOS Settings."
-                 : "Ask for a reminder on anything you save and one ping arrives before it ends, plus one when \(partnerName ?? "someone") adds to the library. Never a nag. Yours to change any time in iOS Settings.")
+                 ? "Ask for a reminder on anything you save and one heads-up arrives before it ends. On the day itself, it stays on your Lock Screen. Never a nag. Change it any time in iOS Settings."
+                 : "Ask for a reminder on anything you save and one heads-up arrives before it ends. On the day itself, it stays on your Lock Screen. You\u{2019}ll also hear when \(partnerName ?? "someone") adds something. Change it any time in iOS Settings.")
 
             mockBanner
 
