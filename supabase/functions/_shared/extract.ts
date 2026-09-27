@@ -309,16 +309,18 @@ export function jsonLdEvents(html: string): LdEvent[] {
 }
 
 /// The closing day the page's structured data gives this card's run: an
-/// event there opening the same day, with one end date between them.
+/// event there opening the same day, with one end date between them. An
+/// end the next day is a night running past midnight, not a two-day run.
 export function ldClosing(
   events: LdEvent[],
   card: Pick<ParsedCard, "kind" | "starts_on">,
 ): string | null {
   const start = card.starts_on;
   if (card.kind !== "event" || !start) return null;
+  const dayAfter = new Date(Date.parse(`${start}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const ends = new Set(
     events
-      .filter((e) => e.start === start && e.end && e.end >= start)
+      .filter((e) => e.start === start && e.end && e.end >= start && e.end !== dayAfter)
       .map((e) => e.end!),
   );
   return ends.size === 1 ? [...ends][0] : null;

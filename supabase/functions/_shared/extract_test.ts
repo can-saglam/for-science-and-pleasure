@@ -45,6 +45,12 @@ Deno.test("an unclear closing day stays empty", () => {
   assert(ldClosing(twoRuns, card) === null, "two end dates for one opening");
   assert(ldClosing([{ name: "A", start: "2026-11-07", end: "2026-01-01" }], card) === null, "ends before it opens");
   assert(ldClosing([{ name: "A", start: "2026-11-07", end: null }], card) === null, "no end given");
+  assert(ldClosing([{ name: "Gig", start: "2026-11-07", end: "2026-11-08" }], card) === null, "a night past midnight");
+  assert(ldClosing([{ name: "A", start: "2026-11-07", end: "2026-11-07" }], card) === "2026-11-07", "one day");
+  assert(
+    ldClosing([{ name: "A", start: "2026-12-31", end: "2027-01-01" }], { ...card, starts_on: "2026-12-31" }) === null,
+    "New Year's Eve past midnight",
+  );
 });
 
 Deno.test("another year's page at the same address isn't this run", () => {
