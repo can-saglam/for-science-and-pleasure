@@ -259,6 +259,79 @@ export function isThisRun(html: string, dates: string[]): boolean {
   return !found.length || found.some((y) => years.has(y));
 }
 
+/// An event as a page's JSON-LD describes it. Venues often print only
+/// "Opens 7 November" and keep the closing day in the structured data,
+/// which the page text drops along with every other script.
+export interface LdEvent {
+  name: string | null;
+  start: string | null;
+  end: string | null;
+}
+
+const LD_EVENT_TYPE_RE = /event|exhibition|festival/i;
+
+function ldDay(value: unknown): string | null {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
+}
+
+function collectLdEvents(node: unknown, out: LdEvent[], depth = 0): void {
+  if (!node || typeof node !== "object" || depth > 4 || out.length >= 12) return;
+  if (Array.isArray(node)) {
+    for (const entry of node) collectLdEvents(entry, out, depth + 1);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  const types = [obj["@type"]].flat().filter((t): t is string => typeof t === "string");
+  if (types.some((t) => LD_EVENT_TYPE_RE.test(t))) {
+    const start = ldDay(obj.startDate);
+    const end = ldDay(obj.endDate);
+    if (start || end) {
+      out.push({ name: typeof obj.name === "string" ? obj.name.trim() || null : null, start, end });
+    }
+  }
+  for (const key of ["@graph", "itemListElement", "item", "subEvent"]) {
+    collectLdEvents(obj[key], out, depth + 1);
+  }
+}
+
+export function jsonLdEvents(html: string): LdEvent[] {
+  const out: LdEvent[] = [];
+  for (const block of html.matchAll(
+    /<script\b[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    try {
+      collectLdEvents(JSON.parse(block[1]), out);
+    } catch {
+      // malformed block — keep looking
+    }
+  }
+  return out;
+}
+
+/// The closing day the page's structured data gives this card's run: an
+/// event there opening the same day, with one end date between them.
+export function ldClosing(
+  events: LdEvent[],
+  card: Pick<ParsedCard, "kind" | "starts_on">,
+): string | null {
+  const start = card.starts_on;
+  if (card.kind !== "event" || !start) return null;
+  const ends = new Set(
+    events
+      .filter((e) => e.start === start && e.end && e.end >= start)
+      .map((e) => e.end!),
+  );
+  return ends.size === 1 ? [...ends][0] : null;
+}
+
+function ldEventLines(events: LdEvent[]): string {
+  if (!events.length) return "";
+  const lines = events.map((e) =>
+    `- ${e.name ?? "(unnamed)"}: starts ${e.start ?? "unknown"}, ends ${e.end ?? "unknown"}`
+  );
+  return `Event dates from the page's structured data (JSON-LD), which often has a closing date the visible text leaves out:\n${lines.join("\n")}`;
+}
+
 function isSiteRoot(url: string): boolean {
   return new URL(url).pathname.replace(/\/+$/, "") === "";
 }
@@ -307,7 +380,7 @@ export async function ownPage(
 
 async function fetchPage(
   url: string,
-): Promise<{ text: string; ogImage: string | null } | null> {
+): Promise<{ text: string; ogImage: string | null; events: LdEvent[] } | null> {
   try {
     const res = await publicFetch(url, {
       redirect: "follow",
@@ -333,8 +406,10 @@ async function fetchPage(
       .replace(/&nbsp;|&amp;|&quot;|&#\d+;|&[a-z]+;/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
+    const events = jsonLdEvents(html);
     return {
-      text: [title, metas.join("\n"), body].join("\n\n").slice(0, 30_000),
+      text: [title, metas.join("\n"), ldEventLines(events), body].filter(Boolean).join("\n\n").slice(0, 30_000),
+      events,
       // og:image first, then JSON-LD and the page's largest picture — the
       // same ladder the model's suggested website gets. Gallery and
       // festival sites often skip social meta tags entirely.
@@ -384,7 +459,7 @@ export async function extractCard(
   // Google Maps links: never fetch the page (it's huge, JS-only junk); the
   // URL itself names the place and pins its coordinates.
   const mapsLink = url ? await resolveMapsLink(url) : null;
-  let page: { text: string; ogImage: string | null } | null = null;
+  let page: { text: string; ogImage: string | null; events: LdEvent[] } | null = null;
   if (url && !mapsLink && isFetchable(url)) {
     page = await fetchPage(url);
     if (page && looksBlocked(page.text)) page = null;
@@ -603,6 +678,7 @@ export async function extractCard(
     : [];
   const own = !url && proposedLink ? await ownPage(proposedLink, seen, eventDates) : null;
   const savedUrl = url ?? own?.url ?? null;
+  card.ends_on ??= ldClosing(page?.events ?? (own?.html ? jsonLdEvents(own.html) : []), card);
 
   let imageUrl = page?.ogImage ??
     (own?.html ? heroImageFromHtml(own.html, own.url) : null);

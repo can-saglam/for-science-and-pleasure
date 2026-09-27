@@ -1,4 +1,51 @@
-import { cleanLink, isAnchored, isThisRun, linkKey, mentionsDate } from "./extract.ts";
+import { cleanLink, isAnchored, isThisRun, jsonLdEvents, ldClosing, linkKey, mentionsDate } from "./extract.ts";
+
+const ld = (json: unknown) => `<script type="application/ld+json">${JSON.stringify(json)}</script>`;
+
+Deno.test("a closing day only the structured data gives is read", () => {
+  // The V&A prints "Opens Saturday, 7 November 2026" and nothing else.
+  const vam = `<p>Opens Saturday, 7 November 2026</p>` + ld({
+    "@context": "http://schema.org",
+    "@type": "ExhibitionEvent",
+    name: "Constantinople to Istanbul: One City, Two Empires",
+    startDate: "2026-11-07",
+    endDate: "2027-05-09",
+  });
+  const events = jsonLdEvents(vam);
+  assert(events.length === 1 && events[0].end === "2027-05-09", "read the ExhibitionEvent");
+  const card = { kind: "event" as const, starts_on: "2026-11-07" };
+  assert(ldClosing(events, card) === "2027-05-09", "closing day");
+  assert(ldClosing(events, { ...card, starts_on: "2026-11-08" }) === null, "a different run");
+  assert(ldClosing(events, { kind: "place", starts_on: "2026-11-07" }) === null, "places have no run");
+  assert(ldClosing(events, { ...card, starts_on: null }) === null, "no start to match");
+});
+
+Deno.test("structured data in graphs, lists and timestamps", () => {
+  const graph = jsonLdEvents(ld({
+    "@graph": [
+      { "@type": "Organization", name: "Gallery" },
+      { "@type": ["Event", "VisualArtsEvent"], name: "Show", startDate: "2026-10-01T10:00:00+01:00", endDate: "2027-01-10T18:00:00+00:00" },
+    ],
+  }));
+  assert(graph.length === 1 && graph[0].start === "2026-10-01" && graph[0].end === "2027-01-10", "graph, typed array, timestamps");
+  const list = jsonLdEvents(ld({
+    "@type": "ItemList",
+    itemListElement: [{ "@type": "ListItem", item: { "@type": "Event", name: "Gig", startDate: "2026-12-01" } }],
+  }));
+  assert(list.length === 1 && list[0].end === null, "list item, no end");
+  assert(jsonLdEvents(`<script type="application/ld+json">{not json</script>`).length === 0, "malformed block");
+});
+
+Deno.test("an unclear closing day stays empty", () => {
+  const card = { kind: "event" as const, starts_on: "2026-11-07" };
+  const twoRuns = [
+    { name: "A", start: "2026-11-07", end: "2027-01-01" },
+    { name: "B", start: "2026-11-07", end: "2027-02-01" },
+  ];
+  assert(ldClosing(twoRuns, card) === null, "two end dates for one opening");
+  assert(ldClosing([{ name: "A", start: "2026-11-07", end: "2026-01-01" }], card) === null, "ends before it opens");
+  assert(ldClosing([{ name: "A", start: "2026-11-07", end: null }], card) === null, "no end given");
+});
 
 Deno.test("another year's page at the same address isn't this run", () => {
   const nov13 = ["2026-11-13"];
