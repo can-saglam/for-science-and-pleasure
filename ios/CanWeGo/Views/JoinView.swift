@@ -113,6 +113,7 @@ struct JoinSheet: View {
                 Task { await lookup() }
             } label: {
                 Text("Look up")
+                    .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
             .prominentGlass()
@@ -191,6 +192,7 @@ struct JoinSheet: View {
                         Text(inSharedGroup ? "Leave this group and join" : "Join")
                         if joining { ProgressView() }
                     }
+                    .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                 }
                 .prominentGlass()
@@ -216,6 +218,7 @@ struct JoinSheet: View {
                     showPlus = true
                 } label: {
                     Text("See Plus")
+                        .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
                 .prominentGlass()

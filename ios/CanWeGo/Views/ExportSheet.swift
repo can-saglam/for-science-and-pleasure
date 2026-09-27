@@ -42,6 +42,7 @@ struct ExportSheet: View {
                     files = LibraryExport.write(items)
                 } label: {
                     Label(count == 1 ? "Export 1 save" : "Export \(count) saves", systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
                 .prominentGlass()
