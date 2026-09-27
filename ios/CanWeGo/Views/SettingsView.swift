@@ -105,6 +105,7 @@ struct SettingsView: View {
                         theme.wrappedValue = option
                     }
                     .padding(.vertical, 6)
+                    .id("appearance")
                 }
                 .listRowBackground(Self.rowBackground)
 

@@ -126,10 +126,15 @@ struct ThemeSnapshot {
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#365AA8") ?? .black, ink: Color.fromHex("#FAF8F0") ?? .white)
         case "moss":
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#465A37") ?? .black, ink: Color.fromHex("#FAF8F0") ?? .white)
-        case "umber":
-            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#564A30") ?? .black, ink: Color.fromHex("#EFEED2") ?? .white)
+        // Umber was retired for terracotta, as in the app.
+        case "terracotta", "umber":
+            ThemeSnapshot(name: "terracotta", isLight: false, paper: Color.fromHex("#7C3520") ?? .black, ink: Color.fromHex("#FBEFE3") ?? .white)
+        case "petrol":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#0F4C4F") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
         case "stone":
             ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#C8CBC4") ?? .white, ink: Color.fromHex("#0D0F0A") ?? .black)
+        case "blush":
+            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#EBDAD3") ?? .white, ink: Color.fromHex("#43201D") ?? .black)
         default:
             ThemeSnapshot(name: "midnight", isLight: false, paper: Color.fromHex("#0A107A") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
         }

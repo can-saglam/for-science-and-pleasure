@@ -201,7 +201,7 @@ struct ItemCard: View {
     /// takes the same shape in a calm green.
     private var badgeFold: Double {
         switch AppBackground.theme {
-        case .wine, .forest, .moss: return 0.4
+        case .wine, .forest, .moss, .terracotta: return 0.4
         default: return 0.55
         }
     }

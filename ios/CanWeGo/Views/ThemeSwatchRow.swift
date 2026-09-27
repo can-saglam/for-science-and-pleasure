@@ -25,16 +25,20 @@ struct ThemeSwatchRow: View {
                     .contentTransition(.numericText())
                     .animation(.snappy, value: themes.current)
             }
-            ScrollView(.horizontal) {
-                HStack(spacing: 12) {
-                    ForEach(AppTheme.allCases) { option in
-                        swatch(option)
+            // More discs than fit: open scrolled to the one in use.
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        ForEach(AppTheme.allCases) { option in
+                            swatch(option).id(option)
+                        }
                     }
+                    .padding(.horizontal, 2)
                 }
-                .padding(.horizontal, 2)
+                .scrollIndicators(.hidden)
+                .scrollClipDisabled()
+                .onAppear { proxy.scrollTo(themes.current, anchor: .center) }
             }
-            .scrollIndicators(.hidden)
-            .scrollClipDisabled()
         }
     }
 

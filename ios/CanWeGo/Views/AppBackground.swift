@@ -2,22 +2,24 @@ import SwiftUI
 
 // MARK: - Themes
 
-/// Nine moods, one app. The deep set: the signature midnight blue, a pure
-/// black, a dark forest green, a deep wine red. The mid-tones from the
-/// print sheet: cobalt, moss, umber. And two papers for daylight — oat
-/// and stone. Each theme derives its whole palette — tab shades,
-/// sheet depth, control accent — from one base color, so everything
-/// stays tuned.
+/// Eleven moods, one app. The deep set: the signature midnight blue, a
+/// pure black, a petrol teal, a dark forest green, a deep wine red. The
+/// mid-tones from the print sheet: cobalt, moss, terracotta. And three
+/// papers for daylight — oat, stone and blush. Each theme derives its
+/// whole palette — tab shades, sheet depth, control accent — from one
+/// base color, so everything stays tuned. Declared in picker order.
 enum AppTheme: String, CaseIterable, Identifiable {
     case midnight
-    case cobalt
     case ink
+    case petrol
     case forest
-    case moss
-    case umber
     case wine
+    case cobalt
+    case moss
+    case terracotta
     case oat
     case stone
+    case blush
 
     var id: String { rawValue }
 
@@ -26,30 +28,32 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: "Midnight Blue"
         case .cobalt: "Cobalt"
         case .ink: "Pure Black"
+        case .petrol: "Petrol"
         case .forest: "Forest Green"
         case .moss: "Moss"
-        case .umber: "Umber"
+        case .terracotta: "Terracotta"
         case .wine: "Wine Red"
         case .oat: "Oat"
         case .stone: "Stone"
+        case .blush: "Blush"
         }
     }
 
-    /// The papers — oat and stone — are light pages with dark type;
-    /// everything else is a dark base.
+    /// The papers — oat, stone and blush — are light pages with dark
+    /// type; everything else is a dark base.
     var isLight: Bool {
         switch self {
-        case .oat, .stone: true
+        case .oat, .stone, .blush: true
         default: false
         }
     }
 
-    /// Cobalt, moss and umber sit between the deep bases and the papers:
-    /// dark enough for light type, light enough that a few mixes need a
-    /// gentler hand.
+    /// Cobalt, moss and terracotta sit between the deep bases and the
+    /// papers: dark enough for light type, light enough that a few mixes
+    /// need a gentler hand.
     var isMidTone: Bool {
         switch self {
-        case .cobalt, .moss, .umber: true
+        case .cobalt, .moss, .terracotta: true
         default: false
         }
     }
@@ -57,16 +61,17 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var colorScheme: ColorScheme { isLight ? .light : .dark }
 
     /// Logo, titles, and anything that used to be hardcoded white.
-    /// Midnight and forest print in the warm cream of the olive
-    /// reference; umber in a paler parchment; cobalt and moss in a soft
-    /// white; stone flips to near-black, oat to a dark brown; ink and wine
-    /// stay white.
+    /// Midnight, petrol and forest print in the warm cream of the olive
+    /// reference; terracotta in a warmer shell; cobalt and moss in a soft
+    /// white; stone flips to near-black, oat to a dark brown, blush to a
+    /// deep maroon; ink and wine stay white.
     var ink: Color {
         switch self {
         case .stone: Color(hex: "#0D0F0A") ?? .black
         case .oat: Color(hex: "#3E2C14") ?? Color(red: 0.243, green: 0.173, blue: 0.078)
-        case .midnight, .forest: Self.forestCream
-        case .umber: Color(hex: "#EFEED2") ?? Self.forestCream
+        case .blush: Color(hex: "#43201D") ?? Color(red: 0.263, green: 0.125, blue: 0.114)
+        case .midnight, .petrol, .forest: Self.forestCream
+        case .terracotta: Color(hex: "#FBEFE3") ?? .white
         case .cobalt, .moss: Color(hex: "#FAF8F0") ?? .white
         default: .white
         }
@@ -82,18 +87,22 @@ enum AppTheme: String, CaseIterable, Identifiable {
             Color(hex: "#365AA8") ?? Color(red: 0.212, green: 0.353, blue: 0.659)
         case .ink:
             .black
+        case .petrol:
+            Color(hex: "#0F4C4F") ?? Color(red: 0.059, green: 0.298, blue: 0.310)
         case .forest:
             Color(hex: "#323316") ?? Color(red: 0.196, green: 0.200, blue: 0.086)
         case .moss:
             Color(hex: "#465A37") ?? Color(red: 0.275, green: 0.353, blue: 0.216)
-        case .umber:
-            Color(hex: "#564A30") ?? Color(red: 0.337, green: 0.290, blue: 0.188)
+        case .terracotta:
+            Color(hex: "#7C3520") ?? Color(red: 0.486, green: 0.208, blue: 0.125)
         case .wine:
             Color(hex: "#440015") ?? Color(red: 0.267, green: 0, blue: 0.082)
         case .oat:
             Color(hex: "#E3DDCF") ?? Color(red: 0.890, green: 0.867, blue: 0.812)
         case .stone:
             Color(hex: "#C8CBC4") ?? Color(red: 0.784, green: 0.796, blue: 0.769)
+        case .blush:
+            Color(hex: "#EBDAD3") ?? Color(red: 0.922, green: 0.855, blue: 0.827)
         }
     }
 
@@ -107,12 +116,14 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: nil
         case .cobalt: "AppIconCobalt"
         case .ink: "AppIconInk"
+        case .petrol: "AppIconPetrol"
         case .forest: "AppIconForest"
         case .moss: "AppIconMoss"
-        case .umber: "AppIconUmber"
+        case .terracotta: "AppIconTerracotta"
         case .wine: "AppIconWine"
         case .oat: "AppIconOat"
         case .stone: "AppIconStone"
+        case .blush: "AppIconBlush"
         }
     }
 
@@ -123,26 +134,30 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: "IconPreviewMidnight"
         case .cobalt: "IconPreviewCobalt"
         case .ink: "IconPreviewInk"
+        case .petrol: "IconPreviewPetrol"
         case .forest: "IconPreviewForest"
         case .moss: "IconPreviewMoss"
-        case .umber: "IconPreviewUmber"
+        case .terracotta: "IconPreviewTerracotta"
         case .wine: "IconPreviewWine"
         case .oat: "IconPreviewOat"
         case .stone: "IconPreviewStone"
+        case .blush: "IconPreviewBlush"
         }
     }
 
     /// Tint for controls: toolbar buttons, the selected tab, links.
-    /// Papers use their ink; the mid-tones lift a pale wash of their own
-    /// hue, like midnight's periwinkle; umber uses its parchment ink.
+    /// Papers use their ink; the mid-tones and petrol lift a pale wash of
+    /// their own hue, like midnight's periwinkle.
     var accent: Color {
         switch self {
         case .midnight: Color(hex: "#97A4FF") ?? .white
         case .cobalt: Color(hex: "#D3DEFF") ?? .white
         case .ink: .white
+        case .petrol: Color(hex: "#9EE3DA") ?? .white
         case .forest: Self.forestCream
         case .moss: Color(hex: "#DCE8C8") ?? .white
-        case .umber, .oat, .stone: ink
+        case .terracotta: Color(hex: "#FFD3BF") ?? .white
+        case .oat, .stone, .blush: ink
         case .wine: Color(hex: "#FFA2B8") ?? .white
         }
     }
@@ -151,7 +166,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     /// to deepen into a swipe fill.
     var accentIsNeutral: Bool {
         switch self {
-        case .ink, .forest, .umber, .oat, .stone: true
+        case .ink, .forest, .oat, .stone, .blush: true
         default: false
         }
     }
@@ -163,8 +178,8 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var cardAccentMix: Double {
         switch self {
         case .ink: 0.30
-        case .oat, .stone: 0.16
-        case .cobalt, .moss, .umber: 0.28
+        case .oat, .stone, .blush: 0.16
+        case .cobalt, .moss, .terracotta: 0.28
         default: 0.34
         }
     }
@@ -177,7 +192,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var cardLiftAmount: Double {
         switch self {
         case .ink: 0.07
-        case .oat, .stone: 0.05
+        case .oat, .stone, .blush: 0.05
         default: 0.06
         }
     }
@@ -237,11 +252,16 @@ final class ThemeStore {
         // CWG_THEME env var lets simulator runs pin a theme for screenshots.
         let stored = ProcessInfo.processInfo.environment["CWG_THEME"]
             ?? defaults?.string(forKey: "appTheme")
-        // "cream" was retired; the nearest paper stands in for anyone who had it.
+        // Retired themes hand over to their nearest: cream to oat, umber to
+        // terracotta (saved, and its icon swapped on the next background).
         let initial = stored.flatMap(AppTheme.init(rawValue:))
-            ?? (stored == "cream" ? .oat : .midnight)
+            ?? Self.successor(of: stored)
         current = initial
         scheme = initial
+        if stored == "umber", ProcessInfo.processInfo.environment["CWG_THEME"] == nil {
+            defaults?.set(initial.rawValue, forKey: "appTheme")
+            defaults?.set(true, forKey: "iconSyncPending")
+        }
         // After the singleton is live — doing this inline re-enters
         // `shared` mid-init and traps. `writeTheme` used to read
         // `ThemeStore.shared` from here and crashed launch on device.
@@ -343,6 +363,14 @@ final class ThemeStore {
     private var iconSyncItem: DispatchWorkItem?
     #endif
 
+    static func successor(of retired: String?) -> AppTheme {
+        switch retired {
+        case "cream": .oat
+        case "umber": .terracotta
+        default: .midnight
+        }
+    }
+
     /// Has a theme ever been chosen on this device? False on a fresh
     /// install, when the first run picks one from the system appearance.
     var hasStoredChoice: Bool { defaults?.string(forKey: "appTheme") != nil }
@@ -405,20 +433,23 @@ enum AppBackground {
 
     /// Warnings, error notes, duplicate notices. System orange reads on the
     /// dark pages but sits at ~1.5:1 on the papers, so they deepen it to
-    /// a burnt orange; on umber's brown it goes paler to stay distinct.
+    /// a burnt orange; on terracotta's orange-red it goes paler to stay
+    /// distinct.
     static var warning: Color {
         if theme.isLight { return Color(red: 0.62, green: 0.32, blue: 0) }
-        if theme == .umber { return Color(red: 1.0, green: 0.72, blue: 0.36) }
+        if theme == .terracotta { return Color(red: 1.0, green: 0.82, blue: 0.50) }
         return .orange
     }
 
     /// Destructive rows and urgent copy. Deeper on the papers (system red
     /// is under 3:1 there); on wine, system red melts into the page, so it
-    /// lifts toward the theme's pink; the mid-tones lift it a touch too,
-    /// so it stays legible against a coloured page.
+    /// lifts toward the theme's pink; terracotta is itself a red, so it
+    /// goes paler still; the other mid-tones lift it a touch, so it stays
+    /// legible against a coloured page.
     static var destructive: Color {
         if theme.isLight { return Color(red: 0.72, green: 0.10, blue: 0.14) }
         if theme == .wine { return Color(red: 1.0, green: 0.47, blue: 0.53) }
+        if theme == .terracotta { return Color(red: 1.0, green: 0.74, blue: 0.72) }
         if theme.isMidTone { return Color(red: 1.0, green: 0.55, blue: 0.55) }
         return .red
     }

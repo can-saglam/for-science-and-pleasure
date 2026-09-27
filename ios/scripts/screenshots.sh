@@ -77,7 +77,7 @@ echo "First run (preview mode)"
 for page in welcome name code home save joined notify; do
   shoot "onboarding-$page" 5 CWG_ONBOARDING_PREVIEW=1 "CWG_ONBOARDING_PAGE=$page"
 done
-for theme in midnight cobalt ink forest moss umber wine oat stone; do
+for theme in midnight ink petrol forest wine cobalt moss terracotta oat stone blush; do
   shoot "library-theme-$theme" 5 "CWG_THEME=$theme"
 done
 
