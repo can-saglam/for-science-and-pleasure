@@ -225,20 +225,26 @@ struct PlusPaywall: View {
     /// The group as a row of seats: who's in (a star on whoever holds
     /// Plus), and the empty chairs Plus would add.
     private func seats(_ members: [GroupCard.Member], empty: Int) -> some View {
-        HStack(alignment: .top, spacing: 18) {
+        // Fewer seats, bigger faces; four still fit across the narrowest phone.
+        let size: CGFloat = switch members.count + empty {
+        case ...2: 96
+        case 3: 84
+        default: 68
+        }
+        return HStack(alignment: .top, spacing: 18) {
             ForEach(members) { member in
                 VStack(spacing: 8) {
                     Text(member.initial)
-                        .font(.displaySmallBold(30, relativeTo: .title))
+                        .font(.displaySmallBold(size * 0.44, relativeTo: .title))
                         .foregroundStyle(AvatarColour.initial(member.avatarColour))
-                        .frame(width: 68, height: 68)
+                        .frame(width: size, height: size)
                         .background(AvatarColour.color(member.avatarColour), in: .circle)
                         .overlay(alignment: .bottomTrailing) {
                             if member.isPlus && isCovered {
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: 11, weight: .bold))
+                                    .font(.system(size: size * 0.16, weight: .bold))
                                     .foregroundStyle(AppBackground.base)
-                                    .frame(width: 24, height: 24)
+                                    .frame(width: size * 0.34, height: size * 0.34)
                                     .background(AppBackground.ink, in: .circle)
                                     .overlay(Circle().strokeBorder(AppBackground.sheet, lineWidth: 2.5))
                                     .offset(x: 3, y: 3)
@@ -246,9 +252,9 @@ struct PlusPaywall: View {
                         }
                         .shadow(color: .black.opacity(AppBackground.theme.isLight ? 0.10 : 0.3), radius: 10, y: 5)
                     Text(member.userId == me ? "You" : member.name)
-                        .font(.caption.weight(.semibold))
+                        .font((size > 68 ? Font.footnote : Font.caption).weight(.semibold))
                         .lineLimit(1)
-                        .frame(maxWidth: 76)
+                        .frame(maxWidth: size + 8)
                 }
                 .scaleEffect(dealt ? 1 : 0.6)
                 .opacity(dealt ? 1 : 0)
@@ -258,7 +264,7 @@ struct PlusPaywall: View {
                     Image(systemName: "plus")
                         .font(.title2.weight(.medium))
                         .foregroundStyle(AppBackground.ink.opacity(0.55))
-                        .frame(width: 68, height: 68)
+                        .frame(width: size, height: size)
                         .background(AppBackground.wash(0.05), in: .circle)
                         .overlay(
                             Circle().strokeBorder(
@@ -316,11 +322,11 @@ struct PlusPaywall: View {
         if isCovered { return coveredLine }
         switch reason {
         case .browsing:
-            return "Can We Go? is free to use. Plus lifts the limits for everyone in your group."
+            return "Can We Go? is free. Plus removes the limits for everyone in your group."
         case .seats:
-            return "Free groups have two seats. Plus makes it four: one library, everyone adding and planning together."
+            return "A free group is for two people. With Plus, up to four can share one library."
         case .category(let c):
-            return "Free libraries keep \(CategoryCap.limit) upcoming \(CategoryCap.plural(c).lowercased()) at a time. Plus lifts the limit for your whole group."
+            return "On the free plan you can have \(CategoryCap.limit) upcoming \(CategoryCap.plural(c).lowercased()) at a time. Plus removes the limit for your whole group."
         }
     }
 
@@ -328,15 +334,15 @@ struct PlusPaywall: View {
         let holders = (group.card?.members ?? []).filter(\.isPlus)
         let mine = holders.contains { $0.userId == me }
         let others = holders.filter { $0.userId != me }.map(\.name)
-        if mine && others.isEmpty { return "Your Plus covers everyone in the group." }
-        if mine { return "You and \(ListFormatter.localizedString(byJoining: others)) both have Plus. Either one covers the whole group." }
+        if mine && others.isEmpty { return "Your Plus covers everyone in your group." }
+        if mine { return "You and \(ListFormatter.localizedString(byJoining: others)) both have Plus. You only need one for the whole group." }
         if let first = others.first, others.count == 1 {
-            return "\(first)\u{2019}s Plus covers everyone in the group, you included. Nothing to buy."
+            return "\(first) has Plus, so you have it too. Nothing to pay."
         }
         if !others.isEmpty {
-            return "\(ListFormatter.localizedString(byJoining: others)) have Plus, which covers the whole group. Nothing to buy."
+            return "\(ListFormatter.localizedString(byJoining: others)) have Plus, so you have it too. Nothing to pay."
         }
-        return "Your group has Plus. Nothing to buy."
+        return "Your group has Plus, so you have it too. Nothing to pay."
     }
 
     private var headline: some View {
@@ -364,11 +370,11 @@ struct PlusPaywall: View {
 
     private func benefits(unlocked: Bool) -> some View {
         VStack(spacing: 0) {
-            benefit("infinity", "Every save, no cap", "No four-per-category limit, ever.", unlocked)
+            benefit("infinity", "Save as much as you like", "No limit of \(CategoryCap.limit) per category.", unlocked)
             Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
-            benefit("person.3.fill", "Four in the group", "Two more seats, still one shared library.", unlocked)
+            benefit("person.3.fill", "Up to four people", "Invite two more to your library.", unlocked)
             Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
-            benefit("sparkles", "50 look-ups a day", "Cards read from links and screenshots, up from 10.", unlocked)
+            benefit("sparkles", "More adds each day", "Up to 50 links or screenshots a day, instead of 10.", unlocked)
         }
         .padding(.vertical, 6)
         .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 22, style: .continuous))
