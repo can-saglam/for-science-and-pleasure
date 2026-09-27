@@ -29,9 +29,6 @@ struct OpenSaveIntent: OpenIntent {
 struct WhatsOnIntent: AppIntent {
     static let title: LocalizedStringResource = "What's On"
     static let description = IntentDescription("Lists the saved events that are on today, this weekend, this week, or closing soon.")
-    /// Reads save titles aloud: not to whoever picks up a locked phone.
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
     @Parameter(title: "When", default: .weekend)
     var period: SavePeriod
 
@@ -78,8 +75,6 @@ struct WhatsOnIntent: AppIntent {
 struct ClosingSoonIntent: AppIntent {
     static let title: LocalizedStringResource = "What's Closing Soon"
     static let description = IntentDescription("Lists the saved exhibitions and runs that close in the next three weeks.")
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
     init() {}
 
     @MainActor
@@ -95,9 +90,6 @@ struct ClosingSoonIntent: AppIntent {
 struct SaveLinkIntent: AppIntent {
     static let title: LocalizedStringResource = "Save a Link"
     static let description = IntentDescription("Looks up a link and adds it to your saves, like sharing it to Can We Go.")
-    /// Adds without asking (it's a Shortcuts step), so only on an unlocked phone.
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
     @Parameter(title: "Link")
     var link: URL
 
@@ -137,8 +129,6 @@ struct SaveLinkIntent: AppIntent {
 struct AddToLibraryIntent: AppIntent {
     static let title: LocalizedStringResource = "Add to Can We Go"
     static let description = IntentDescription("Looks up an event or place from a description, like \u{201c}the new Anish Kapoor show at the Hayward\u{201d}, and adds it to your saves.")
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
     @Parameter(title: "What", requestValueDialog: "What should I add?")
     var what: String
 

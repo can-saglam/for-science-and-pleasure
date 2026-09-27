@@ -180,8 +180,6 @@ struct SaveItemQuery: EntityQuery {
 @available(iOS 27.0, *)
 @AppIntent(schema: .reminders.createReminder)
 struct AddSaveByVoiceIntent {
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
     var title: String
     var dueDate: DateComponents?
     var images: [IntentFile]

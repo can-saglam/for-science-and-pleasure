@@ -190,8 +190,6 @@ struct SaveEventQuery: EntityQuery {
 @available(iOS 27.0, *)
 @AppIntent(schema: .calendar.createEvent)
 struct AddEventByVoiceIntent {
-    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
-
     var title: String
     var startDate: Date
     var endDate: Date?
