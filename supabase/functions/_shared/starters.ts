@@ -192,8 +192,8 @@ export function starterFresh(fetchedAt: string | Date, now = new Date()): boolea
 /// Hosts that are never a venue's own page. A starter must be something
 /// the parser can read into a real card; a listings page yields a card
 /// about the listings site.
-const AGGREGATOR_RE =
-  /(^|\.)(tripadvisor|timeout|yelp|eventbrite|ticketmaster|dice\.fm|ra\.co|songkick|google|facebook|instagram|tiktok|wikipedia|booking|opentable|thefork|resy|viator|getyourguide|designmynight|skiddle|seetickets|axs|lonelyplanet|culturetrip|secretldn|londonist|visitlondon|visit[a-z]+)\.(com|co\.uk|org|net|fm|co|de|fr|es|it|pt|nl)$/i;
+export const AGGREGATOR_RE =
+  /(^|\.)((tripadvisor|timeout|yelp|eventbrite|ticketmaster|songkick|google|facebook|instagram|tiktok|wikipedia|booking|opentable|thefork|resy|viator|getyourguide|designmynight|skiddle|seetickets|axs|lonelyplanet|culturetrip|secretldn|londonist|visitlondon|visit[a-z]+)\.(com|co\.uk|org|net|fm|co|de|fr|es|it|pt|nl)|dice\.fm|ra\.co)$/i;
 
 /** Tidy the model's answer: https only, no aggregators, no duplicates, exactly the count. */
 export function shapeStarters(raw: unknown): Starter[] {

@@ -135,31 +135,53 @@ enum ParseClient {
         return try JSONDecoder().decode(Envelope.self, from: data).card
     }
 
-    // MARK: - Starters (first-run chips for the home city)
+    // MARK: - Suggestions (chips for the home city)
 
-    struct Starter: Decodable, Hashable, Identifiable {
+    struct Suggestion: Codable, Hashable, Identifiable {
         let title: String
         let url: String
         let kind: String
+        var venue: String?
+        var startsOn: String?
+        var endsOn: String?
         var id: String { url }
-    }
 
-    /// Three real things to go to in `locality`, for the first-run's save
-    /// page. Cached per city on the server, so a hit is instant; a miss
-    /// is a short knowledge-only model call. One retry on a drop.
-    static func starters(locality: String, country: String) async throws -> [Starter] {
-        do {
-            return try await startersOnce(locality: locality, country: country)
-        } catch let error where isTransient(error) {
-            try? await Task.sleep(for: .seconds(1))
-            return try await startersOnce(locality: locality, country: country)
+        enum CodingKeys: String, CodingKey {
+            case title, url, kind, venue
+            case startsOn = "starts_on"
+            case endsOn = "ends_on"
         }
     }
 
-    private static func startersOnce(locality: String, country: String) async throws -> [Starter] {
+    struct SuggestionPool: Codable {
+        let events: [Suggestion]
+        let places: [Suggestion]
+        /// No events yet for this city; a search for them is running.
+        var eventsComing: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case events, places
+            case eventsComing = "events_coming"
+        }
+    }
+
+    /// Things on in `locality` and places worth going to, refreshed on the
+    /// server weekly (events) and fortnightly (places). A stored pool is
+    /// instant; only a brand-new city's places wait on a short model call.
+    /// One retry on a drop.
+    static func suggestions(locality: String, country: String) async throws -> SuggestionPool {
+        do {
+            return try await suggestionsOnce(locality: locality, country: country)
+        } catch let error where isTransient(error) {
+            try? await Task.sleep(for: .seconds(1))
+            return try await suggestionsOnce(locality: locality, country: country)
+        }
+    }
+
+    private static func suggestionsOnce(locality: String, country: String) async throws -> SuggestionPool {
         guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
 
-        var request = URLRequest(url: secrets.supabaseURL.appending(path: "functions/v1/starters"))
+        var request = URLRequest(url: secrets.supabaseURL.appending(path: "functions/v1/suggestions"))
         request.httpMethod = "POST"
         request.timeoutInterval = 25
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -171,10 +193,9 @@ enum ParseClient {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(message ?? "Starters failed (\(status)).", status: status)
+            throw ParseError.server(message ?? "Suggestions failed (\(status)).", status: status)
         }
-        struct Envelope: Decodable { let starters: [Starter] }
-        return try JSONDecoder().decode(Envelope.self, from: data).starters
+        return try JSONDecoder().decode(SuggestionPool.self, from: data)
     }
 
     // MARK: - Locate (find missing locations)

@@ -128,12 +128,9 @@ struct OnboardingView: View {
     @State private var parsing = false
     @State private var parseTask: Task<Void, Never>?
     @State private var parsed: Item?
-    /// Three real things in the home city, fetched the moment a home is
-    /// known so they're waiting when the save page comes up.
-    @State private var starters: [ParseClient.Starter] = []
-    @State private var startersTask: Task<Void, Never>?
-    @State private var startersFor: String?
-    @State private var startersLoading = false
+    /// The home city's suggestions, fetched the moment a home is known so
+    /// they're waiting when the save page comes up.
+    @State private var suggestions = Suggestions.shared
 
     // Joined
     @State private var groupCards: [Item] = []
@@ -1708,33 +1705,18 @@ struct OnboardingView: View {
         advance()
     }
 
-    /// Ask the server for the city's three chips now, so they're on the
-    /// save page by the time it comes up. One in-flight fetch per city;
-    /// an empty result (cold miss still running, or a failed call) is
-    /// retried when the save page appears.
+    /// Ask the server for the city's suggestions now, so they're on the
+    /// save page by the time it comes up; the same pool the empty library
+    /// tabs use. The store keeps one fetch in flight per city.
     private func fetchStarters(for home: HomeStore.Home) {
-        let country = home.country.isEmpty ? home.locality : home.country
-        let key = "\(home.locality)|\(country)"
-        if startersFor == key, startersLoading || !starters.isEmpty { return }
-        startersFor = key
-        starters = []
-        startersLoading = true
-        startersTask?.cancel()
-        startersTask = Task {
-            defer {
-                if !Task.isCancelled, startersFor == key { startersLoading = false }
-            }
-            let found = try? await ParseClient.starters(locality: home.locality, country: country)
-            guard !Task.isCancelled, startersFor == key else { return }
-            withAnimation(ease) { starters = found ?? [] }
-        }
+        suggestions.load(for: home)
     }
 
     // MARK: First save
 
     /// Instant chips while the server answers — and the fallback if it
     /// doesn't. Same cities as `_shared/starters.ts`.
-    private static let cityStarters: [String: [ParseClient.Starter]] = [
+    private static let cityStarters: [String: [ParseClient.Suggestion]] = [
         "london": [
             .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place"),
             .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place"),
@@ -1789,15 +1771,18 @@ struct OnboardingView: View {
         picked ?? (HomeStore.shared.isSet ? HomeStore.shared.home : nil)
     }
 
-    /// The chips: the city's own from the server, then the built-in set
-    /// for that city (so Singapore isn't a blank wait), nothing if we
-    /// have no home and no fallback.
-    private var starterChips: [ParseClient.Starter] {
-        if !starters.isEmpty { return starters }
+    /// The chips: the city's own from the server (things on first, then
+    /// places), then the built-in set for that city (so Singapore isn't a
+    /// blank wait), nothing if we have no home and no fallback.
+    private var starterChips: [ParseClient.Suggestion] {
+        if let home = chosenHome {
+            let pool = suggestions.mixed(for: home)
+            if !pool.isEmpty { return pool }
+        }
         return Self.fallbackStarters(for: chosenHome)
     }
 
-    private static func fallbackStarters(for home: HomeStore.Home?) -> [ParseClient.Starter] {
+    private static func fallbackStarters(for home: HomeStore.Home?) -> [ParseClient.Suggestion] {
         guard let home else { return [] }
         let aliases = [
             "new york city": "new york", "nyc": "new york",
@@ -1813,12 +1798,9 @@ struct OnboardingView: View {
         return []
     }
 
-    /// The city the chips are actually about — the one they were fetched
-    /// for, which can differ from a guess that landed since.
-    private var starterCity: String? {
-        if !starters.isEmpty { return startersFor?.split(separator: "|").first.map(String.init) }
-        return chosenHome?.locality
-    }
+    /// The city the chips are about. The pool only answers for the chosen
+    /// home, so a guess that landed since can't mislabel them.
+    private var starterCity: String? { chosenHome?.locality }
 
     private var savePage: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -1880,7 +1862,7 @@ struct OnboardingView: View {
                                 .scrollClipDisabled()
                             }
                             .transition(.opacity)
-                        } else if startersLoading, let city = chosenHome?.locality {
+                        } else if suggestions.loading, let city = chosenHome?.locality {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
                                 Text("Looking up a few things in \(city)…")
@@ -1901,7 +1883,7 @@ struct OnboardingView: View {
         .animation(ease, value: parsing)
         .animation(ease, value: parsed?.id)
         .animation(ease, value: starterChips)
-        .animation(ease, value: startersLoading)
+        .animation(ease, value: suggestions.loading)
         .onAppear {
             if let home = chosenHome { fetchStarters(for: home) }
         }

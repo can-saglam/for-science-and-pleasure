@@ -533,13 +533,15 @@ struct ContentView: View {
         #endif
     }
 
-    /// Visual Intelligence handed something over: a picture opens the
-    /// composer on it; a search moves to its tab, where the list opens it.
+    /// Visual Intelligence or a suggestion chip handed something over: a
+    /// picture or link opens the composer on it; a search moves to its
+    /// tab, where the list opens it.
     private func takeVisualHandoff() {
-        if CaptureGate.pendingImage != nil {
+        if CaptureGate.pendingImage != nil || CaptureGate.pendingLink != nil {
             if captureOpen {
                 // A composer already open keeps what's being typed there.
                 CaptureGate.pendingImage = nil
+                CaptureGate.pendingLink = nil
             } else {
                 deepLinked = nil
                 captureOpen = true

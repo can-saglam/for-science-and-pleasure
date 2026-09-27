@@ -7,14 +7,20 @@ enum ItemGate {
     static var pending: UUID?
 }
 
-/// A picture sent from Visual Intelligence to be looked up and saved,
-/// parked until the composer opens and takes it.
+/// A picture sent from Visual Intelligence, or a suggestion's link, to be
+/// looked up and saved, parked until the composer opens and takes it.
 enum CaptureGate {
     static var pendingImage: Data?
+    static var pendingLink: String?
 
     static func take() -> Data? {
         defer { pendingImage = nil }
         return pendingImage
+    }
+
+    static func takeLink() -> String? {
+        defer { pendingLink = nil }
+        return pendingLink
     }
 }
 
@@ -57,7 +63,7 @@ extension Notification.Name {
     static let cwgLibraryWillSwap = Notification.Name("cwgLibraryWillSwap")
     /// Siri or Shortcuts parked a save in the shared inbox.
     static let cwgInboxChanged = Notification.Name("cwgInboxChanged")
-    /// `CaptureGate` holds a picture for the composer.
+    /// `CaptureGate` holds a picture or a link for the composer.
     static let cwgCaptureImage = Notification.Name("cwgCaptureImage")
     /// `SearchGate` holds a search for one of the tabs.
     static let cwgSearchSaves = Notification.Name("cwgSearchSaves")

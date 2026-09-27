@@ -267,7 +267,7 @@ function isSiteRoot(url: string): boolean {
 /// exact page. A dead or guessed deep link is dropped, never swapped for
 /// the site's homepage — two shows at one venue would then share a link
 /// and read as duplicates of each other.
-async function ownPage(
+export async function ownPage(
   candidate: string,
   seen: Set<string>,
   dates: string[],

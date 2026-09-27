@@ -46,6 +46,8 @@ struct LibraryView: View {
     private let shareTip = ShareTip()
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
+    /// The list's visible height, for centring an empty tab in it.
+    @State private var listHeight: CGFloat = 0
 
     private enum ArchiveSide: CaseIterable {
         case all, been
@@ -312,16 +314,17 @@ struct LibraryView: View {
                         .transition(.opacity)
                 }
             }
-            // A quiet drop-in after pull-to-refresh, either way.
-            .overlay(alignment: .top) {
+            // A quiet word after pull-to-refresh, either way, just above
+            // the tab bar.
+            .overlay(alignment: .bottom) {
                 if let refreshNotice {
                     Label(refreshNotice.text, systemImage: refreshNotice.icon)
                         .font(.footnote.weight(.medium))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .glassEffect(.regular, in: .capsule)
-                        .padding(.top, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             // No navigation title: the wordmark owns the leading edge, and
@@ -623,12 +626,14 @@ struct LibraryView: View {
             }
 
             if visible.isEmpty && !been.isEmpty && query.isEmpty && category == nil && area == nil {
-                EmptyFigure(
+                EmptyState(
                     title: "Nothing coming up",
                     message: kind == Item.Kind.place
                         ? "Everywhere you saved, you've been. Add the next one with +."
                         : "Everything you saved has been and gone. Add the next one with +."
-                )
+                ) {
+                    suggestionChips
+                }
                 .padding(.vertical, 8)
                 .cardListRow()
             }
@@ -648,26 +653,41 @@ struct LibraryView: View {
                 .cardListRow()
             } else if visible.isEmpty && been.isEmpty && missed.isEmpty {
                 let filtered = category != nil || area != nil || !query.isEmpty
-                EmptyFigure(
-                    title: base.isEmpty ? emptyTitle : "Nothing matches",
-                    message: base.isEmpty ? emptyPrompt : "Try a different word, or clear the filters.",
-                    // A chip's own glyph when one is chosen; the figure otherwise.
-                    glyph: category != nil ? emptyGlyph : nil
-                ) {
-                    if filtered {
-                        Button("Clear filters") {
-                            Haptics.tap()
-                            withAnimation(.snappy) {
-                                category = nil
-                                area = nil
-                                query = ""
-                            }
-                        }
-                        .buttonStyle(.glass)
+                if base.isEmpty && !filtered {
+                    // Nothing in this tab: the first-time version when the
+                    // whole library is new, with things to start from.
+                    let firstTime = !items.contains { !$0.isDeleted }
+                    EmptyState(
+                        title: firstTime ? firstTitle : emptyTitle,
+                        message: firstTime ? firstPrompt : emptyPrompt
+                    ) {
+                        suggestionChips
                     }
+                    // Centred between the header and the tab bar, less the
+                    // bottom content margin.
+                    .frame(minHeight: max(listHeight - 24, 0))
+                    .cardListRow()
+                } else {
+                    EmptyState(
+                        title: base.isEmpty ? emptyTitle : "Nothing matches",
+                        message: base.isEmpty ? emptyPrompt : "Try a different word, or clear the filters.",
+                        glyph: category != nil ? emptyGlyph : nil
+                    ) {
+                        if filtered {
+                            Button("Clear filters") {
+                                Haptics.tap()
+                                withAnimation(.snappy) {
+                                    category = nil
+                                    area = nil
+                                    query = ""
+                                }
+                            }
+                            .buttonStyle(.glass)
+                        }
+                    }
+                    .padding(.top, 40)
+                    .cardListRow()
                 }
-                .padding(.top, 40)
-                .cardListRow()
             }
 
             journal
@@ -720,6 +740,7 @@ struct LibraryView: View {
         .contentMargins(.top, 0, for: .scrollContent)
         // A little extra so the last card clears the floating tab bar.
         .contentMargins(.bottom, 24, for: .scrollContent)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
         .appBackground(kind == Item.Kind.place ? AppBackground.places : AppBackground.library)
     }
 
@@ -746,10 +767,9 @@ struct LibraryView: View {
 
     // MARK: - Empty states
 
-    /// The running figure from the welcome page, small and in the ink,
-    /// with a line under it — the brand in the emptiest screen instead of
-    /// a system placeholder. A chip's glyph stands in when one is chosen.
-    private struct EmptyFigure<Actions: View>: View {
+    /// A title and a line under it, in the brand's type instead of a system
+    /// placeholder. A chosen filter chip's glyph sits above.
+    private struct EmptyState<Actions: View>: View {
         let title: String
         let message: String
         var glyph: String? = nil
@@ -770,14 +790,6 @@ struct LibraryView: View {
                         .font(.system(size: 34, weight: .medium))
                         .foregroundStyle(AppBackground.ink.opacity(0.55))
                         .frame(height: 56)
-                } else {
-                    Image("Figure")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 56)
-                        .foregroundStyle(AppBackground.ink.opacity(0.7))
-                        .accessibilityHidden(true)
                 }
                 VStack(spacing: 6) {
                     Text(title)
@@ -795,6 +807,43 @@ struct LibraryView: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+    }
+
+    /// Nothing saved in either tab yet: most likely straight out of the
+    /// first run without adding anything.
+    private var firstTitle: String {
+        kind == Item.Kind.place ? "Where do you keep meaning to go?" : "What's the first thing you'd go to?"
+    }
+
+    private var firstPrompt: String {
+        let how = kind == Item.Kind.place
+            ? "Share a restaurant from Google Maps or Instagram, or name it with +."
+            : "Share a link from any app, paste one with +, or just name it."
+        return sharedLibrary ? "\(how) It lands here\(forWhom)." : how
+    }
+
+    /// A few things from the home city's pool under an empty tab. None
+    /// without a home, and none left once they're all saved.
+    @ViewBuilder
+    private var suggestionChips: some View {
+        let home = HomeStore.shared.isSet ? HomeStore.shared.home : nil
+        let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: items) } ?? []
+        VStack(spacing: 0) {
+            if let home, !picks.isEmpty {
+                VStack(spacing: 10) {
+                    Text(kind == Item.Kind.place ? "A few places in \(home.locality)" : "A few things on in \(home.locality)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    SuggestionChips(picks: picks)
+                }
+                .padding(.top, 12)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: picks)
+        .onAppear {
+            if let home { Suggestions.shared.load(for: home) }
         }
     }
 

@@ -125,6 +125,11 @@ struct CaptureView: View {
                 imageJPEG = picture
                 Task { await parse() }
             }
+            // So is a suggestion chip's link.
+            if text.isEmpty, imageJPEG == nil, draft == nil, let link = CaptureGate.takeLink() {
+                text = link
+                Task { await parse() }
+            }
             // CWG_BLANK is only set by automated screenshot runs; it jumps
             // straight to the blank-card edit stage.
             if ProcessInfo.processInfo.environment["CWG_BLANK"] != nil, draft == nil {
