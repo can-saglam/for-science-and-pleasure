@@ -5,8 +5,9 @@ parses them into cards with opening/closing dates, and the app helps plan the
 week around what's opening and closing.
 
 The product is the native iOS app in [`ios/`](ios/) (SwiftUI, distributed via
-TestFlight). The original web PWA was retired in September 2026: the GitHub
-Pages site is down and the `web/` folder removed. Retirement note: a dormant
+TestFlight). The original web PWA was retired in September 2026 and the `web/`
+folder removed; GitHub Pages now serves only the static support, privacy and
+terms pages from [`docs/`](docs/). Retirement note: a dormant
 installed copy once replayed weeks-old cached data over the live library, so
 writes are now also guarded server-side (`0013_stale_write_guard.sql`).
 
