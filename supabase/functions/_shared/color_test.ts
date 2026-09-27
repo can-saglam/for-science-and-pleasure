@@ -186,6 +186,21 @@ Deno.test("Wikipedia queries skip short and placeholder names", () => {
   );
 });
 
+Deno.test("Wikipedia queries try the hall and the centre of a bracketed venue", () => {
+  assertEquals(
+    wikipediaQueries({
+      title: "Dua Lipa & Patti Smith: Bread of Angels",
+      venue: "Southbank Centre (Royal Festival Hall)",
+    }),
+    [
+      "Southbank Centre (Royal Festival Hall)",
+      "Royal Festival Hall",
+      "Southbank Centre",
+      "Dua Lipa & Patti Smith: Bread of Angels",
+    ],
+  );
+});
+
 Deno.test("Wikipedia summary: keep a matching original image, drop disambiguation", () => {
   const page = {
     type: "standard",

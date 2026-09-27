@@ -362,8 +362,15 @@ export function wikipediaQueries(card: { title?: string | null; venue?: string |
     if (!out.some((x) => x.toLowerCase() === q.toLowerCase())) out.push(q);
   };
   add(card.venue);
+  // "Southbank Centre (Royal Festival Hall)" is no Wikipedia title; the
+  // hall inside the brackets and the centre outside them both are.
+  const qualified = (card.venue ?? "").match(/^(.+?)\s*\((.+)\)\s*$/);
+  if (qualified) {
+    add(qualified[2]);
+    add(qualified[1]);
+  }
   add(card.title);
-  return out.slice(0, 2);
+  return out.slice(0, qualified ? 4 : 2);
 }
 
 /// True when query and Wikipedia title share a real word — stops "Kin"
