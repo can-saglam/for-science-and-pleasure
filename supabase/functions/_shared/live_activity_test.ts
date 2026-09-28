@@ -107,3 +107,28 @@ Deno.test("startAps matches DayActivityAttributes and sounds like the reminder i
   assert(alert.body === "Last day · Hayward Gallery" && alert.sound === "default" && !("sound" in aps), "alert sound");
   assert(aps["stale-date"] === 1790269200, "stale at the end");
 });
+
+Deno.test("startAps carries today's hours only when there are some", () => {
+  const item = {
+    id: "3f1c0a52-0000-4000-8000-000000000002",
+    kind: "place",
+    title: "Charleston",
+    venue: null,
+    area: null,
+    color: null,
+    image_url: null,
+    starts_on: null,
+    ends_on: null,
+    reminder_offset_days: 0,
+    reminder_anchor: null,
+    remind_time: null,
+  };
+  const endsAt = new Date("2026-09-24T17:00:00Z");
+  const withHours = startAps(item, today, endsAt, "Open until 17:00");
+  assert(
+    JSON.stringify(withHours["content-state"]) === JSON.stringify({ label: "Today", hours: "Open until 17:00" }),
+    JSON.stringify(withHours["content-state"]),
+  );
+  const without = startAps(item, today, endsAt, null);
+  assert(!("hours" in (without["content-state"] as Record<string, unknown>)), "no key without hours");
+});

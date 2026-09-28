@@ -30,6 +30,7 @@ enum SharedInbox {
         var colorHex: String?
         var imageUrl: String?
         var source: String?
+        var placeId: String?
         var status: String?
         /// Share-sheet "Save anyway" after a duplicate warning.
         var allowDuplicate: Bool?
@@ -128,6 +129,7 @@ extension SharedInbox.PendingSave {
         colorHex = card.color
         imageUrl = card.image_url
         source = card.source
+        placeId = card.place_id
         self.userId = userId.uuidString
         groupId = GroupStore.shared.card?.groupId.uuidString
     }
@@ -159,6 +161,7 @@ extension Item {
         colorHex = pending.colorHex
         imageUrl = pending.imageUrl
         source = pending.source
+        placeId = pending.placeId
         if let status = pending.status { self.status = status }
         createdAt = pending.savedAt
         updatedAt = pending.savedAt

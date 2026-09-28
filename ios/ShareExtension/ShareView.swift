@@ -338,6 +338,7 @@ struct ShareView: View {
         item.colorHex = card.color
         item.imageUrl = card.image_url
         item.source = card.source
+        item.placeId = card.place_id
         return item
     }
 
@@ -437,6 +438,7 @@ struct ShareView: View {
         pending.colorHex = item.colorHex
         pending.imageUrl = item.imageUrl
         pending.source = item.source
+        pending.placeId = item.placeId
         pending.status = item.status
         pending.allowDuplicate = saveAnyway ? true : nil
         pending.userId = userId.uuidString

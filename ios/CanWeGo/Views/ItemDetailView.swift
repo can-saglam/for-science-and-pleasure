@@ -28,6 +28,8 @@ struct ItemDetailView: View {
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
     @State private var paywall: PlusReason?
+    @State private var hours: OpeningHours?
+    @State private var hoursLoading = false
 
     private enum CalendarState {
         case idle, added, failed
@@ -255,6 +257,7 @@ struct ItemDetailView: View {
         copy.colorHex = item.colorHex
         copy.lat = item.lat
         copy.lng = item.lng
+        copy.placeId = item.placeId
         return copy
     }
 
@@ -262,6 +265,12 @@ struct ItemDetailView: View {
     /// once here instead of on every keystroke.
     private func applyEdits() {
         guard let scratch else { return }
+        // Moved somewhere else without a fresh lookup: the old place's hours
+        // aren't this one's. The server drops it on the same terms (0041).
+        let moved = scratch.venue != item.venue || scratch.address != item.address
+            || (scratch.isPlace && scratch.title != item.title)
+        if moved && scratch.placeId == item.placeId { scratch.placeId = nil }
+        item.placeId = scratch.placeId
         item.title = scratch.title
         item.kind = scratch.kind
         item.category = scratch.category
@@ -381,6 +390,7 @@ struct ItemDetailView: View {
         fill(\.source, card.source)
         fill(\.startsOn, card.starts_on)
         fill(\.endsOn, card.ends_on)
+        fill(\.placeId, card.place_id)
         scratch.reconcileReminder()
         if let lat = card.lat, let lng = card.lng {
             scratch.lat = lat
@@ -501,6 +511,7 @@ struct ItemDetailView: View {
 
         VStack(alignment: .leading, spacing: 10) {
             metaRow("calendar", dateLine)
+            HoursRow(hours: hours, loading: hoursLoading)
             metaRow("building.2", item.venue != item.title ? item.venue : nil)
             metaRow("map", areaLine)
             metaRow("sterlingsign.circle", item.price)
@@ -662,6 +673,25 @@ struct ItemDetailView: View {
         }
         .controlSize(.large)
         .padding(.top, 4)
+        .task(id: item.showsHours ? item.placeId : nil) { await loadHours() }
+    }
+
+    private func loadHours() async {
+        guard item.showsHours else {
+            hours = nil
+            return
+        }
+        if let known = HoursClient.cached(item) {
+            hours = known
+            return
+        }
+        hoursLoading = true
+        let loaded = await HoursClient.load(item)
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            hours = loaded
+            hoursLoading = false
+        }
     }
 
     @ViewBuilder

@@ -26,6 +26,7 @@ struct ItemSnapshot {
     var colorHex: String?
     var lat: Double?
     var lng: Double?
+    var placeId: String?
     var addedByEmail: String?
     var createdAt: Date
     var updatedAt: Date
@@ -40,7 +41,7 @@ extension Item {
             reminderOffsetDays: reminderOffsetDays, reminderAnchor: reminderAnchor,
             remindAt: remindAt, remindTime: remindTime, price: price,
             category: category, notes: notes, status: status,
-            colorHex: colorHex, lat: lat, lng: lng,
+            colorHex: colorHex, lat: lat, lng: lng, placeId: placeId,
             addedByEmail: addedByEmail, createdAt: createdAt, updatedAt: updatedAt
         )
     }
@@ -69,6 +70,7 @@ extension Item {
         colorHex = s.colorHex
         lat = s.lat
         lng = s.lng
+        placeId = s.placeId
         addedByEmail = s.addedByEmail
         createdAt = s.createdAt
         updatedAt = s.updatedAt

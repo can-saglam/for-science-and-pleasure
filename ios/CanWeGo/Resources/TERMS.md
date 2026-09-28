@@ -18,3 +18,7 @@ Purchases are also covered by Apple’s standard [Licensed Application End User 
 ## Your account
 
 Deleting your account is in Settings. What happens to a shared library is spelled out there before you confirm.
+
+## Credits
+
+Opening hours and some addresses and photos come from Google Maps. Map pins use data © OpenStreetMap contributors.

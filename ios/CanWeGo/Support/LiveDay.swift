@@ -6,6 +6,7 @@ import UIKit
 struct DayActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var label: String
+        var hours: String?
     }
 
     var itemID: String

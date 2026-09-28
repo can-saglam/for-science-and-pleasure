@@ -14,6 +14,9 @@ struct DayActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         /// "Last day", "Opens tomorrow", "Today".
         var label: String
+        /// The venue's hours today, when it has some: "Open until 18:00",
+        /// "Closed today". Absent from pushes before build 93.
+        var hours: String?
     }
 
     var itemID: String
@@ -83,6 +86,12 @@ struct DayActivityWidget: Widget {
                                 .foregroundStyle(.white.opacity(0.65))
                                 .lineLimit(1)
                         }
+                        if let hours = context.state.hours {
+                            Text(hours)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(DayLook.isClosedLine(hours) ? look.islandAccent : .white.opacity(0.65))
+                                .lineLimit(1)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
@@ -135,6 +144,11 @@ struct DayLook {
 
     var glyph: String { attributes.kind == "place" ? "mappin.and.ellipse" : "ticket.fill" }
 
+    /// "Closed today", "Temporarily closed": worth the eye before setting off.
+    static func isClosedLine(_ hours: String) -> Bool {
+        hours.hasPrefix("Closed") || hours == "Temporarily closed"
+    }
+
     var link: URL {
         URL(string: "canwego://item/\(attributes.itemID)") ?? URL(string: "canwego://")!
     }
@@ -166,8 +180,19 @@ struct DayActivityView: View {
                     .foregroundStyle(look.ink.opacity(0.65))
                     .lineLimit(1)
             }
-            label
-                .padding(.top, 2)
+            HStack(spacing: 8) {
+                label
+                if let hours = context.state.hours {
+                    Text(hours)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(DayLook.isClosedLine(hours)
+                            ? Color.red.mix(with: look.ink, by: 0.55)
+                            : look.ink.opacity(0.65))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .padding(.top, 2)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)

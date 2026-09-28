@@ -40,6 +40,16 @@ export async function consumeQuota(
   return !error;
 }
 
+/** Opening-hours lookups per person per day: each is a billed Google call,
+ * counted apart from the AI allowance. Far more than opening every save. */
+export const DAILY_HOURS = 200;
+
+export async function consumeHours(db: SupabaseClient, userId: string): Promise<boolean> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { data, error } = await db.rpc("bump_hours", { p_user_id: userId, p_day: day });
+  return !error && typeof data === "number" && data <= DAILY_HOURS;
+}
+
 export const quotaResponse = () =>
   new Response(JSON.stringify({ error: "daily limit reached" }), {
     status: 429,

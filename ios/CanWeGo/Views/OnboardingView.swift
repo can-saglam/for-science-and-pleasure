@@ -1976,6 +1976,7 @@ struct OnboardingView: View {
             item.colorHex = card.color
             item.imageUrl = card.image_url
             item.source = card.source
+            item.placeId = card.place_id
             parsed = item
             Haptics.success()
         } catch {

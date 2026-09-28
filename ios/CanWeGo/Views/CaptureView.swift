@@ -595,6 +595,7 @@ struct CaptureView: View {
             item.colorHex = card.color
             item.imageUrl = card.image_url
             item.source = card.source
+            item.placeId = card.place_id
             // A partner's save may have synced in while the parser worked.
             loadLibrary()
             withAnimation(.spring(duration: 0.4)) { draft = item }

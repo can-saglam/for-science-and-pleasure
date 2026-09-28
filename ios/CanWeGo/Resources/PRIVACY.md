@@ -29,7 +29,7 @@ A screenshot or link you share or paste is sent to our parse function so we can 
 
 - Supabase hosts the database and sign-in.
 - Anthropic’s Claude reads a shared screenshot or link to fill in the card. It is not used to train their models.
-- OpenStreetMap turns a venue’s address into a map pin, and Wikipedia can supply a photo when a page has none. Only the venue is looked up, never anything about you.
+- Google Maps finds a venue’s address and opening hours, and can supply a photo when nothing else has one. OpenStreetMap turns an address into a map pin, and Wikipedia can supply a photo too. Only the venue is looked up, never anything about you.
 - Apple handles sign-in, notifications and payments. We never see your card details.
 
 ## Deleting your account

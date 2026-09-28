@@ -9,6 +9,7 @@
 import { sendLiveActivity } from "./apns.ts";
 import type { admin } from "./groups.ts";
 import { groupHome, homeToday } from "./home.ts";
+import { hoursLine, hoursShown, placeHours } from "./hours.ts";
 import { customTimeDue } from "./reminders.ts";
 import { homeInstant, localClock } from "./schedule.ts";
 
@@ -36,6 +37,9 @@ export interface ActivityItem {
   reminder_offset_days: number | null;
   reminder_anchor: string | null;
   remind_time: string | null;
+  category?: string | null;
+  address?: string | null;
+  place_id?: string | null;
 }
 
 export type ActivityResult =
@@ -119,11 +123,27 @@ export function activityEnd(timeZone: string, today: string, at: Date): Date {
   return cap < midnight ? cap : midnight;
 }
 
+/** Today's hours line for a save whose venue has them, or null. One
+ * Google call per save, not per phone; a slow answer is left out. */
+export async function activityHours(item: ActivityItem, today: string, at: Date): Promise<string | null> {
+  if (!item.place_id || !hoursShown({ ...item, category: item.category ?? null }, today)) return null;
+  const hours = await placeHours(item.place_id, item, at, 4_000);
+  if (!hours) return null;
+  const local = new Date(at.getTime() + hours.offset * 60_000);
+  return hoursLine(hours, local.getUTCHours() * 60 + local.getUTCMinutes());
+}
+
 /** The start push. `attributes` and `content-state` mirror the app's
  * `DayActivityAttributes` field for field; the alert is required for a
  * push-to-start, and makes the reminder's sound since it replaces the
- * reminder push on that phone. */
-export function startAps(item: ActivityItem, today: string, endsAt: Date): Record<string, unknown> {
+ * reminder push on that phone. `hours` is new in build 93: older builds
+ * ignore the key. */
+export function startAps(
+  item: ActivityItem,
+  today: string,
+  endsAt: Date,
+  hours: string | null = null,
+): Record<string, unknown> {
   const label = activityLabel(item.kind, item.starts_on, item.ends_on, today);
   const place = activityPlace(item);
   const end = Math.floor(endsAt.getTime() / 1000);
@@ -139,7 +159,7 @@ export function startAps(item: ActivityItem, today: string, endsAt: Date): Recor
   if (item.image_url) attributes.imageURL = item.image_url;
   return {
     event: "start",
-    "content-state": { label },
+    "content-state": hours ? { label, hours } : { label },
     "attributes-type": "DayActivityAttributes",
     attributes,
     "stale-date": end,
@@ -229,7 +249,7 @@ export async function runActivities(
   // Start: each day-of reminder whose moment has come, once.
   const { data: dueRows, error } = await db
     .from("items")
-    .select("id, kind, title, venue, area, color, image_url, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_time")
+    .select("id, kind, title, venue, area, color, image_url, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_time, category, address, place_id")
     .eq("group_id", groupId)
     .eq("remind_at", today)
     .eq("status", "saved")
@@ -266,7 +286,7 @@ export async function runActivities(
     // A twin cron hit already claimed it.
     if (claim?.code === "23505") continue;
     if (claim) throw claim;
-    const aps = startAps(item, today, endsAt);
+    const aps = startAps(item, today, endsAt, await activityHours(item, today, at));
     let failed = 0;
     const reached = new Set<string>();
     for (const { token, user_id, device_id } of tokens) {

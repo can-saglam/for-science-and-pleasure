@@ -29,6 +29,8 @@ export interface PlaceMatch {
   photo: string | null;
   /** Who took that photo, as Google credits them. */
   credit: string | null;
+  /** Google's place types: "art_gallery", "cultural_center", "locality". */
+  types: string[];
 }
 
 interface SearchPlace {
@@ -37,6 +39,62 @@ interface SearchPlace {
   formattedAddress?: string;
   location?: { latitude?: number; longitude?: number };
   photos?: { name?: string; authorAttributions?: { displayName?: string }[] }[];
+  types?: string[];
+}
+
+/** One Text Search round. Pro fields only: adding an Enterprise one
+ * (opening hours, rating) would bill every save at the higher rate. */
+async function searchText(
+  key: string,
+  textQuery: string,
+  bias: { center: { lat: number; lng: number }; radius: number } | null,
+  pageSize: number,
+): Promise<SearchPlace[] | null> {
+  const res = await fetch(`${API}/places:searchText`, {
+    method: "POST",
+    signal: AbortSignal.timeout(8_000),
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress,places.location,places.photos,places.types",
+    },
+    body: JSON.stringify({
+      textQuery,
+      pageSize,
+      languageCode: "en",
+      ...(bias
+        ? {
+          locationBias: {
+            circle: {
+              center: { latitude: bias.center.lat, longitude: bias.center.lng },
+              radius: bias.radius,
+            },
+          },
+        }
+        : {}),
+    }),
+  });
+  if (!res.ok) {
+    console.warn("places search", res.status, (await res.text()).slice(0, 200));
+    return null;
+  }
+  const { places = [] } = await res.json() as { places?: SearchPlace[] };
+  return places;
+}
+
+function toMatch(p: SearchPlace & { id: string }): PlaceMatch {
+  const photo = p.photos?.find((ph) => ph.name) ?? null;
+  return {
+    id: p.id,
+    name: p.displayName?.text ?? "",
+    address: p.formattedAddress ?? null,
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
+    photo: photo?.name ?? null,
+    credit: photo?.authorAttributions?.[0]?.displayName ?? null,
+    types: p.types ?? [],
+  };
 }
 
 // Words that say what kind of place it is rather than which one: "The
@@ -129,36 +187,13 @@ export async function findPlace(
     : null);
 
   try {
-    const res = await fetch(`${API}/places:searchText`, {
-      method: "POST",
-      signal: AbortSignal.timeout(8_000),
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": key,
-        "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.photos",
-      },
-      body: JSON.stringify({
-        textQuery: placeQuery(name, hint, home),
-        pageSize: 3,
-        languageCode: "en",
-        ...(centre
-          ? {
-            locationBias: {
-              circle: {
-                center: { latitude: centre.lat, longitude: centre.lng },
-                radius: pin ? 500 : 50_000,
-              },
-            },
-          }
-          : {}),
-      }),
-    });
-    if (!res.ok) {
-      console.warn("places search", res.status, (await res.text()).slice(0, 200));
-      return null;
-    }
-    const { places = [] } = await res.json() as { places?: SearchPlace[] };
+    const places = await searchText(
+      key,
+      placeQuery(name, hint, home),
+      centre ? { center: centre, radius: pin ? 500 : 50_000 } : null,
+      3,
+    );
+    if (!places) return null;
     const postcode = samePostcode && hint.address ? ukPostcode(hint.address) : null;
     for (const p of places) {
       const found = p.displayName?.text ?? "";
@@ -170,22 +205,79 @@ export async function findPlace(
       const lat = p.location?.latitude ?? null;
       const lng = p.location?.longitude ?? null;
       if (pin && (lat == null || lng == null || metresBetween(pin, { lat, lng }) > 400)) continue;
-      const photo = p.photos?.find((ph) => ph.name) ?? null;
-      return {
-        id: p.id,
-        name: found,
-        address: p.formattedAddress ?? null,
-        lat,
-        lng,
-        photo: photo?.name ?? null,
-        credit: photo?.authorAttributions?.[0]?.displayName ?? null,
-      };
+      return toMatch({ ...p, id: p.id });
     }
     return null;
   } catch (e) {
     console.warn("places search failed", String(e));
     return null;
   }
+}
+
+// What Google calls a city, a street or a postcode: never a venue with
+// hours of its own ("London" for a citywide festival).
+const NOT_A_VENUE = new Set([
+  "political", "locality", "country", "postal_code", "route", "street_address",
+  "intersection", "colloquial_area", "neighborhood", "sublocality",
+]);
+
+export function isVenue(match: Pick<PlaceMatch, "types">): boolean {
+  return !match.types.some((t) => NOT_A_VENUE.has(t));
+}
+
+// Centres with several spaces under one roof, whose building hours aren't
+// their galleries' (the Barbican: 8:00–23:00, its gallery 10:00–18:00).
+const ARTS_CENTRE = new Set([
+  "cultural_center", "performing_arts_theater", "concert_hall", "event_venue",
+  "community_center", "auditorium", "amphitheatre",
+]);
+const GALLERY = new Set(["art_gallery", "museum"]);
+
+/** The gallery inside an arts centre, when Google lists it: within a few
+ * hundred metres, and named for the centre ("Barbican Art Gallery"). */
+export async function galleryInside(centre: PlaceMatch): Promise<PlaceMatch | null> {
+  const key = apiKey();
+  // Google often tags the centre itself a gallery too (the Barbican is a
+  // theatre and an art gallery), so that alone doesn't settle it.
+  if (!key || centre.lat == null || centre.lng == null) return null;
+  if (!centre.types.some((t) => ARTS_CENTRE.has(t))) return null;
+  const at = { lat: centre.lat, lng: centre.lng };
+  const words = new Set(tokens(centre.name));
+  try {
+    const places = await searchText(key, `${centre.name} art gallery`, { center: at, radius: 300 }, 5);
+    for (const p of places ?? []) {
+      const lat = p.location?.latitude;
+      const lng = p.location?.longitude;
+      if (!p.id || p.id === centre.id || lat == null || lng == null) continue;
+      if (!p.types?.some((t) => GALLERY.has(t))) continue;
+      if (metresBetween(at, { lat, lng }) > 300) continue;
+      if (!tokens(p.displayName?.text ?? "").some((t) => words.has(t))) continue;
+      return toMatch({ ...p, id: p.id });
+    }
+    return null;
+  } catch (e) {
+    console.warn("gallery search failed", String(e));
+    return null;
+  }
+}
+
+/** The place an event's hours come from: its venue, found near the save's
+ * pin, else anywhere near home (a postcode pin can sit far from a venue on
+ * a big estate), and for an exhibition, the gallery inside an arts centre. */
+export async function eventVenue(
+  card: { venue: string | null; address?: string | null; area?: string | null; category: string | null },
+  home: Home,
+  coords: { lat: number; lng: number } | null,
+  known: PlaceMatch | null = null,
+): Promise<PlaceMatch | null> {
+  const venue = card.venue?.trim();
+  if (!venue || /^https?:\/\//.test(venue)) return null;
+  let match = known;
+  if (!match && coords) match = await findPlace(venue, card, home, coords, { samePostcode: true });
+  match ??= await findPlace(venue, card, home, null, { samePostcode: true });
+  if (!match || !isVenue(match)) return null;
+  if (card.category === "exhibition") match = (await galleryInside(match)) ?? match;
+  return match;
 }
 
 /** A short-lived direct link to a photo, for reading its colour. */

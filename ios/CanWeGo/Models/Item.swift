@@ -35,6 +35,9 @@ final class Item {
     var source: String?
     var lat: Double?
     var lng: Double?
+    /// The Google place its opening hours come from, found by the parser.
+    /// Only the ID is kept; the hours are fetched when shown (`HoursClient`).
+    var placeId: String?
     var addedByEmail: String?
     /// Which shared library this belongs to (launch plan, Phase 1a). Set by
     /// the server on first insert; the client only carries it back.

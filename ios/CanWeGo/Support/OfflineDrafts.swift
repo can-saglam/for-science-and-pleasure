@@ -171,6 +171,7 @@ enum OfflineDrafts {
         if untouched {
             item.kind = card.kind
             item.title = card.title
+            item.placeId = card.place_id
         }
         put(\.summary, card.summary)
         put(\.venue, card.venue)

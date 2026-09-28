@@ -370,6 +370,7 @@ enum SupabaseSync {
         var source: String?
         var lat: Double?
         var lng: Double?
+        var place_id: String?
         var added_by_email: String?
         var group_id: UUID?
         var updated_by: UUID?
@@ -411,6 +412,8 @@ enum SupabaseSync {
             try c.encode(source ?? "manual", forKey: .source)
             try c.encode(lat, forKey: .lat)
             try c.encode(lng, forKey: .lng)
+            // Null never clears the server's (0041): only moving the save does.
+            try c.encode(place_id, forKey: .place_id)
             try c.encode(added_by_email, forKey: .added_by_email)
             try c.encode(group_id, forKey: .group_id)
             try c.encode(updated_by, forKey: .updated_by)
@@ -599,6 +602,7 @@ enum SupabaseSync {
             source: item.source,
             lat: item.lat,
             lng: item.lng,
+            place_id: item.placeId,
             added_by_email: item.addedByEmail ?? SupabaseAuth.shared.email,
             group_id: item.groupId,
             updated_by: item.updatedBy,
@@ -687,6 +691,7 @@ enum SupabaseSync {
                     // carry a new picture.
                     if local.imageUrl != row.image_url { local.imageUrl = row.image_url }
                     if local.colorHex != row.color { local.colorHex = row.color }
+                    if local.placeId != row.place_id { local.placeId = row.place_id }
                 }
             } else {
                 let item = Item()
@@ -739,6 +744,7 @@ enum SupabaseSync {
         item.source = row.source
         item.lat = row.lat
         item.lng = row.lng
+        item.placeId = row.place_id
         item.addedByEmail = row.added_by_email
         item.groupId = row.group_id
         item.updatedBy = row.updated_by

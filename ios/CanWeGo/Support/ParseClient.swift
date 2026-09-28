@@ -22,6 +22,7 @@ enum ParseClient {
         let color: String?
         let image_url: String?
         let source: String?
+        let place_id: String?
     }
 
     enum ParseError: LocalizedError {

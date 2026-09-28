@@ -9,7 +9,8 @@ import {
   wikipediaQueries,
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
-import { findPlace, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
+import { hoursApply } from "./hours.ts";
+import { eventVenue, findPlace, isVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
 import {
   geocodeNearHome,
   type Home,
@@ -452,6 +453,8 @@ export async function extractCard(
     lng: number | null;
     color: string | null;
     image_url: string | null;
+    /** The Google place its opening hours come from. */
+    place_id: string | null;
   }
 > {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
@@ -668,6 +671,13 @@ export async function extractCard(
     throw new VagueInputError();
   }
 
+  // Where its opening hours come from, looked up while the photo is.
+  const placeFound: Promise<PlaceMatch | null> = !hoursApply(card)
+    ? Promise.resolve(null)
+    : card.kind === "place"
+    ? Promise.resolve(google && isVenue(google) ? google : null)
+    : eventVenue(card, home, coords, google).catch(() => null);
+
   // Thumbnail: whatever the saved page offered (og:image, JSON-LD, or
   // its largest content picture). If that's still empty, try the official
   // website the model named — Reddit tips, blocked ticketing pages, maps
@@ -729,5 +739,6 @@ export async function extractCard(
     lng: coords?.lng ?? null,
     color,
     image_url: imageUrl,
+    place_id: (await placeFound)?.id ?? null,
   };
 }
