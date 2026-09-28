@@ -31,7 +31,7 @@ struct SettingsView: View {
         if pending > 0 {
             parts.append("\(pending) waiting to send")
         } else if syncStatus.lastSyncedAt != nil {
-            parts.append("Everything's up")
+            parts.append("Up to date")
         }
         return parts.joined(separator: " · ")
     }
@@ -76,7 +76,7 @@ struct SettingsView: View {
                 Section {
                     VStack(spacing: 10) {
                         LogoTitle(height: 44)
-                        Text("Your city, planned by you or together. The exhibitions, gigs and good food you keep meaning to get to, saved before the moment passes.")
+                        Text("The shows, gigs and places you keep meaning to go to, in one list you share.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -120,15 +120,6 @@ struct SettingsView: View {
                     .sensoryFeedback(.selection, trigger: transportApp)
                 } header: {
                     Text("Directions")
-                } footer: {
-                    // Footers here (and in GroupSection) spell out `.footnote`:
-                    // when a menu picker opens or closes, the List re-measures
-                    // the visible footers without its own footer styling —
-                    // body-sized text, an extra line, and everything below
-                    // jumps ~33pt for one frame. With the font explicit both
-                    // passes agree and nothing moves.
-                    Text("Opens when you tap a place or ask the way.")
-                        .font(.footnote)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -147,8 +138,15 @@ struct SettingsView: View {
                 } header: {
                     Text("Reminders").id("reminders")
                 } footer: {
-                    Text("When a reminder goes off on the day itself, the save stays on your Lock Screen and in the Dynamic Island for the rest of the day, instead of a notification. Just for this iPhone.")
+                    // Footers here (and in GroupSection) spell out `.footnote`:
+                    // when a menu picker opens or closes, the List re-measures
+                    // the visible footers without its own footer styling —
+                    // body-sized text, an extra line, and everything below
+                    // jumps ~33pt for one frame. With the font explicit both
+                    // passes agree and nothing moves.
+                    Text("On the day of a reminder, the save stays on your Lock Screen instead of sending a notification.")
                         .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 .listRowBackground(Self.rowBackground)
                 #endif
@@ -163,8 +161,9 @@ struct SettingsView: View {
                 } header: {
                     Text("Your library")
                 } footer: {
-                    Text("A spreadsheet of everything, your events for any calendar, and a list to read. Yours to keep, wherever you go next.")
+                    Text("Download your saves as a spreadsheet, a calendar file and a readable list.")
                         .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -286,7 +285,7 @@ struct SettingsView: View {
                             }
                             Button("Cancel", role: .cancel) {}
                         } message: {
-                            Text("You can sign back in from this screen. Nothing saved on this phone is deleted.")
+                            Text("Your saves stay on this phone. You can sign back in any time.")
                         }
 
                         #if !APP_EXTENSION
@@ -309,10 +308,11 @@ struct SettingsView: View {
                 } header: {
                     Text("Account").id("account")
                 } footer: {
-                    Text(auth.signedIn
-                        ? "Your shared library syncs with the web app and each other\u{2019}s phones whenever the app is open. Preview first-run walks the new-account screens without saving."
-                        : "Sign in to sync your shared library across phones.")
-                        .font(.footnote)
+                    if !auth.signedIn {
+                        Text("Sign in to sync your shared library across phones.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .listRowBackground(Self.rowBackground)
             }
@@ -360,7 +360,7 @@ struct SettingsView: View {
                 Button("Not now", role: .cancel) {}
             } message: {
                 Text(calendarAccess == .writeOnly
-                    ? "To list your calendars, Can We Go needs Full Access under Calendars. Until then, events go to your iPhone's default calendar."
+                    ? "Allow Full Access to Calendars to choose one. Until then, events go to your default calendar."
                     : "Turn on Calendars for Can We Go and choose Full Access to pick where your events go.")
             }
             #endif
@@ -501,11 +501,6 @@ struct SettingsView: View {
             }
         } header: {
             Text("Calendar").id("calendar")
-        } footer: {
-            Text(calendarAccess == .fullAccess
-                ? "Where Add to calendar puts your events. Can We Go only lists your calendars here; it never reads what's in them."
-                : "Add to calendar uses your iPhone's default calendar. To pick another, tap above and let iOS show Can We Go your calendars.")
-                .font(.footnote)
         }
         .listRowBackground(Self.rowBackground)
     }
@@ -546,9 +541,9 @@ struct SettingsView: View {
     private var deleteAccountCopy: String {
         let shared = (GroupStore.shared.card?.members.count ?? 0) > 1
         if shared {
-            return "You share this library. Deleting your account leaves their saves where they are. Export first to keep your own copy: a spreadsheet, a calendar and a readable list."
+            return "Your group keeps the library. Export first if you want your own copy."
         }
-        return "You're the only member. Deleting your account removes this library. Export first to keep a copy: a spreadsheet, a calendar and a readable list."
+        return "This deletes your library too. Export first if you want a copy."
     }
 
     private func deleteAccount() async {

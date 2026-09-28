@@ -273,7 +273,7 @@ struct GroupSection: View {
     }
 
     private func leaveMessage(for card: GroupCard) -> String {
-        var lines = ["You\u{2019}ll leave \(card.name) and get a library of your own. The group keeps everything either way."]
+        var lines = ["You\u{2019}ll get your own library. \(card.name) keeps everything either way."]
         if let mine = card.member(me), mine.isPlus,
            !card.members.contains(where: { $0.isPlus && $0.userId != me }) {
             lines.append("You\u{2019}re the only one with Plus. The group loses it when you go.")
@@ -352,14 +352,15 @@ struct GroupSection: View {
             if let note = ui.note {
                 Text(note).foregroundStyle(AppBackground.warning)
             } else if let card = group.card, card.members.count == 1 {
-                Text("Invite someone and you\u{2019}ll share one library. Everyone sees and edits everything.")
+                Text("Invite someone to share your library. You can both see and edit everything.")
             } else if let card = group.card, card.isFull, !card.needsPlusToGrow {
-                Text("Everyone here sees and edits the same library. Four is the most a group can hold.")
+                Text("Everyone here shares one library. A group holds up to four people.")
             } else {
-                Text("Everyone here sees and edits the same library. Anyone can invite; nobody can remove anyone but themselves.")
+                Text("Everyone here shares one library. Anyone can invite. You can leave, but you can\u{2019}t remove anyone.")
             }
         }
         .font(.footnote)
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -386,7 +387,7 @@ struct GroupPresentations: ViewModifier {
                     .disabled(ui.draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("It\u{2019}s how you appear to your group, on the cards you add and in the group\u{2019}s name.")
+                Text("Your group sees this on the saves you add.")
             }
             // CWG_SETTINGS=city is only set by automated test runs.
             .task {
@@ -408,11 +409,11 @@ struct GroupPresentations: ViewModifier {
     private var leftMessage: String {
         guard let left = ui.left else { return "" }
         if !left.landed {
-            return "You\u{2019}ve got a library of your own now; it\u{2019}ll fill in as soon as the app can reach the server."
+            return "Your new library will fill in once you\u{2019}re back online."
         }
         return left.result.copied > 0
-            ? "You\u{2019}ve got a library of your own now, with a copy of everything the group had."
-            : "You\u{2019}ve got a library of your own now, starting empty."
+            ? "Your new library has a copy of everything from the group."
+            : "Your new library starts empty."
     }
 }
 
@@ -461,7 +462,7 @@ struct InviteSheet: View {
                     .buttonStyle(.glass)
                     .controlSize(.large)
                 }
-                Text("Anyone with this code can join until it expires, or until you cancel it in Settings. They\u{2019}ll bring their own saves with them and see everything in \(groupName).")
+                Text("Anyone with this code can join until it expires or you cancel it. Their saves come with them.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
