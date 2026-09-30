@@ -90,4 +90,6 @@ Deno.test("homeInstant: 18:00 on the home clock, either side of the clocks chang
   assert(tokyo.toISOString() === "2026-09-24T00:00:00.000Z", tokyo.toISOString());
   const ny = homeInstant("America/New_York", "2026-03-08", 18);
   assert(ny.toISOString() === "2026-03-08T22:00:00.000Z", ny.toISOString());
+  const minutes = homeInstant("Europe/London", "2026-09-24", 0, 21 * 60 + 30);
+  assert(minutes.toISOString() === "2026-09-24T20:30:00.000Z", `minutes roll into hours: ${minutes.toISOString()}`);
 });

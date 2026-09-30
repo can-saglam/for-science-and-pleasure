@@ -2,6 +2,7 @@ import {
   type Hours,
   hoursApply,
   hoursLine,
+  hoursForPlanning,
   hoursShown,
   type Period,
   samePlace,
@@ -40,6 +41,15 @@ Deno.test("hoursShown: an event's only while it's on", () => {
   assert(!hoursShown(show, "2027-01-11"), "closed");
   assert(hoursShown(event("exhibition", null, null), "2026-09-28"), "undated");
   assert(hoursShown({ kind: "place", category: "cafe", starts_on: null, ends_on: null }, "2026-09-28"), "place");
+});
+
+Deno.test("hoursForPlanning: before an event opens too, never once it's over", () => {
+  const show = event("exhibition", "2026-10-02", "2027-01-10");
+  assert(hoursForPlanning(show, "2026-09-28"), "not open yet");
+  assert(hoursForPlanning(show, "2027-01-10"), "last day");
+  assert(!hoursForPlanning(show, "2027-01-11"), "over");
+  assert(!hoursForPlanning(event("gig", "2026-10-02", "2026-10-02"), "2026-09-28"), "a night out has no hours");
+  assert(hoursForPlanning({ kind: "place", category: "cafe", starts_on: null, ends_on: null }, "2026-09-28"), "place");
 });
 
 // Hayward's regular week: closed Monday, 10–18, Saturday until 20.

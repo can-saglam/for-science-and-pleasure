@@ -279,6 +279,10 @@ struct ItemDetailView: View {
         item.price = scratch.price
         item.startsOn = scratch.startsOn
         item.endsOn = scratch.endsOn
+        if scratch.hasReminder, scratch.reminderOffsetDays != item.reminderOffsetDays
+            || scratch.reminderAnchor != item.reminderAnchor {
+            item.clearPlan()
+        }
         item.reminderOffsetDays = scratch.reminderOffsetDays
         item.reminderAnchor = scratch.reminderAnchor
         item.remindAt = scratch.remindAt
@@ -292,6 +296,7 @@ struct ItemDetailView: View {
         item.lat = scratch.lat
         item.lng = scratch.lng
         item.reconcileReminder()
+        item.reconcilePlan()
         item.updatedAt = .now
         item.stampAuthor()
         try? context.save()
@@ -520,7 +525,7 @@ struct ItemDetailView: View {
             metaRow("camera", photoCredit)
         }
 
-        RemindRow(item: item, persist: true)
+        PlanOrRemind(item: item)
 
         if let lat = item.lat, let lng = item.lng {
             let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
@@ -610,7 +615,7 @@ struct ItemDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .destructiveGlass()
-                } else if !item.isDone || done {
+                } else if (!item.isDone && item.canMarkDone) || done {
                     Button(action: confirmWent) {
                         // For something that's already over, the plain label
                         // reads odd — soften it to an after-the-fact note.
@@ -628,7 +633,7 @@ struct ItemDetailView: View {
                 }
             }
 
-            if item.startsOn != nil && (!item.isDone || done) {
+            if (item.startsOn != nil || item.upcomingPlan != nil) && (!item.isDone || done) {
                 Button {
                     Haptics.tap()
                     Task {

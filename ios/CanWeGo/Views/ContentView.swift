@@ -114,6 +114,8 @@ struct ContentView: View {
     @State private var goneItem = false
     /// An invite code that arrived by link; presents the Join sheet.
     @State private var joinCode: String?
+    /// Plans whose day has gone by: "Did you make it?"
+    @State private var followUp: PlanFollowUp?
     /// The Events tab wears today's date; refreshed when the app comes
     /// forward so an overnight leave doesn't leave yesterday on the bar.
     @State private var dayOfMonth = Calendar.current.component(.day, from: Date())
@@ -225,6 +227,7 @@ struct ContentView: View {
         // The library is about to be replaced — close anything showing an item.
         .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
             deepLinked = nil
+            followUp = nil
         }
         // A last-chance notification tapped while the app is alive.
         .onReceive(NotificationCenter.default.publisher(for: .cwgOpenItem)) { note in
@@ -350,6 +353,26 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
             SupabaseSync.schedule(context: context)
         }
+        .sheet(item: $followUp) { PlanFollowUpSheet(items: $0.items) }
+    }
+
+    /// The morning after a plan, once the pull has brought everyone's
+    /// answers in: only onto the plain list, never over another sheet or a
+    /// save that was opened from outside.
+    private func offerFollowUp() {
+        #if !APP_EXTENSION
+        guard followUp == nil, deepLinked == nil, !captureOpen, joinCode == nil, inboxPaywall == nil,
+              syncStatus.hasSyncedOnce, !syncStatus.updateRequired, !group.libraryIsForeign,
+              scenePhase == .active
+        else { return }
+        let presenting = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController?.presentedViewController }
+            .first
+        guard presenting == nil else { return }
+        let over = items.filter(\.planIsOver).sorted { ($0.planOn ?? "") < ($1.planOn ?? "") }
+        guard !over.isEmpty else { return }
+        followUp = PlanFollowUp(items: over)
+        #endif
     }
 
     @ViewBuilder
@@ -413,6 +436,7 @@ struct ContentView: View {
         let listed = items.filter { !$0.isDeleted }
         #if !APP_EXTENSION
         Task { await LiveDay.refresh(items: listed) }
+        Task { await WidgetTip.refresh(items: listed) }
         #endif
         SavedURLIndex.rebuild(from: listed, extraURLs: claimedURLs)
         SpotlightIndex.sync(items: listed)
@@ -433,6 +457,7 @@ struct ContentView: View {
             // rotates through the freshest library.
             WidgetStore.sync(items: items.filter { !$0.isDeleted })
             CategoryCap.publish(items)
+            offerFollowUp()
             await LocationBackfill.run(context: context)
         }
         Task { await MembersStore.shared.refresh() }

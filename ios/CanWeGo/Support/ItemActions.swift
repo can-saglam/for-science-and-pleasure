@@ -31,9 +31,11 @@ extension Item {
         try? modelContext?.save()
     }
 
-    /// Back from We Did Go to the active library.
+    /// Back from We Did Go to the active library. A plan it went with is
+    /// history now, not a question for tomorrow morning.
     func putBack() {
         status = Item.Status.saved
+        if let planOn, planOn < DayString.today() { clearPlan() }
         updatedAt = .now
         stampAuthor()
         try? modelContext?.save()
@@ -75,9 +77,11 @@ extension Item {
         return components.url
     }
 
-    /// All-day calendar event spanning the item's window.
+    /// The plan, when there is one: its time for a couple of hours, or its
+    /// day. Otherwise an all-day event spanning the item's window.
     func addToCalendar() async throws {
-        guard let start = startsOn.flatMap(DayString.date) else { return }
+        let plan = upcomingPlan
+        guard let start = (plan ?? startsOn).flatMap(DayString.date) else { return }
         let store = EKEventStore()
         guard try await store.requestWriteOnlyAccessToEvents() else {
             throw NSError(
@@ -87,9 +91,15 @@ extension Item {
         }
         let event = EKEvent(eventStore: store)
         event.title = title
-        event.isAllDay = true
-        event.startDate = start
-        event.endDate = endsOn.flatMap(DayString.date) ?? start
+        if plan != nil, let at = planInstant {
+            event.timeZone = DayString.timeZone
+            event.startDate = at
+            event.endDate = at.addingTimeInterval(Item.planCalendarHours * 3600)
+        } else {
+            event.isAllDay = true
+            event.startDate = start
+            event.endDate = plan == nil ? endsOn.flatMap(DayString.date) ?? start : start
+        }
         event.location = [venue, area].compactMap(\.self).joined(separator: ", ")
         event.notes = [summary, url].compactMap(\.self).joined(separator: "\n\n")
         event.calendar = CalendarChoice.calendar(in: store) ?? store.defaultCalendarForNewEvents

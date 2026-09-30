@@ -144,7 +144,7 @@ struct SettingsView: View {
                     // body-sized text, an extra line, and everything below
                     // jumps ~33pt for one frame. With the font explicit both
                     // passes agree and nothing moves.
-                    Text("On the day of a reminder, the save stays on your Lock Screen instead of sending a notification.")
+                    Text("On the day of a reminder, or of a plan, the save stays on your Lock Screen instead of sending a notification.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

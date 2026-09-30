@@ -59,13 +59,14 @@ export function isDue(sched: Pick<Schedule, "day_of_week" | "hour" | "minute">, 
 }
 
 /**
- * The instant `hour`:00 falls on `date` (YYYY-MM-DD) in `timeZone`, e.g.
- * 18:00 in London on a BST day is 17:00 UTC. Two passes so a day when the
- * clocks change still lands on the hour.
+ * The instant `hour`:`minute` falls on `date` (YYYY-MM-DD) in `timeZone`,
+ * e.g. 18:00 in London on a BST day is 17:00 UTC. Minutes past 59 roll
+ * into the hours. Two passes so a day when the clocks change still lands
+ * on the hour.
  */
-export function homeInstant(timeZone: string, date: string, hour: number): Date {
+export function homeInstant(timeZone: string, date: string, hour: number, minute = 0): Date {
   const [y, m, d] = date.split("-").map(Number);
-  const wall = Date.UTC(y, m - 1, d, hour);
+  const wall = Date.UTC(y, m - 1, d, hour, minute);
   let guess = wall;
   for (let i = 0; i < 2; i++) {
     const c = localClock(timeZone, new Date(guess));

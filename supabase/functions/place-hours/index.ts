@@ -1,12 +1,13 @@
 // place-hours: a save's opening hours, fresh from Google each time (its
 // terms let us keep the place ID, not the hours). Takes {item_id}; the
 // save has to be in the caller's library (RLS), and have a place whose
-// hours are its own and worth showing today (see hoursShown). Returns
-// {hours} or {hours: null}.
+// hours are its own and worth showing today (see hoursShown), or, with
+// {planning: true}, worth having for picking a day (hoursForPlanning).
+// Returns {hours} or {hours: null}.
 import { corsHeaders } from "../_shared/geo.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { groupHome, homeToday } from "../_shared/home.ts";
-import { hoursShown, placeHours } from "../_shared/hours.ts";
+import { hoursForPlanning, hoursShown, placeHours } from "../_shared/hours.ts";
 import { consumeHours } from "../_shared/quota.ts";
 
 const json = (body: unknown, status = 200) =>
@@ -28,7 +29,7 @@ Deno.serve(async (req) => {
     const caller = await resolveCaller(req);
     if (!caller) return json({ error: "not in a group" }, 403);
 
-    const { item_id } = await req.json().catch(() => ({})) as { item_id?: string };
+    const { item_id, planning } = await req.json().catch(() => ({})) as { item_id?: string; planning?: boolean };
     if (!item_id || !UUID.test(item_id)) return json({ error: "item_id required" }, 400);
 
     const { data: item } = await caller.client
@@ -38,7 +39,9 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!item?.place_id) return json({ hours: null });
     const today = homeToday(await groupHome(caller.client, caller.groupId), new Date());
-    if (!hoursShown(item, today)) return json({ hours: null });
+    if (!(planning === true ? hoursForPlanning(item, today) : hoursShown(item, today))) {
+      return json({ hours: null });
+    }
 
     if (!await consumeHours(admin(), caller.userId)) return json({ error: "daily limit reached" }, 429);
     return json({ hours: await placeHours(item.place_id, item) });

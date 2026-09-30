@@ -3,11 +3,17 @@ import {
   activityLabel,
   activityPlace,
   alertTokens,
+  closingTime,
   deviceKey,
   isDayOf,
+  planAlertBody,
+  planDue,
+  planEnd,
+  planLabel,
   startAps,
   startDue,
 } from "./live_activity.ts";
+import type { Hours } from "./hours.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -131,4 +137,84 @@ Deno.test("startAps carries today's hours only when there are some", () => {
   );
   const without = startAps(item, today, endsAt, null);
   assert(!("hours" in (without["content-state"] as Record<string, unknown>)), "no key without hours");
+});
+
+const at = (hour: string, minute = "00") => ({ hour, minute });
+
+Deno.test("a plan goes up an hour before its time, or at 10:00 without one", () => {
+  const timed = { plan_on: today, plan_time: "17:00:00" };
+  const day = { plan_on: today, plan_time: null };
+  assert(!planDue(timed, today, at("15", "45")) && planDue(timed, today, at("16")), "an hour before");
+  assert(planDue(timed, today, at("23", "30")), "a late plan still goes up");
+  assert(!planDue({ plan_on: "2026-09-25", plan_time: "17:00" }, today, at("16")), "another day");
+  assert(!planDue(day, today, at("09", "45")) && planDue(day, today, at("10")), "10:00 without a time");
+  assert(!planDue(day, today, at("23", "05")), "nothing starts after 23:00 without a time");
+  assert(planDue({ plan_on: today, plan_time: "00:30:00" }, today, at("00", "00")), "just after midnight");
+});
+
+const hayward: Hours = {
+  status: "open",
+  days: [{ date: today, ranges: [{ open: "10:00", close: "18:00" }] }],
+  offset: 60,
+};
+
+Deno.test("closingTime: the opening the plan falls in, while it's still ahead", () => {
+  const now = new Date("2026-09-24T12:00:00Z"); // 13:00 BST
+  assert(closingTime(hayward, "15:00", now)?.toISOString() === "2026-09-24T17:00:00.000Z", "18:00 BST");
+  assert(closingTime(hayward, "19:00", now) === null, "a time after closing isn't cut short");
+  assert(closingTime(hayward, null, now)?.toISOString() === "2026-09-24T17:00:00.000Z", "no time: the day's close");
+  assert(closingTime(hayward, null, new Date("2026-09-24T17:30:00Z")) === null, "already closed");
+  const split: Hours = {
+    ...hayward,
+    days: [{ date: today, ranges: [{ open: "12:00", close: "15:00" }, { open: "18:00", close: "23:00" }] }],
+  };
+  assert(closingTime(split, "19:30", now)?.toISOString() === "2026-09-24T22:00:00.000Z", "the evening sitting");
+  const late: Hours = { ...hayward, days: [{ date: today, ranges: [{ open: "18:00", close: "02:00" }] }] };
+  assert(closingTime(late, "20:00", now) === null, "past midnight is the midnight cap's");
+  assert(closingTime({ ...hayward, days: [{ date: today, ranges: [] }] }, "15:00", now) === null, "closed today");
+  assert(closingTime(null, "15:00", now) === null, "no hours");
+});
+
+Deno.test("planEnd: closing, four hours after, midnight, or eight hours — the earliest", () => {
+  const tz = "Europe/London";
+  const four = new Date("2026-09-24T15:00:00Z"); // 16:00 BST, an hour before 17:00
+  assert(planEnd(tz, today, four, "17:00", null).toISOString() === "2026-09-24T20:00:00.000Z", "21:00: four hours after");
+  const closes = new Date("2026-09-24T17:00:00Z");
+  assert(planEnd(tz, today, four, "17:00", closes).toISOString() === closes.toISOString(), "closing first");
+  const late = new Date("2026-09-24T20:00:00Z"); // 21:00 BST
+  assert(planEnd(tz, today, late, "22:00", null).toISOString() === "2026-09-24T23:00:00.000Z", "midnight caps");
+  const morning = new Date("2026-09-24T09:00:00Z"); // 10:00 BST
+  assert(planEnd(tz, today, morning, null, null).toISOString() === "2026-09-24T17:00:00.000Z", "no time: eight hours");
+});
+
+Deno.test("a plan's label and alert say when", () => {
+  const item = { kind: "event", starts_on: "2026-09-01", ends_on: today, venue: "Hayward Gallery", area: "South Bank" };
+  assert(planLabel({ ...item, plan_time: "17:00:00" }, today) === "Going 17:00", "timed label");
+  assert(planLabel({ ...item, plan_time: null }, today) === "Last day", "untimed keeps the usual line");
+  assert(planAlertBody({ ...item, plan_time: "17:00:00" }) === "Going at 17:00 · Hayward Gallery · South Bank", "timed alert");
+  assert(planAlertBody({ venue: null, area: null, plan_time: null }) === "Going today", "untimed alert");
+});
+
+Deno.test("startAps for a plan carries its label and alert", () => {
+  const aps = startAps({
+    id: "3f1c0a52-0000-4000-8000-000000000003",
+    kind: "event",
+    title: "Anish Kapoor",
+    venue: "Hayward Gallery",
+    area: null,
+    color: null,
+    image_url: null,
+    starts_on: "2026-09-01",
+    ends_on: "2026-10-30",
+    reminder_offset_days: null,
+    reminder_anchor: null,
+    remind_time: null,
+    plan_on: today,
+    plan_time: "17:00:00",
+  }, today, new Date("2026-09-24T17:00:00Z"), "Open until 18:00", true);
+  assert(
+    JSON.stringify(aps["content-state"]) === JSON.stringify({ label: "Going 17:00", hours: "Open until 18:00" }),
+    JSON.stringify(aps["content-state"]),
+  );
+  assert((aps.alert as Record<string, unknown>).body === "Going at 17:00 · Hayward Gallery", "alert");
 });

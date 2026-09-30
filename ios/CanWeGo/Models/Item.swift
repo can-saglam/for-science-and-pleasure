@@ -61,6 +61,13 @@ final class Item {
     /// Hand-picked fire time (`HH:mm`, home clock). Only with the `custom`
     /// anchor; nil for the presets, which always go out at 10:00.
     var remindTime: String?
+    /// The day the group means to go (`yyyy-MM-dd`, home calendar). On the
+    /// day the save goes on everyone's Lock Screen.
+    var planOn: String?
+    /// `HH:mm` on the home clock, or nil for "some time that day".
+    var planTime: String?
+    /// Who set the plan — stamped server-side from the login.
+    var plannedBy: UUID?
     /// Manual position in the Places list (long-press drag). Local-only —
     /// never synced, so each of you can keep your own order.
     var sortOrder: Double?
@@ -360,6 +367,9 @@ extension Item {
         !isDone && timeBucket == .past
     }
 
+    /// Nobody's been to an event that hasn't opened yet.
+    var canMarkDone: Bool { timeBucket != .upcoming }
+
     /// Days become weeks become months once the number stops being useful —
     /// "52 days left" reads worse than "7 weeks left".
     private static func friendlySpan(_ d: Int) -> String {
@@ -475,15 +485,6 @@ extension Item {
         return DayString.instant(day: day, time: time)
     }
 
-    /// Where the picker opens: the reminder already set, or the next
-    /// round hour at least an hour from now.
-    var suggestedCustomReminderDate: Date {
-        if let customReminderDate, customReminderDate > .now { return customReminderDate }
-        let cal = DayString.calendar
-        let inAnHour = Date.now.addingTimeInterval(3600)
-        return cal.date(bySetting: .minute, value: 0, of: inAnHour) ?? inAnHour
-    }
-
     /// Both dates exist and they differ — the menu offers start and close.
     var asksReminderAnchor: Bool {
         guard let s = startsOn, let e = endsOn else { return false }
@@ -526,9 +527,9 @@ extension Item {
         }
     }
 
-    /// Anything still ahead can take a hand-picked day and time; dated
-    /// saves also get the presets. An event that has already ended has
-    /// nothing left to be reminded of.
+    /// Dated saves still ahead get the presets (a day and time of your own
+    /// is a plan). An event that has already ended has nothing left to be
+    /// reminded of.
     var canRemind: Bool { !isDone && timeBucket != .past }
 
     var reminderValueLabel: String {
@@ -556,20 +557,6 @@ extension Item {
         reminderAnchor = anchor
         remindAt = fire
         remindTime = nil
-    }
-
-    /// A hand-picked instant. Minutes are kept; seconds dropped. Anything
-    /// already past is refused and the reminder cleared.
-    func applyCustomReminder(at date: Date) {
-        guard date > .now else {
-            clearReminder()
-            return
-        }
-        let (day, time) = DayString.dayAndTime(date)
-        reminderOffsetDays = 0
-        reminderAnchor = Self.customReminderAnchor
-        remindAt = day
-        remindTime = time
     }
 
     func clearReminder() {

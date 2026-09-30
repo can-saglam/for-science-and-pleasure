@@ -84,7 +84,9 @@ enum LiveDay {
             let attributes = activity.attributes
             let over = attributes.day < today || now >= attributes.endsAt
             let item = UUID(uuidString: attributes.itemID).flatMap { id in items.first { $0.id == id } }
-            let movedOn = item.map { $0.isDone || $0.remindAt != attributes.day } ?? false
+            let movedOn = item.map {
+                $0.isDone || ($0.remindAt != attributes.day && $0.planOn != attributes.day)
+            } ?? false
             if over || movedOn {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }

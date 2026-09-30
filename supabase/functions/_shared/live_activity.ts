@@ -6,10 +6,16 @@
 // dismissal at the exact time. It runs before the reminder push and stands
 // in for it on each phone it reached (see `startedOn`); nothing here
 // touches reminder_runs, and any phone it didn't reach still gets the alert.
+//
+// A plan does the same an hour before its time (10:00 without one) and
+// leaves at the venue's closing time, four hours after the time, or
+// midnight, whichever comes first. It stands in for a reminder on the same
+// day: one activity per save per day, and the plan's wins. Moving or
+// dropping the plan ends its activity; a moved one starts again.
 import { sendLiveActivity } from "./apns.ts";
 import type { admin } from "./groups.ts";
 import { groupHome, homeToday } from "./home.ts";
-import { hoursLine, hoursShown, placeHours } from "./hours.ts";
+import { closeMinutes, type Hours, hoursLine, hoursShown, minutes, placeHours } from "./hours.ts";
 import { customTimeDue } from "./reminders.ts";
 import { homeInstant, localClock } from "./schedule.ts";
 
@@ -23,6 +29,12 @@ export const LAST_START_MINUTE = 23 * 60;
 export const PRESET_MINUTE = 10 * 60;
 /** The dispatcher ticks every 15 minutes: end in the tick before. */
 const TICK_MS = 15 * 60 * 1000;
+/** A planned time goes on the Lock Screen this long before. */
+export const PLAN_LEAD_MINUTES = 60;
+/** …and stays this long after, at most. */
+export const PLAN_STAY_MINUTES = 4 * 60;
+/** A plan without a time starts with the morning presets. */
+export const PLAN_DAY_MINUTE = PRESET_MINUTE;
 
 export interface ActivityItem {
   id: string;
@@ -40,6 +52,10 @@ export interface ActivityItem {
   category?: string | null;
   address?: string | null;
   place_id?: string | null;
+  remind_at?: string | null;
+  plan_on?: string | null;
+  /** HH:MM[:SS] on the home clock. */
+  plan_time?: string | null;
 }
 
 export type ActivityResult =
@@ -123,29 +139,98 @@ export function activityEnd(timeZone: string, today: string, at: Date): Date {
   return cap < midnight ? cap : midnight;
 }
 
-/** Today's hours line for a save whose venue has them, or null. One
- * Google call per save, not per phone; a slow answer is left out. */
-export async function activityHours(item: ActivityItem, today: string, at: Date): Promise<string | null> {
+/** Today's hours for a save whose venue has them, or null. One Google
+ * call per save, not per phone; a slow answer is left out. */
+export async function activityHours(item: ActivityItem, today: string, at: Date): Promise<Hours | null> {
   if (!item.place_id || !hoursShown({ ...item, category: item.category ?? null }, today)) return null;
-  const hours = await placeHours(item.place_id, item, at, 4_000);
+  return await placeHours(item.place_id, item, at, 4_000);
+}
+
+/** The Lock Screen's hours line at `at`. */
+export function hoursLineAt(hours: Hours | null, at: Date): string | null {
   if (!hours) return null;
   const local = new Date(at.getTime() + hours.offset * 60_000);
   return hoursLine(hours, local.getUTCHours() * 60 + local.getUTCMinutes());
+}
+
+/** HH:MM out of Postgres's HH:MM:SS. */
+export function planClock(planTime: string | null | undefined): string | null {
+  return planTime ? planTime.slice(0, 5) : null;
+}
+
+/** The plan's moment has come: an hour before its time, or 10:00 without
+ * one (and not after 23:00, when it would barely be on screen). */
+export function planDue(
+  item: Pick<ActivityItem, "plan_on" | "plan_time">,
+  today: string,
+  clock: { hour: string; minute: string },
+): boolean {
+  if (item.plan_on !== today) return false;
+  const now = Number(clock.hour) * 60 + Number(clock.minute);
+  const time = planClock(item.plan_time);
+  if (!time) return now >= PLAN_DAY_MINUTE && now < LAST_START_MINUTE;
+  return now >= minutes(time) - PLAN_LEAD_MINUTES;
+}
+
+/** When the venue closes today, as an instant, if that's still ahead: the
+ * opening the planned time falls in, or the day's last without a time. An
+ * opening that runs past midnight is left to the midnight cap. */
+export function closingTime(hours: Hours | null, planTime: string | null, at: Date): Date | null {
+  const day = hours?.status === "open" ? hours.days[0] : undefined;
+  if (!hours || !day?.ranges.length) return null;
+  const range = planTime
+    ? day.ranges.find((r) => minutes(planTime) >= minutes(r.open) && minutes(planTime) < closeMinutes(r))
+    : day.ranges[day.ranges.length - 1];
+  if (!range || closeMinutes(range) >= 1440) return null;
+  const close = new Date(Date.parse(`${day.date}T00:00:00Z`) + (closeMinutes(range) - hours.offset) * 60_000);
+  return close > at ? close : null;
+}
+
+/** A plan's activity leaves at the earliest of: closing time, four hours
+ * after the planned time, and the usual eight hours or midnight. */
+export function planEnd(
+  timeZone: string,
+  today: string,
+  at: Date,
+  planTime: string | null,
+  closesAt: Date | null,
+): Date {
+  const ends = [activityEnd(timeZone, today, at)];
+  if (planTime) ends.push(homeInstant(timeZone, today, 0, minutes(planTime) + PLAN_STAY_MINUTES));
+  if (closesAt) ends.push(closesAt);
+  return new Date(Math.min(...ends.map((d) => d.getTime())));
+}
+
+/** "Going 17:00" on the Lock Screen when there's a time; the usual line
+ * otherwise. */
+export function planLabel(item: Pick<ActivityItem, "kind" | "starts_on" | "ends_on" | "plan_time">, today: string): string {
+  const time = planClock(item.plan_time);
+  return time ? `Going ${time}` : activityLabel(item.kind, item.starts_on, item.ends_on, today);
+}
+
+/** The plan's one notification, and its Live Activity's alert. */
+export function planAlertBody(item: Pick<ActivityItem, "venue" | "area" | "plan_time">): string {
+  const time = planClock(item.plan_time);
+  const lead = time ? `Going at ${time}` : "Going today";
+  const place = activityPlace(item);
+  return place ? `${lead} · ${place}` : lead;
 }
 
 /** The start push. `attributes` and `content-state` mirror the app's
  * `DayActivityAttributes` field for field; the alert is required for a
  * push-to-start, and makes the reminder's sound since it replaces the
  * reminder push on that phone. `hours` is new in build 93: older builds
- * ignore the key. */
+ * ignore the key. A plan brings its own label and alert line. */
 export function startAps(
   item: ActivityItem,
   today: string,
   endsAt: Date,
   hours: string | null = null,
+  plan = false,
 ): Record<string, unknown> {
-  const label = activityLabel(item.kind, item.starts_on, item.ends_on, today);
+  const label = plan ? planLabel(item, today) : activityLabel(item.kind, item.starts_on, item.ends_on, today);
   const place = activityPlace(item);
+  const body = plan ? planAlertBody(item) : place ? `${label} · ${place}` : label;
   const end = Math.floor(endsAt.getTime() / 1000);
   const attributes: Record<string, unknown> = {
     itemID: item.id,
@@ -163,7 +248,7 @@ export function startAps(
     "attributes-type": "DayActivityAttributes",
     attributes,
     "stale-date": end,
-    alert: { title: item.title, body: place ? `${label} · ${place}` : label, sound: "default" },
+    alert: { title: item.title, body, sound: "default" },
   };
 }
 
@@ -198,64 +283,104 @@ export async function runActivities(
   await db.from("live_activity_tokens").delete()
     .lt("updated_at", new Date(at.getTime() - 2 * 86_400_000).toISOString());
 
+  /** Sends the end to every phone running this save's activity. */
+  const endOn = async (itemId: string, label: string, dismissAt: Date) => {
+    const { data: tokens, error: tokensError } = await db
+      .from("live_activity_tokens").select("token").eq("item_id", itemId);
+    if (tokensError) throw tokensError;
+    for (const { token } of (tokens ?? []) as { token: string }[]) {
+      tally(await send(token, {
+        event: "end",
+        "content-state": { label },
+        "dismissal-date": Math.floor(dismissAt.getTime() / 1000),
+      }));
+    }
+    await db.from("live_activity_tokens").delete().eq("item_id", itemId);
+  };
+
   // End: its time is within a tick (dismissed at that time), or the save
-  // is no longer on its reminder day (dismissed now).
+  // is no longer on the reminder or plan it started for (dismissed now).
+  // A plan's run is forgotten rather than closed, so a moved plan can
+  // start again today.
   const { data: open, error: openError } = await db
     .from("live_activity_runs")
-    .select("item_id, remind_at, ends_at")
+    .select("item_id, remind_at, ends_at, source, plan_time")
     .eq("group_id", groupId)
     .is("ended_at", null);
   if (openError) throw openError;
-  const runs = (open ?? []) as { item_id: string; remind_at: string; ends_at: string | null }[];
+  const runs = (open ?? []) as {
+    item_id: string;
+    remind_at: string;
+    ends_at: string | null;
+    source: string | null;
+    plan_time: string | null;
+  }[];
   if (runs.length) {
     // A failed read here would look like every save had gone.
     const { data: rows, error: rowsError } = await db
       .from("items")
-      .select("id, kind, starts_on, ends_on, status, deleted_at, remind_at")
+      .select("id, kind, starts_on, ends_on, status, deleted_at, remind_at, plan_on, plan_time")
       .in("id", runs.map((r) => r.item_id));
     if (rowsError) throw rowsError;
     const byId = new Map((rows ?? []).map((r: { id: string }) => [r.id, r]));
     for (const run of runs) {
       const item = byId.get(run.item_id) as
-        | { kind: string; starts_on: string | null; ends_on: string | null; status: string; deleted_at: string | null; remind_at: string | null }
+        | {
+          kind: string;
+          starts_on: string | null;
+          ends_on: string | null;
+          status: string;
+          deleted_at: string | null;
+          remind_at: string | null;
+          plan_on: string | null;
+          plan_time: string | null;
+        }
         | undefined;
+      const plan = run.source === "plan";
       const endsAt = run.ends_at ? new Date(run.ends_at) : at;
       const pastDay = run.remind_at < today;
-      const gone = !item || item.deleted_at != null || item.status !== "saved" || item.remind_at !== run.remind_at;
+      const moved = plan
+        ? item?.plan_on !== run.remind_at || planClock(item?.plan_time) !== planClock(run.plan_time)
+        : item?.remind_at !== run.remind_at;
+      const gone = !item || item.deleted_at != null || item.status !== "saved" || moved;
       const nearlyOver = endsAt.getTime() - at.getTime() <= TICK_MS;
       if (!pastDay && !gone && !nearlyOver) continue;
 
       const dismissAt = gone || pastDay || endsAt <= at ? at : endsAt;
-      const label = item ? activityLabel(item.kind, item.starts_on, item.ends_on, run.remind_at) : "Today";
-      const { data: tokens, error: tokensError } = await db
-        .from("live_activity_tokens").select("token").eq("item_id", run.item_id);
-      if (tokensError) throw tokensError;
-      for (const { token } of (tokens ?? []) as { token: string }[]) {
-        tally(await send(token, {
-          event: "end",
-          "content-state": { label },
-          "dismissal-date": Math.floor(dismissAt.getTime() / 1000),
-        }));
+      const label = !item
+        ? "Today"
+        : plan
+        ? planLabel({ ...item, plan_time: run.plan_time }, run.remind_at)
+        : activityLabel(item.kind, item.starts_on, item.ends_on, run.remind_at);
+      await endOn(run.item_id, label, dismissAt);
+      if (plan && gone && !pastDay) {
+        await db.from("live_activity_runs").delete()
+          .eq("item_id", run.item_id)
+          .eq("remind_at", run.remind_at);
+      } else {
+        await db.from("live_activity_runs")
+          .update({ ended_at: new Date().toISOString() })
+          .eq("item_id", run.item_id)
+          .eq("remind_at", run.remind_at);
       }
-      await db.from("live_activity_tokens").delete().eq("item_id", run.item_id);
-      await db.from("live_activity_runs")
-        .update({ ended_at: new Date().toISOString() })
-        .eq("item_id", run.item_id)
-        .eq("remind_at", run.remind_at);
       result.ended++;
     }
   }
 
-  // Start: each day-of reminder whose moment has come, once.
+  // Start: each day-of reminder, and each plan, whose moment has come,
+  // once. A plan today takes the place of the day's reminder.
   const { data: dueRows, error } = await db
     .from("items")
-    .select("id, kind, title, venue, area, color, image_url, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_time, category, address, place_id")
+    .select("id, kind, title, venue, area, color, image_url, starts_on, ends_on, reminder_offset_days, reminder_anchor, remind_at, remind_time, category, address, place_id, plan_on, plan_time")
     .eq("group_id", groupId)
-    .eq("remind_at", today)
+    .or(`remind_at.eq.${today},plan_on.eq.${today}`)
     .eq("status", "saved")
     .is("deleted_at", null);
   if (error) throw error;
-  const due = ((dueRows ?? []) as ActivityItem[]).filter((item) => startDue(item, clock));
+  const due = ((dueRows ?? []) as ActivityItem[]).flatMap((item) => {
+    if (item.plan_on === today) return planDue(item, today, clock) ? [{ item, plan: true }] : [];
+    return item.remind_at === today && startDue(item, clock) ? [{ item, plan: false }] : [];
+  });
   if (!due.length) return result;
 
   const { data: members, error: membersError } = await db
@@ -271,22 +396,58 @@ export async function runActivities(
 
   const { data: startedRows, error: startedError } = await db
     .from("live_activity_runs")
-    .select("item_id")
+    .select("item_id, source, plan_time, ended_at")
     .eq("remind_at", today)
-    .in("item_id", due.map((i) => i.id));
+    .in("item_id", due.map(({ item }) => item.id));
   if (startedError) throw startedError;
-  const started = new Set((startedRows ?? []).map((r: { item_id: string }) => r.item_id));
-  const endsAt = activityEnd(home.timezone, today, at);
+  const started = new Map(
+    ((startedRows ?? []) as { item_id: string; source: string | null; plan_time: string | null; ended_at: string | null }[])
+      .map((r) => [r.item_id, r]),
+  );
 
-  for (const item of due) {
-    if (started.has(item.id)) continue;
+  for (const { item, plan } of due) {
+    const run = started.get(item.id);
+    if (run && !plan) continue;
+    if (run && plan) {
+      // This plan's own: already on screen, or over for the day.
+      if (run.source === "plan" && planClock(run.plan_time) === planClock(item.plan_time)) continue;
+      // The morning's reminder, or a plan since moved: clear it away first.
+      if (!run.ended_at) {
+        await endOn(item.id, activityLabel(item.kind, item.starts_on, item.ends_on, today), at);
+        result.ended++;
+      }
+      await db.from("live_activity_runs").delete().eq("item_id", item.id).eq("remind_at", today);
+    }
+    const planTime = plan ? planClock(item.plan_time) : null;
+    const claimEnd = activityEnd(home.timezone, today, at);
     const { error: claim } = await db
       .from("live_activity_runs")
-      .insert({ item_id: item.id, remind_at: today, group_id: groupId, ends_at: endsAt.toISOString() });
+      .insert({
+        item_id: item.id,
+        remind_at: today,
+        group_id: groupId,
+        ends_at: claimEnd.toISOString(),
+        source: plan ? "plan" : "reminder",
+        plan_time: planTime,
+      });
     // A twin cron hit already claimed it.
     if (claim?.code === "23505") continue;
     if (claim) throw claim;
-    const aps = startAps(item, today, endsAt, await activityHours(item, today, at));
+    const hours = await activityHours(item, today, at);
+    const endsAt = plan ? planEnd(home.timezone, today, at, planTime, closingTime(hours, planTime, at)) : claimEnd;
+    if (plan) {
+      // Too close to its end to be worth putting up: done for the day.
+      if (endsAt.getTime() - at.getTime() <= TICK_MS) {
+        await db.from("live_activity_runs")
+          .update({ ended_at: new Date().toISOString(), ends_at: endsAt.toISOString() })
+          .eq("item_id", item.id).eq("remind_at", today);
+        continue;
+      }
+      await db.from("live_activity_runs")
+        .update({ ends_at: endsAt.toISOString() })
+        .eq("item_id", item.id).eq("remind_at", today);
+    }
+    const aps = startAps(item, today, endsAt, hoursLineAt(hours, at), plan);
     let failed = 0;
     const reached = new Set<string>();
     for (const { token, user_id, device_id } of tokens) {

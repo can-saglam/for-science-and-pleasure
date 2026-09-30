@@ -119,11 +119,33 @@ struct ItemCard: View {
     }
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// The pill's width, so the card's last line can keep clear of it.
+    @State private var pillWidth: CGFloat = 0
 
     /// At accessibility text sizes the countdown can't share a line with
     /// the title — it moves below, the way it already does beside a photo.
     private var stackedTimeLabel: Bool {
         imageURL != nil || typeSize.isAccessibilitySize
+    }
+
+    /// "Tue · 17:00" for a planned day still ahead.
+    private var plan: String? { compact ? nil : item.planPillText }
+
+    private enum Row { case title, subtitle, time, hints }
+
+    /// The bottom line of text, which shares its height with the pill.
+    private var lastRow: Row {
+        if !hints.isEmpty { return .hints }
+        if stackedTimeLabel, slotLabel != nil { return .time }
+        if !subtitle.isEmpty { return .subtitle }
+        return .title
+    }
+
+    /// Beside a photo the pill sits in its bottom corner, past the text's
+    /// usual 64 points of room: the last line gives up the rest.
+    private func pillRoom(_ row: Row) -> CGFloat {
+        guard plan != nil, imageURL != nil, row == lastRow else { return 0 }
+        return max(0, pillWidth + 9 + 6 - 64)
     }
 
     var body: some View {
@@ -142,20 +164,33 @@ struct ItemCard: View {
                     timeText(label)
                 }
             }
-            if !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(compact ? .caption : .subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+            .padding(.trailing, pillRoom(.title))
+            // No photo: the pill ends the subtitle's line, under the
+            // countdown, so the card keeps its height.
+            if let plan, imageURL == nil, !typeSize.isAccessibilitySize {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if !subtitle.isEmpty { subtitleText }
+                    Spacer(minLength: 0)
+                    planPill(plan, onPhoto: false)
+                }
+            } else if !subtitle.isEmpty {
+                subtitleText
+                    .padding(.trailing, pillRoom(.subtitle))
             }
             if stackedTimeLabel, let label = slotLabel {
                 timeText(label)
                     .padding(.top, 1)
+                    .padding(.trailing, pillRoom(.time))
+            }
+            if let plan, imageURL == nil, typeSize.isAccessibilitySize {
+                planPill(plan, onPhoto: false)
+                    .padding(.top, 2)
             }
             if !hints.isEmpty {
                 Text(hints.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(AppBackground.warning)
+                    .padding(.trailing, pillRoom(.hints))
             }
         }
         // Wrapped subtitles otherwise inherit a centred alignment and
@@ -175,6 +210,13 @@ struct ItemCard: View {
         }
         .background(cardBackground, in: .rect(cornerRadius: radius, style: .continuous))
         .clipShape(.rect(cornerRadius: radius, style: .continuous))
+        .overlay(alignment: .bottomTrailing) {
+            if let plan, imageURL != nil {
+                planPill(plan, onPhoto: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pillWidth = $0 }
+                    .padding(9)
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(cardBorder, lineWidth: 1)
@@ -190,6 +232,7 @@ struct ItemCard: View {
         var parts = [item.title]
         if !subtitle.isEmpty { parts.append(subtitle) }
         if let label = slotLabel { parts.append(label) }
+        if !compact, let going = item.planSpokenText { parts.append(going) }
         if item.isDone { parts.append(Voice.didGo) }
         else if item.isMissed { parts.append("Missed") }
         parts.append(contentsOf: hints)
@@ -229,6 +272,36 @@ struct ItemCard: View {
                 .foregroundStyle(Color.secondary)
                 .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
         }
+    }
+
+    private var subtitleText: some View {
+        Text(subtitle)
+            .font(compact ? .caption : .subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+    }
+
+    /// The planned day. Dark on a photo, where it has to read over any
+    /// picture; a quiet wash of ink on a plain card. Solid fills, not a
+    /// material: a blur per card is a GPU pass per scrolled frame.
+    private func planPill(_ text: String, onPhoto: Bool) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "calendar")
+                .imageScale(.small)
+            Text(text)
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(onPhoto ? Color.white : AppBackground.ink.opacity(0.75))
+        .padding(.leading, 7)
+        .padding(.trailing, 9)
+        .padding(.vertical, 4)
+        .background(
+            onPhoto ? Color.black.opacity(0.6) : AppBackground.ink.opacity(0.08),
+            in: .capsule
+        )
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .fixedSize()
     }
 
     /// The source photo bleeding in from the card's right edge, dissolving
@@ -422,13 +495,15 @@ struct ItemCardRow: View {
         // The swipe gestures, spoken: VoiceOver's rotor gets the same three
         // actions a sighted thumb has.
         .accessibilityHint("Opens the details")
-        .accessibilityAction(named: item.isDone ? "Put back" : Voice.didGo) {
+        .accessibilityActions {
             if item.isDone {
-                putBack()
-            } else {
-                celebrate += 1
-                item.markDone()
-                UndoBin.shared.stashDone(item)
+                Button("Put back") { putBack() }
+            } else if item.canMarkDone {
+                Button(Voice.didGo) {
+                    celebrate += 1
+                    item.markDone()
+                    UndoBin.shared.stashDone(item)
+                }
             }
         }
         .accessibilityAction(named: "Delete") { delete() }
@@ -444,7 +519,7 @@ struct ItemCardRow: View {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
                 .tint(AppBackground.swipePutBack)
-            } else {
+            } else if item.canMarkDone {
                 Button {
                     celebrate += 1
                     item.markDone()
@@ -471,7 +546,7 @@ struct ItemCardRow: View {
                 } label: {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
-            } else {
+            } else if item.canMarkDone {
                 Button {
                     celebrate += 1
                     item.markDone()

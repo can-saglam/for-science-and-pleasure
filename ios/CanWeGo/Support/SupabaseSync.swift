@@ -365,6 +365,9 @@ enum SupabaseSync {
         var reminder_anchor: String?
         var remind_at: String?
         var remind_time: String?
+        var plan_on: String?
+        var plan_time: String?
+        var planned_by: UUID?
         var notes: String?
         var color: String?
         var source: String?
@@ -405,6 +408,10 @@ enum SupabaseSync {
             try c.encode(reminder_anchor, forKey: .reminder_anchor)
             try c.encode(remind_at, forKey: .remind_at)
             try c.encode(remind_time, forKey: .remind_time)
+            try c.encode(plan_on, forKey: .plan_on)
+            try c.encode(plan_time, forKey: .plan_time)
+            // The server stamps who planned it from the login (0042).
+            try c.encode(planned_by, forKey: .planned_by)
             try c.encode(notes, forKey: .notes)
             try c.encode(color, forKey: .color)
             // `source` is NOT NULL on the server; rows from before the
@@ -597,6 +604,9 @@ enum SupabaseSync {
             reminder_anchor: item.reminderAnchor,
             remind_at: item.remindAt,
             remind_time: item.remindTime,
+            plan_on: item.planOn,
+            plan_time: item.planOn == nil ? nil : item.planTime,
+            planned_by: item.plannedBy,
             notes: item.notes,
             color: item.colorHex,
             source: item.source,
@@ -739,6 +749,9 @@ enum SupabaseSync {
         item.remindAt = row.remind_at
         // Postgres `time` comes back as HH:MM:SS; keep the HH:mm the app writes.
         item.remindTime = row.remind_time.map { String($0.prefix(5)) }
+        item.planOn = row.plan_on
+        item.planTime = row.plan_time.map { String($0.prefix(5)) }
+        item.plannedBy = row.planned_by
         item.notes = row.notes
         item.colorHex = row.color
         item.source = row.source

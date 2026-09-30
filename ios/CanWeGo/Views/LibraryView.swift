@@ -43,7 +43,12 @@ struct LibraryView: View {
     @State private var undoBin = UndoBin.shared
     /// A pull-to-refresh in flight: the wordmark's "?" rocks meanwhile.
     @State private var refreshing = false
-    private let shareTip = ShareTip()
+    /// One tip at a time: the share tip first, then the widget tip once it's
+    /// dismissed or no longer needed.
+    @State private var tips = TipGroup(.firstAvailable) {
+        ShareTip()
+        WidgetTip()
+    }
     /// Drives the tap-active-tab scroll back to the top of the list.
     @State private var scrollPosition = ScrollPosition()
     /// The list's visible height, for centring an empty tab in it.
@@ -592,8 +597,8 @@ struct LibraryView: View {
             }
 
             // Second launch onwards, until dismissed or a share lands:
-            // saves can come from the share sheet.
-            TipView(shareTip)
+            // saves can come from the share sheet. Then the widget.
+            TipView(tips.currentTip)
                 .tipBackground(AppBackground.wash(0.06))
                 .tipCornerRadius(12)
                 .tipImageSize(CGSize(width: 22, height: 22))

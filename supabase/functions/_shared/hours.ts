@@ -35,6 +35,13 @@ export function hoursShown(item: HoursSubject, today: string): boolean {
   return (!item.starts_on || item.starts_on <= today) && (!item.ends_on || item.ends_on >= today);
 }
 
+/** Hours worth having while picking a day to go: an event's before it
+ * opens too, so its closed days can be marked. */
+export function hoursForPlanning(item: HoursSubject, today: string): boolean {
+  if (!hoursApply(item)) return false;
+  return item.kind !== "event" || !item.ends_on || item.ends_on >= today;
+}
+
 /** "HH:MM" on the venue's clock. A close of "24:00" is midnight. */
 export interface Range {
   open: string;
@@ -104,9 +111,9 @@ export function weekFrom(periods: Period[], today: string): Day[] {
   });
 }
 
-const minutes = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
+export const minutes = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 /** A close at or before its opening runs past midnight. */
-const closeMinutes = (r: Range) => {
+export const closeMinutes = (r: Range) => {
   const c = minutes(r.close);
   return c <= minutes(r.open) ? c + 1440 : c;
 };

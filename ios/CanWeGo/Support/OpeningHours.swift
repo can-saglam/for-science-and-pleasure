@@ -29,21 +29,29 @@ extension Item {
     /// server's `MIN_RUN_DAYS`.
     static let hoursMinRunDays = 3
 
-    /// Whether the details should ask for hours today: a place (not a concert
+    /// Whether the venue's hours are this save's own: a place (not a concert
     /// hall, whose hours are the box office's), or an exhibition or market
-    /// that runs for days and is on now. Mirrors the server's `hoursShown`.
-    var showsHours: Bool {
+    /// that runs for days. Mirrors the server's `hoursApply`.
+    var hoursApply: Bool {
         guard placeId != nil else { return false }
         if isPlace { return category != "venue" }
         guard isEvent, category == "exhibition" || category == "market" else { return false }
-        let today = DayString.today()
-        if let startsOn, startsOn > today { return false }
-        if let endsOn, endsOn < today { return false }
         guard let startsOn, let endsOn,
               let from = DayString.date(startsOn), let to = DayString.date(endsOn)
         else { return true }
         let days = DayString.calendar.dateComponents([.day], from: from, to: to).day ?? 0
         return days >= Self.hoursMinRunDays
+    }
+
+    /// Whether the details should ask for hours today: their own, and for
+    /// an event, only while it's on. Mirrors the server's `hoursShown`.
+    var showsHours: Bool {
+        guard hoursApply else { return false }
+        guard isEvent else { return true }
+        let today = DayString.today()
+        if let startsOn, startsOn > today { return false }
+        if let endsOn, endsOn < today { return false }
+        return true
     }
 }
 
@@ -61,16 +69,21 @@ enum HoursClient {
         cache[key(item)]
     }
 
-    static func load(_ item: Item) async -> OpeningHours? {
-        let key = key(item)
-        if let hit = cache[key] { return hit }
+    /// `planning` asks for hours the details wouldn't show yet (an event
+    /// before it opens), to mark closed days in the plan picker. A miss
+    /// isn't remembered under the details' key.
+    static func load(_ item: Item, planning: Bool = false) async -> OpeningHours? {
+        let key = planning ? key(item) + "|plan" : key(item)
+        if let hit = cache[key] ?? (planning ? cache[self.key(item)] : nil) { return hit }
         do {
             var request = URLRequest(url: SupabaseAuth.baseURL.appending(path: "functions/v1/place-hours"))
             request.httpMethod = "POST"
             request.timeoutInterval = 15
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(try await SupabaseAuth.shared.validToken())", forHTTPHeaderField: "Authorization")
-            request.httpBody = try JSONEncoder().encode(["item_id": item.id.uuidString.lowercased()])
+            var body: [String: Any] = ["item_id": item.id.uuidString.lowercased()]
+            if planning { body["planning"] = true }
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
             struct Envelope: Decodable { let hours: OpeningHours? }
@@ -189,6 +202,35 @@ extension OpeningHours {
         else { return closed }
         let when = index == 1 ? "tomorrow" : Self.dayName(next, index: index)
         return "\(closed) · opens \(when) \(Self.time(open))"
+    }
+
+    /// The hours on `date` (yyyy-MM-dd): that day's own within the week
+    /// Google gave, or the same weekday's beyond it. Empty is closed; nil
+    /// is unknown.
+    func ranges(on date: String) -> [Range]? {
+        guard status == "open" else { return [] }
+        if let day = days.first(where: { $0.date == date }) { return day.ranges }
+        guard let weekday = Self.weekday(date) else { return nil }
+        return days.first { Self.weekday($0.date) == weekday }?.ranges
+    }
+
+    /// Whether `date` comes from the week Google gave rather than the
+    /// weekday pattern after it.
+    func knowsExactly(_ date: String) -> Bool {
+        days.contains { $0.date == date }
+    }
+
+    private static func weekday(_ date: String) -> Int? {
+        guard let day = weekdayFormat.date(from: date) else { return nil }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        return utc.component(.weekday, from: day)
+    }
+
+    /// The opening `hm` falls in, if any.
+    static func range(_ ranges: [Range], containing hm: String) -> Range? {
+        let t = minutes(hm)
+        return ranges.first { t >= minutes($0.open) && t < closeMinutes($0) }
     }
 
     /// Open right now, for the summary's colour.
