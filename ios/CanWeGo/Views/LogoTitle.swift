@@ -4,34 +4,44 @@ import SwiftUI
 /// a template and tinted in the theme ink — cream on midnight and forest,
 /// black on cream, white on ink and wine.
 ///
-/// Two small moments live here. On a cold launch the mark fades and
-/// settles into place once, so the app is alive from the first frame. And
-/// while the library is refreshing, the "?" rocks on its dot — the mark
-/// asking the question while the answer is fetched.
+/// Two small moments live here. The library header, the welcome page and
+/// Settings write the mark in by hand the first time each shows in a
+/// session (`CanWeGoLogoWriteOn`). And while the library is refreshing,
+/// the "?" rocks on its dot — the mark asking the question while the
+/// answer is fetched.
 struct LogoTitle: View {
+    /// Where a mark writes itself in. Each place does it once per session;
+    /// the next time it shows, the mark is simply there.
+    enum Moment { case library, onboarding, settings }
+
     var height: CGFloat = 28
     /// The list is pulling from the server: the "?" rocks until it's done.
     var refreshing = false
-    /// Fade-and-settle on first appearance. Only the library header asks
-    /// for it; a mark rendered offscreen (the share postcard) must not
-    /// start invisible.
-    var settles = false
+    /// Writes in by hand rather than standing still. Only the three places
+    /// above ask; a mark rendered offscreen (the share postcard) must never
+    /// start blank.
+    var writes: Moment? = nil
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// One settle per process, whichever copy of the mark gets there first.
-    @State private var settled: Bool
-    private static var hasSettled = false
+    @State private var animates: Bool
+    /// When each place first started writing this session.
+    private static var written: [Moment: Date] = [:]
 
-    init(height: CGFloat = 28, refreshing: Bool = false, settles: Bool = false) {
+    init(height: CGFloat = 28, refreshing: Bool = false, writes: Moment? = nil) {
         self.height = height
         self.refreshing = refreshing
-        self.settles = settles
-        // Starts hidden only for the one settle; everything else is
-        // simply there.
-        _settled = State(initialValue: !(settles && !Self.hasSettled))
+        self.writes = writes
+        _animates = State(initialValue: writes.map(Self.mayWrite) ?? false)
+    }
+
+    /// Copies that show up together write together: the toolbar builds the
+    /// library header twice at launch, and only one of them is on screen.
+    /// Any later copy (another tab, coming back) is simply written.
+    private static func mayWrite(_ moment: Moment) -> Bool {
+        written[moment].map { Date.now.timeIntervalSince($0) < 0.3 } ?? true
     }
     /// The "?"'s lean, in degrees.
     @State private var tilt: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -40,23 +50,23 @@ struct LogoTitle: View {
                 QuestionMarkRegion(inverted: true)
                     .fill(.black, style: FillStyle(eoFill: true))
             }
-            // …and the "?" alone, free to rock on its dot.
+            // …and the "?" alone, free to rock on its dot. One element for
+            // VoiceOver: this copy stays silent.
             mark
                 .mask { QuestionMarkRegion().fill(.black) }
                 .rotationEffect(.degrees(tilt), anchor: QuestionMarkRegion.pivot)
+                .accessibilityHidden(writes != nil)
         }
         .frame(width: height * 5.01, height: height)
-        .opacity(settled ? 1 : 0)
-        .offset(y: settled ? 0 : 6)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Can We Go?")
+        .modifier(StaticLabel(applies: writes == nil))
         .onAppear {
-            guard !settled else { return }
-            Self.hasSettled = true
-            if reduceMotion {
-                settled = true
-            } else {
-                withAnimation(.spring(duration: 0.55, bounce: 0.15).delay(0.05)) { settled = true }
+            guard let writes else { return }
+            // A copy made before an earlier one had written (another tab's
+            // header) would otherwise write again.
+            if !Self.mayWrite(writes) {
+                animates = false
+            } else if Self.written[writes] == nil {
+                Self.written[writes] = .now
             }
         }
         .onChange(of: refreshing) { _, now in
@@ -75,15 +85,53 @@ struct LogoTitle: View {
         }
     }
 
+    @ViewBuilder
     private var mark: some View {
-        Image("Logo")
-            .renderingMode(.template)
-            .resizable()
-            .scaledToFit()
-            // Both dimensions pinned: a bare toolbar slot proposes almost
-            // no width, and scaledToFit would shrink the mark to a speck.
+        if writes != nil {
+            // The write-on's frame carries a margin round the artwork; sized
+            // so the artwork is exactly the PDF's, and nudged so its centre
+            // is too — the letters land where the static mark's do.
+            let unit = height / Self.artHeight
+            CanWeGoLogoWriteOn(
+                ink: AppBackground.ink,
+                timing: .launch,
+                animates: animates
+            )
+            .frame(width: CanWeGoLogoData.viewBoxWidth * unit, height: CanWeGoLogoData.viewBoxHeight * unit)
+            .offset(
+                x: (CanWeGoLogoData.viewBoxX + CanWeGoLogoData.viewBoxWidth / 2 - Self.artWidth / 2) * unit,
+                y: (CanWeGoLogoData.viewBoxY + CanWeGoLogoData.viewBoxHeight / 2 - Self.artHeight / 2) * unit
+            )
             .frame(width: height * 5.01, height: height)
-            .foregroundStyle(AppBackground.ink)
+        } else {
+            Image("Logo")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                // Both dimensions pinned: a bare toolbar slot proposes almost
+                // no width, and scaledToFit would shrink the mark to a speck.
+                .frame(width: height * 5.01, height: height)
+                .foregroundStyle(AppBackground.ink)
+        }
+    }
+
+    /// The artwork box of `Logo.pdf`, in the write-on's units.
+    private static let artWidth = 1855.379883
+    private static let artHeight = 370.670044
+
+    /// The static mark is one element with its own label; the write-on
+    /// brings its own ("CanWeGo?", as a header).
+    private struct StaticLabel: ViewModifier {
+        var applies: Bool
+        func body(content: Content) -> some View {
+            if applies {
+                content
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Can We Go?")
+            } else {
+                content
+            }
+        }
     }
 }
 
@@ -122,8 +170,10 @@ extension View {
     /// system capsule would squeeze the wide mark into a circle.
     func logoTitle(refreshing: Bool = false) -> some View {
         toolbar {
-            ToolbarItem(placement: .topBarLeading) { LogoTitle(refreshing: refreshing, settles: true) }
-                .sharedBackgroundVisibility(.hidden)
+            ToolbarItem(placement: .topBarLeading) {
+                LogoTitle(refreshing: refreshing, writes: .library)
+            }
+            .sharedBackgroundVisibility(.hidden)
         }
     }
 }

@@ -36,7 +36,7 @@ struct PlanOrRemind: View {
                 }
             } else {
                 RemindRow(item: item, persist: true, title: plans && reminds ? "Pick an option" : "Remind")
-                if reminds, let plan = item.planRowText, item.upcomingPlan != nil {
+                if reminds, let plan = item.planSentenceText, item.upcomingPlan != nil {
                     footnote("A reminder replaces the plan for \(plan).")
                 }
             }

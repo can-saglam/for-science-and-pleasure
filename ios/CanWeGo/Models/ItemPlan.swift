@@ -74,14 +74,14 @@ extension Item {
         }
     }
 
-    /// "Today", "Tomorrow", "Tuesday" within the week, then "Tue 13 Oct".
-    static func planDayLongName(_ day: String) -> String {
-        switch DayString.daysFromToday(day) ?? 7 {
-        case 0: return "Today"
-        case 1: return "Tomorrow"
-        case 2..<7: return DayString.text(day, .dateTime.weekday(.wide)) ?? day
-        default: return DayString.text(day, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? day
+    /// The cards' phrasing ("Opens this Saturday"): "Today", "Tomorrow",
+    /// "This Saturday", "Next Thursday" through next week, then "Tue 13 Oct".
+    /// `inSentence` keeps the words lower case: "for this Saturday".
+    static func planDayLongName(_ day: String, inSentence: Bool = false) -> String {
+        if let days = DayString.daysFromToday(day), let friendly = Item.friendlyDay(days, day) {
+            return inSentence ? friendly : friendly.prefix(1).uppercased() + friendly.dropFirst()
         }
+        return DayString.text(day, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? day
     }
 
     /// The card's pill: "Tue · 17:00", "Sat", "Today · 5:00 PM".
@@ -91,18 +91,23 @@ extension Item {
         return "\(Self.planDayName(day)) · \(OpeningHours.time(planTime))"
     }
 
-    /// The details' Going row: "Tuesday · 17:00", "Tue 13 Oct".
-    var planRowText: String? {
+    /// The details' Going row: "This Saturday · 17:00", "Tue 13 Oct".
+    var planRowText: String? { planText(inSentence: false) }
+
+    /// The same, mid-sentence: "for this Saturday · 17:00".
+    var planSentenceText: String? { planText(inSentence: true) }
+
+    private func planText(inSentence: Bool) -> String? {
         guard let day = upcomingPlan else { return nil }
-        guard let planTime else { return Self.planDayLongName(day) }
-        return "\(Self.planDayLongName(day)) · \(OpeningHours.time(planTime))"
+        let name = Self.planDayLongName(day, inSentence: inSentence)
+        guard let planTime else { return name }
+        return "\(name) · \(OpeningHours.time(planTime))"
     }
 
-    /// For VoiceOver: "Going Tuesday at 17:00".
+    /// For VoiceOver: "Going this Saturday at 17:00".
     var planSpokenText: String? {
         guard let day = upcomingPlan else { return nil }
-        let name = Self.planDayLongName(day)
-        let when = (DayString.daysFromToday(day) ?? 7) < 2 ? name.lowercased() : name
+        let when = Self.planDayLongName(day, inSentence: true)
         guard let planTime else { return "Going \(when)" }
         return "Going \(when) at \(OpeningHours.time(planTime))"
     }

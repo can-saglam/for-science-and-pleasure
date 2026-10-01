@@ -384,7 +384,7 @@ extension Item {
 
     /// "today", "tomorrow", "this Saturday", "next Thursday" for anything
     /// within the current or the following calendar week; nil beyond that.
-    private static func friendlyDay(_ daysAway: Int, _ day: String) -> String? {
+    static func friendlyDay(_ daysAway: Int, _ day: String) -> String? {
         switch daysAway {
         case 0: return "today"
         case 1: return "tomorrow"

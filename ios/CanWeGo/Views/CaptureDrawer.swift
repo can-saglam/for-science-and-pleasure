@@ -276,13 +276,17 @@ struct CaptureStatus: View {
     var body: some View {
         HStack(spacing: 8) {
             SmallRing()
-            Text(phrases[step])
-                .id(step)
-                .transition(reduceMotion ? .opacity : .push(from: .bottom))
+            // Only the words are clipped, for the push between lines: the
+            // ring's stroke reaches just past its own frame.
+            ZStack(alignment: .leading) {
+                Text(phrases[step])
+                    .id(step)
+                    .transition(reduceMotion ? .opacity : .push(from: .bottom))
+            }
+            .clipped()
         }
         .font(.subheadline)
         .foregroundStyle(.secondary)
-        .clipped()
         .animation(.snappy, value: step)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(phrases[0])

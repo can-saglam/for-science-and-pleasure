@@ -24,6 +24,8 @@ struct LibraryView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The stale-sync pill's sideways drag, on its way to being dismissed.
+    @State private var staleDrag: CGFloat = 0
     @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
     @State private var query = ""
     @State private var category: String?
@@ -302,6 +304,22 @@ struct LibraryView: View {
             // position and its tucked-away search bar; the map just fades.
             ZStack {
                 list
+                    // Floats just above the tab bar; the list scrolls clear
+                    // of it. A refresh notice takes the same spot while it
+                    // shows, so a good retry hands straight over to
+                    // "Updated just now".
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        let shown = showsStale && refreshNotice == nil && !searchOpen
+                        VStack {
+                            if shown {
+                                staleBanner
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 12)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                        }
+                        .animation(.snappy, value: shown)
+                    }
                     .opacity(mode.showMap ? 0 : 1)
                     .allowsHitTesting(!mode.showMap)
                     .accessibilityHidden(mode.showMap)
@@ -490,51 +508,44 @@ struct LibraryView: View {
         }
     }
 
-    /// A day without a successful sync while online: say so, say why if we
-    /// know, and offer a retry. Dismissible, but it returns after another
-    /// day of the same — a library quietly drifting apart is the one thing
-    /// a shared list must never do silently.
+    /// A day without a successful sync while online: one glass pill above
+    /// the tab bar saying when it last worked, with Retry inside it. Swiped
+    /// away it returns after another day of the same — a library quietly
+    /// drifting apart is the one thing a shared list must never do
+    /// silently. Why it failed lives in Settings, with the raw answer.
     private var staleBanner: some View {
-        let problem = syncStatus.problem
-            ?? (ProcessInfo.processInfo.environment["CWG_STALE"] != nil
-                ? SyncProblem(message: "Changes on this phone haven't reached the server yet.",
-                              detail: "Push failed (400): {\"code\":\"PGRST102\",\"details\":null,\"hint\":null,\"message\":\"All object keys must match\"}",
-                              status: 400)
-                : nil)
-        // Same anatomy as the duplicate and ended-event notices in Capture:
-        // an orange label, footnote copy, two full-width glass buttons.
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 8) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(staleTitle)
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(AppBackground.warning)
-                        Text(problem?.message ?? "You're online, but the server hasn't answered since.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } icon: {
+        HStack(spacing: 10) {
+            Group {
+                if syncStatus.syncing {
+                    SmallRing()
+                } else {
                     Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.footnote.weight(.semibold))
                         .foregroundStyle(AppBackground.warning)
                 }
-                Spacer(minLength: 0)
-                Button {
-                    Haptics.tap()
-                    withAnimation(.snappy) { syncStatus.staleBannerDismissedAt = .now }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss")
             }
+            .frame(width: 18)
 
-            // One action. The raw server answer lives in Settings, not here.
+            // Two lines of different lengths cross-fading smear into each
+            // other; one pushes the other out instead.
+            ZStack(alignment: .leading) {
+                Group {
+                    if syncStatus.syncing {
+                        Text("\(Text("Syncing…").fontWeight(.semibold))\(Text(" · \(lastSyncedPhrase(lower: true))").foregroundStyle(.secondary))")
+                    } else {
+                        Text(lastSyncedPhrase(lower: false)).fontWeight(.semibold)
+                    }
+                }
+                .id(syncStatus.syncing)
+                .transition(reduceMotion ? .opacity : .push(from: .bottom))
+            }
+            .font(.footnote)
+            .foregroundStyle(AppBackground.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+
             Button {
                 Haptics.tap()
                 Task {
@@ -545,25 +556,54 @@ struct LibraryView: View {
                     }
                 }
             } label: {
-                Label(syncStatus.syncing ? "Syncing…" : "Try again", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
+                Text("Retry")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 4)
             }
             .prominentGlass()
+            .controlSize(.small)
             .disabled(syncStatus.syncing)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .contain)
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .glassEffect(.regular, in: .capsule)
+        .animation(.snappy, value: syncStatus.syncing)
+        // Swiped sideways, it goes; a mostly vertical drag is the list
+        // scrolling and leaves it be.
+        .offset(x: staleDrag)
+        .opacity(1 - min(0.8, abs(staleDrag) / 240))
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 16)
+                .onChanged { drag in
+                    guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                    staleDrag = drag.translation.width
+                }
+                .onEnded { drag in
+                    if abs(drag.translation.width) > 90 || abs(drag.predictedEndTranslation.width) > 220 {
+                        dismissStaleBanner()
+                    } else {
+                        withAnimation(.snappy) { staleDrag = 0 }
+                    }
+                }
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(syncStatus.problem?.message ?? "You're online, but the server hasn't answered since.")
+        .accessibilityAction(named: "Dismiss") { dismissStaleBanner() }
     }
 
-    /// "Out of sync for 3 weeks" beats "Last synced 3 weeks ago": the first
-    /// names the problem, the second reads like a timestamp.
-    private var staleTitle: String {
-        guard let last = syncStatus.lastSyncedAt else { return "Not synced yet" }
-        let gap = Duration.seconds(max(3600, Date.now.timeIntervalSince(last)))
-        return "Out of sync for \(gap.formatted(.units(allowed: [.weeks, .days, .hours], width: .wide, maximumUnitCount: 1)))"
+    private func dismissStaleBanner() {
+        Haptics.tap()
+        withAnimation(.snappy) { syncStatus.staleBannerDismissedAt = .now }
+        staleDrag = 0
+    }
+
+    /// "Last synced 2 days ago", "Last synced yesterday": when it last
+    /// worked, rather than an alarm.
+    private func lastSyncedPhrase(lower: Bool) -> String {
+        let lead = lower ? "last synced" : "Last synced"
+        guard let last = syncStatus.lastSyncedAt else { return lower ? "not synced yet" : "Not synced yet" }
+        return "\(lead) \(last.formatted(.relative(presentation: .named)))"
     }
 
     private var list: some View {
@@ -585,17 +625,14 @@ struct LibraryView: View {
         }
     }
 
+    /// CWG_STALE only exists so screenshot runs can photograph the pill.
+    private var showsStale: Bool {
+        (syncStatus.isStale && SupabaseAuth.shared.signedIn)
+            || ProcessInfo.processInfo.environment["CWG_STALE"] != nil
+    }
+
     private var listBody: some View {
         List {
-            // CWG_STALE only exists so screenshot runs can photograph the banner.
-            if (syncStatus.isStale && SupabaseAuth.shared.signedIn)
-                || ProcessInfo.processInfo.environment["CWG_STALE"] != nil {
-                staleBanner
-                    .padding(.top, 6)
-                    .cardListRow()
-                    .transition(.opacity)
-            }
-
             // Second launch onwards, until dismissed or a share lands:
             // saves can come from the share sheet. Then the widget.
             TipView(tips.currentTip)

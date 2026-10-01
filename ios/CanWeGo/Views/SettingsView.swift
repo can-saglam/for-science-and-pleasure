@@ -75,7 +75,7 @@ struct SettingsView: View {
                 // with the version tucked quietly beneath it.
                 Section {
                     VStack(spacing: 10) {
-                        LogoTitle(height: 44)
+                        LogoTitle(height: 44, writes: .settings)
                         Text("The shows, gigs and places you keep meaning to go to, in one list you share.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)

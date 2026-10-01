@@ -618,7 +618,7 @@ struct OnboardingView: View {
                 // Drawn over the wordmark and button below, so a card
                 // pulled down travels across the page, not under it.
                 .zIndex(1)
-            LogoTitle(height: 52)
+            LogoTitle(height: 52, writes: .onboarding)
             Text(auth.sessionExpired && !preview
                  ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
                  : "Save the things you want to go to.\nShare them. Get a nudge\nbefore they close.")

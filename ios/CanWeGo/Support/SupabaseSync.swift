@@ -685,9 +685,12 @@ enum SupabaseSync {
                 if let local = byID[row.id] {
                     // Last-write-wins: a newer local edit keeps the row and
                     // retries on the next push.
+                    // Assigning an unchanged value still dirties the model,
+                    // and every save schedules a sync: an already-deleted
+                    // row rewritten on each pull kept syncing forever.
                     if row.updated_at >= local.updatedAt {
-                        local.deletedAt = deleted
-                        local.updatedAt = row.updated_at
+                        if local.deletedAt != deleted { local.deletedAt = deleted }
+                        if local.updatedAt != row.updated_at { local.updatedAt = row.updated_at }
                     }
                 }
                 continue
