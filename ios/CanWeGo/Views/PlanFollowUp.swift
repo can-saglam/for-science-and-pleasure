@@ -8,7 +8,7 @@ struct PlanFollowUp: Identifiable {
 }
 
 /// The morning after a plan: did you make it? Any answer clears the plan,
-/// and that syncs, so the group is asked once. "We went" marks an event
+/// and that syncs, so the group is asked once. "We went" ("I went" alone) marks an event
 /// done (a place stays on the list, it just loses the plan); "Not this
 /// time" offers another day while one is left. Swiping it away counts as
 /// not this time.
@@ -32,7 +32,7 @@ struct PlanFollowUpSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 0) {
             if let item = current {
                 if askingAgain {
                     anotherDay(item)
@@ -41,9 +41,6 @@ struct PlanFollowUpSheet: View {
                 }
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 32)
-        .padding(.bottom, 16)
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -69,25 +66,12 @@ struct PlanFollowUpSheet: View {
     // MARK: - Steps
 
     private func question(_ item: Item) -> some View {
-        VStack(spacing: 18) {
-            photo(item)
-            VStack(spacing: 6) {
-                Text("Did you make it to \(item.title)?")
-                    .font(.displaySmallBold(24, relativeTo: .title2))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let when = whenLine(item) {
-                    Text(when)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-            }
+        step(item, title: "Did you make it to \(item.title)?", detail: whenLine(item)) {
             HStack(spacing: 10) {
                 Button {
                     wentThere(item)
                 } label: {
-                    Label("We went", systemImage: "checkmark")
+                    Label(Voice.went, systemImage: "checkmark")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AppBackground.onProminent)
                         .frame(maxWidth: .infinity)
@@ -104,24 +88,11 @@ struct PlanFollowUpSheet: View {
                 }
                 .buttonStyle(.glass)
             }
-            .controlSize(.large)
         }
-        .transition(.opacity)
     }
 
     private func anotherDay(_ item: Item) -> some View {
-        VStack(spacing: 18) {
-            photo(item)
-            VStack(spacing: 6) {
-                Text("Another day?")
-                    .font(.displaySmallBold(24, relativeTo: .title2))
-                if let left = stillOn(item) {
-                    Text(left)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-            }
+        step(item, title: "Another day?", detail: stillOn(item)) {
             VStack(spacing: 10) {
                 Button {
                     Haptics.tap()
@@ -145,32 +116,58 @@ struct PlanFollowUpSheet: View {
                 }
                 .buttonStyle(.glass)
             }
-            .controlSize(.large)
         }
-        .transition(.opacity)
     }
 
-    @ViewBuilder
-    private func photo(_ item: Item) -> some View {
-        if let url = item.imageUrl.flatMap(URL.init(string:)) {
-            CachedImage(url: url) { phase in
-                if case .success(let image) = phase {
-                    image.resizable().scaledToFill()
-                } else {
-                    item.accentColor.opacity(0.25)
-                }
+    /// Laid out like the details: the photo with the heading on its foot
+    /// (or the item's color washing in when there's none), then the answers.
+    private func step(
+        _ item: Item, title: String, detail: String?,
+        @ViewBuilder actions: () -> some View
+    ) -> some View {
+        let heading = VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.displaySmallBold(28, relativeTo: .title2))
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail {
+                Text(detail)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
-            .frame(width: 84, height: 84)
-            .clipShape(.rect(cornerRadius: 18, style: .continuous))
-            .accessibilityHidden(true)
-        } else {
-            Image(systemName: item.glyph)
-                .font(.title)
-                .foregroundStyle(item.accentColor.mix(with: AppBackground.ink, by: 0.35))
-                .frame(width: 84, height: 84)
-                .background(item.accentColor.opacity(0.22), in: .rect(cornerRadius: 18, style: .continuous))
-                .accessibilityHidden(true)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if let url = item.imageUrl.flatMap(URL.init(string:)) {
+                HeroPhoto(url: url, placeholder: item.accentColor)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .bottomLeading) {
+                        heading
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 6)
+                    }
+            } else {
+                heading
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 40)
+                    .background(alignment: .top) {
+                        LinearGradient(
+                            colors: [item.accentColor.opacity(0.22), item.accentColor.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 260)
+                    }
+            }
+            actions()
+                .controlSize(.large)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 16)
+        }
+        .transition(.opacity)
     }
 
     /// "Yesterday at 17:00 · Hayward Gallery", "Saturday · Hayward Gallery".

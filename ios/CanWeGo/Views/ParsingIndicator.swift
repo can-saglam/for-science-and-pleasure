@@ -1,40 +1,5 @@
 import SwiftUI
 
-/// The wait, made pleasant: a slim spinning gradient ring over the app
-/// blue, with rotating status copy underneath. Shared by the capture sheet
-/// and the share extension.
-struct ParsingIndicator: View {
-    /// What's being read, for the first line of the ticker.
-    var text: String? = nil
-    var hasImage = false
-    @State private var spinning = false
-
-    var body: some View {
-        VStack(spacing: 18) {
-            Circle()
-                .trim(from: 0.14, to: 1)
-                .stroke(
-                    AngularGradient(
-                        colors: [AppBackground.ink.opacity(0.04), AppBackground.ink.opacity(0.9)],
-                        center: .center
-                    ),
-                    style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
-                )
-                .frame(width: 40, height: 40)
-                .rotationEffect(.degrees(spinning ? 360 : 0))
-                .animation(
-                    .linear(duration: 1.1).repeatForever(autoreverses: false),
-                    value: spinning
-                )
-                .onAppear { spinning = true }
-
-            ParsingPhrases(text: text, hasImage: hasImage)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
 /// A save button's face: the words give way to a single checkmark that
 /// bounces in when `saved` flips, then the sheet leaves. The
 /// acknowledgement is the button itself; the library's toast says the rest.

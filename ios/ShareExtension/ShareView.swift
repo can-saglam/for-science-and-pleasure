@@ -30,23 +30,60 @@ struct ShareView: View {
     @State private var saved = false
     @State private var confirmDiscard = false
     @State private var saveAnyway = false
+    /// The phone's own preview of a shared link, while the parser reads.
+    @State private var peek: LinkPeek?
+    @State private var peekTask: Task<Void, Never>?
 
     private var isPreview: Bool {
         if case .preview = stage { return true }
         return false
     }
 
+    private var draft: Item? {
+        if case .preview(let item) = stage { return item }
+        return nil
+    }
+
+    /// Mirrors the in-app capture flow: the wait and the card share one
+    /// drawer with the photo edge to edge; editing keeps the plain sheet.
+    private var showsDrawer: Bool {
+        switch stage {
+        case .reading, .parsing: true
+        case .preview: !editing
+        default: false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    content
+                if showsDrawer {
+                    CaptureDrawer(
+                        draft: draft,
+                        peek: peek,
+                        input: payloadImage != nil ? .image : (extractedURL != nil || payloadText == nil ? .link : .text),
+                        showsMap: false
+                    ) {
+                        if let draft {
+                            VStack(alignment: .leading, spacing: 16) {
+                                preview(draft)
+                            }
+                        }
+                    }
+                    .transition(.opacity)
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        content
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .ignoresSafeArea(edges: showsDrawer ? .top : [])
             // Mirrors the in-app capture flow's preview title.
-            .sheetTitle(isPreview ? "Looks right?" : "Can We Go?") {
+            .sheetTitle(
+                showsDrawer ? nil : (isPreview ? "Looks right?" : "Can We Go?")
+            ) {
                 cancel()
             }
             .background(alignment: .top) {
@@ -65,15 +102,15 @@ struct ShareView: View {
         .tint(AppBackground.accent)
         .appColorScheme()
         .task { await run() }
+        .onDisappear { peekTask?.cancel() }
     }
 
     @ViewBuilder
     private var content: some View {
         switch stage {
         case .reading, .parsing:
-            ParsingIndicator(text: extractedURL ?? payloadText, hasImage: payloadImage != nil)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 64)
+            // Shown in the drawer instead.
+            EmptyView()
 
         case .signedOut:
             VStack(alignment: .leading, spacing: 14) {
@@ -129,15 +166,6 @@ struct ShareView: View {
     @ViewBuilder
     private func preview(_ draft: Item) -> some View {
         if !editing {
-            Label(
-                draft.isPlace ? "Looks like a place" : "Looks like an event",
-                systemImage: draft.isPlace ? "mappin.and.ellipse" : "ticket"
-            )
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-
-            ItemCard(item: draft)
-
             RemindRow(item: draft)
         } else {
             ItemForm(item: draft)
@@ -309,14 +337,30 @@ struct ShareView: View {
     }
 
     private func parse() async {
-        stage = .parsing
+        withAnimation(.snappy) { stage = .parsing }
         editing = false
+        peekTask?.cancel()
+        if payloadImage == nil, let url = extractedURL.flatMap(URL.init(string:)) {
+            peekTask = Task {
+                guard let found = await LinkPeek.fetch(url), !Task.isCancelled, !isPreview else { return }
+                withAnimation(.spring(duration: 0.45)) { peek = found }
+            }
+        }
+        defer { peekTask?.cancel() }
         do {
             let card = try await ParseClient.parse(text: payloadText, imageJPEG: payloadImage)
+            // The card's photo lands with the card when it can.
+            if let url = card.image_url.flatMap(URL.init(string:)) {
+                await ImageStore.warm(url, variant: .hero, limit: .milliseconds(900))
+            }
             let item = item(from: card)
-            withAnimation(.snappy) { stage = .preview(item) }
+            withAnimation(.spring(duration: 0.45)) { stage = .preview(item) }
         } catch {
-            stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy) {
+                peek = nil
+                stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
+            }
         }
     }
 

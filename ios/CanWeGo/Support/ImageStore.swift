@@ -217,6 +217,18 @@ enum ImageStore {
         return await load(url, variant: variant)
     }
 
+    /// Starts a fetch and waits for it, but never longer than `limit`: a
+    /// photo that's in memory by then draws in the same frame as whatever
+    /// reveals it; a slower one carries on and pops in when it lands.
+    static func warm(_ url: URL, variant: Variant, limit: Duration) async {
+        guard cached(url, variant: variant) == nil else { return }
+        Task { _ = await fetch(url, variant: variant) }
+        let deadline = ContinuousClock.now + limit
+        while cached(url, variant: variant) == nil, ContinuousClock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+    }
+
     /// The card image and its pre-blurred melt underlay, together. Baking
     /// the blur once (instead of a live `.blur` on every card) takes the
     /// heaviest per-frame GPU pass out of scrolling entirely.

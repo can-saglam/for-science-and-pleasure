@@ -35,38 +35,60 @@ extension View {
     /// the display face. Replaces the navigation bar (hidden here) so the
     /// title gets the full width — the leading toolbar slot hugs its
     /// capsule and was clipping "Where are we going?" to "W…".
-    func sheetTitle(_ title: String, onClose: @escaping () -> Void) -> some View {
+    ///
+    /// A nil title is for content that runs edge to edge under the header
+    /// (the capture drawer's photo): the close button floats in the same
+    /// spot with no inset.
+    func sheetTitle(_ title: String?, onClose: @escaping () -> Void) -> some View {
         toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
-                HStack(alignment: .top, spacing: 12) {
-                    Text(title)
-                        .font(.displaySmallBold(30, relativeTo: .title2))
-                        .foregroundStyle(AppBackground.ink)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityAddTraits(.isHeader)
-                        // Sits on the button's optical centre line.
-                        .padding(.top, 7)
-                    Button {
-                        Haptics.tap()
-                        onClose()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.body.weight(.semibold))
+                if let title {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(title)
+                            .font(.displaySmallBold(30, relativeTo: .title2))
                             .foregroundStyle(AppBackground.ink)
-                            // Same 44pt circle the toolbar used to draw.
-                            .frame(width: 44, height: 44)
-                            .contentShape(.circle)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityAddTraits(.isHeader)
+                            // Sits on the button's optical centre line.
+                            .padding(.top, 7)
+                        SheetCloseButton(onClose: onClose)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .accessibilityLabel("Close")
+                    .padding(.horizontal, 20)
+                    // Clears the sheet's drag indicator with room to breathe.
+                    .padding(.top, 30)
+                    .padding(.bottom, 8)
                 }
-                .padding(.horizontal, 20)
-                // Clears the sheet's drag indicator with room to breathe.
-                .padding(.top, 30)
-                .padding(.bottom, 8)
             }
+            .overlay(alignment: .top) {
+                if title == nil {
+                    SheetCloseButton(onClose: onClose)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 30)
+                }
+            }
+    }
+}
+
+private struct SheetCloseButton: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        Button {
+            Haptics.tap()
+            onClose()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppBackground.ink)
+                // Same 44pt circle the toolbar used to draw.
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .accessibilityLabel("Close")
     }
 }

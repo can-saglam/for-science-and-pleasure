@@ -38,6 +38,13 @@ struct CaptureView: View {
     @State private var paywall: PlusReason?
     /// The on-device model's quick read, shown while the parser works.
     @State private var firstLook: Item?
+    /// Set while the parser reads (and kept once its card is in): what it
+    /// was sent. The input stage gives way to the capture drawer.
+    @State private var reading: CaptureInput?
+    /// The phone's own preview of the link, while the parser reads.
+    @State private var peek: LinkPeek?
+    @State private var parseTask: Task<Void, Never>?
+    @State private var peekTask: Task<Void, Never>?
     /// The last parse failed for want of a connection.
     @State private var offline = false
     @State private var sync = SyncStatus.shared
@@ -59,31 +66,58 @@ struct CaptureView: View {
     /// Known offline before sending, or found out by a send that failed.
     private var offlineMode: Bool { offline || !sync.online }
 
+    /// The parser's wait and its card share one drawer, photo edge to edge;
+    /// editing (and the blank card) keep the plain sheet and its form.
+    private var showsDrawer: Bool { (reading != nil || draft != nil) && !editing && !manual }
+
+    /// Past the input stage: the sheet stays at full height.
+    private var expanded: Bool { reading != nil || draft != nil }
+
+    private var reveal: Animation {
+        reduceMotion ? .easeInOut(duration: 0.3) : .spring(duration: 0.45)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if let draft {
-                        previewStage(draft)
-                            .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
-                    } else {
-                        inputStage
+                if showsDrawer {
+                    CaptureDrawer(draft: draft, look: firstLook, peek: peek, input: reading ?? .text) {
+                        if let draft {
+                            VStack(alignment: .leading, spacing: 18) {
+                                previewStage(draft)
+                            }
+                        }
+                    }
+                    .transition(.opacity)
+                } else {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let draft {
+                            previewStage(draft)
+                                .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
+                        } else {
+                            inputStage
+                        }
+                    }
+                    .padding(20)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        // Only the input stage drives the small detent; the
+                        // drawer and the form go to .large regardless.
+                        guard !expanded else { return }
+                        inputHeight = height
                     }
                 }
-                .padding(20)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    // Only the input stage drives the small detent; the
-                    // preview's long form goes to .large regardless.
-                    guard draft == nil else { return }
-                    inputHeight = height
-                }
             }
+            // The drawer's photo runs edge to edge under the close button.
+            .ignoresSafeArea(edges: showsDrawer ? .top : [])
             .scrollDismissesKeyboard(.interactively)
             // The header lives in the top safe-area inset, so its height
             // shows up here rather than in the content above.
-            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { headerHeight = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { height in
+                guard !showsDrawer else { return }
+                headerHeight = height
+            }
             .sheetTitle(
-                draft == nil ? Voice.whereGoing : (manual ? "Add your own" : "Looks right?")
+                showsDrawer ? nil : (draft == nil ? Voice.whereGoing : (manual ? "Add your own" : "Looks right?"))
             ) {
                 dismiss()
             }
@@ -109,26 +143,31 @@ struct CaptureView: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
         .sensoryFeedback(.success, trigger: saved) { _, new in new }
-        .onChange(of: draft != nil) { _, hasDraft in
-            withAnimation(.snappy) { detent = hasDraft ? .large : inputDetent }
+        .onChange(of: expanded) { _, isExpanded in
+            withAnimation(.snappy) { detent = isExpanded ? .large : inputDetent }
         }
         // The measured height settles a frame or two after the sheet
         // appears (and moves when a notice comes or goes): follow it.
         .onChange(of: inputDetent) { _, now in
-            guard draft == nil else { return }
+            guard !expanded else { return }
             withAnimation(.snappy) { detent = now }
+        }
+        // Closing mid-read stops the parse and the link preview with it.
+        .onDisappear {
+            parseTask?.cancel()
+            peekTask?.cancel()
         }
         .onAppear {
             loadLibrary()
             // A picture from Visual Intelligence is read straight away.
             if imageJPEG == nil, draft == nil, let picture = CaptureGate.take() {
                 imageJPEG = picture
-                Task { await parse() }
+                startParse()
             }
             // So is a suggestion chip's link.
             if text.isEmpty, imageJPEG == nil, draft == nil, let link = CaptureGate.takeLink() {
                 text = link
-                Task { await parse() }
+                startParse()
             }
             // CWG_BLANK is only set by automated screenshot runs; it jumps
             // straight to the blank-card edit stage.
@@ -148,7 +187,7 @@ struct CaptureView: View {
             if ProcessInfo.processInfo.environment["CWG_DUPE"] != nil,
                let url = library.compactMap(\.url).first {
                 text = url
-                Task { await parse() }
+                startParse()
             }
         }
         // A changed input is a new question; the old duplicate verdict goes.
@@ -184,8 +223,10 @@ struct CaptureView: View {
             text: $text, imageJPEG: $imageJPEG,
             busy: busy || savingOffline, offline: offlineMode, onManual: startManual
         ) {
-            Task {
-                if offlineMode { await saveOffline() } else { await parse() }
+            if offlineMode {
+                Task { await saveOffline() }
+            } else {
+                startParse()
             }
         }
 
@@ -204,11 +245,6 @@ struct CaptureView: View {
             .transition(.opacity)
         }
 
-        if let firstLook, busy {
-            firstLookCard(firstLook)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-        }
-
         if let errorMessage, !offlineMode {
             // The input is still in the field above — nothing is lost — so
             // the way forward is one tap, not a re-paste.
@@ -220,7 +256,7 @@ struct CaptureView: View {
                 if canParse {
                     Button("Try again") {
                         Haptics.tap()
-                        Task { await parse() }
+                        startParse()
                     }
                     .font(.footnote.weight(.semibold))
                     .buttonStyle(.glass)
@@ -235,27 +271,10 @@ struct CaptureView: View {
             duplicateNotice(existing) {
                 saveAnyway = true
                 self.existing = nil
-                Task { await parse() }
+                startParse()
             }
             .transition(.opacity)
         }
-    }
-
-    /// The quick read, faint while the parser checks it.
-    private func firstLookCard(_ look: Item) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("First look, from your iPhone", systemImage: "sparkles")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            ItemCard(item: look, compact: true)
-                .opacity(0.75)
-                .allowsHitTesting(false)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
     }
 
     /// With the phone's quick read, the save goes into the library now and
@@ -328,27 +347,13 @@ struct CaptureView: View {
 
     @ViewBuilder
     private func previewStage(_ draft: Item) -> some View {
-        // While editing, the form IS the preview — showing the card too
-        // just duplicates (or, for a blank card, embarrasses) it.
-        if !editing {
-            Label(
-                draft.isPlace ? "Looks like a place" : "Looks like an event",
-                systemImage: draft.isPlace ? "mappin.and.ellipse" : "ticket"
-            )
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.top, 6)
-
-            // The card already wears its thumbnail — a hero image above it
-            // just showed the same picture twice.
-            ItemCard(item: draft)
-
-            RemindRow(item: draft)
-        }
-
+        // Reading, this sits under the drawer's header, which is the
+        // card; editing, the form is the preview and the header steps out.
         if editing {
             ItemForm(item: draft)
                 .transition(.opacity)
+        } else {
+            RemindRow(item: draft)
         }
 
         // The parser may land on something we already have — the same URL
@@ -453,6 +458,8 @@ struct CaptureView: View {
                         Button("Discard", role: .destructive) {
                             withAnimation(.snappy) {
                                 self.draft = nil
+                                reading = nil
+                                peek = nil
                                 editing = false
                                 manual = false
                             }
@@ -552,6 +559,13 @@ struct CaptureView: View {
         }
     }
 
+    /// Every way into a parse goes through here, so closing the sheet can
+    /// stop the one in flight.
+    private func startParse() {
+        parseTask?.cancel()
+        parseTask = Task { await parse() }
+    }
+
     private func parse() async {
         busy = true
         errorMessage = nil
@@ -566,17 +580,38 @@ struct CaptureView: View {
             withAnimation(.snappy) { existing = twin }
             return
         }
+        withAnimation(reveal) {
+            peek = nil
+            reading = CaptureInput(text: trimmed, hasImage: imageJPEG != nil)
+        }
+        // A screenshot's picture only ever comes from the parser; a link
+        // gets the phone's own preview in the meantime.
+        peekTask?.cancel()
+        if imageJPEG == nil, let url = LinkPeek.firstURL(in: trimmed) {
+            peekTask = Task {
+                guard let found = await LinkPeek.fetch(url), !Task.isCancelled, busy, draft == nil else { return }
+                withAnimation(reveal) { peek = found }
+            }
+        }
         let look = Task { await InstantDraft.make(text: trimmed, imageJPEG: imageJPEG) }
         Task {
             guard let quick = await look.value, busy, draft == nil else { return }
-            withAnimation(.snappy) { firstLook = quick.item }
+            withAnimation(reveal) { firstLook = quick.item }
         }
-        defer { look.cancel() }
+        defer {
+            look.cancel()
+            peekTask?.cancel()
+        }
         do {
             let card = try await ParseClient.parse(
                 text: trimmed.isEmpty ? nil : trimmed,
                 imageJPEG: imageJPEG
             )
+            guard !Task.isCancelled else { return }
+            // The card's photo lands with the card when it can.
+            if let url = card.image_url.flatMap(URL.init(string:)) {
+                await ImageStore.warm(url, variant: .hero, limit: .milliseconds(900))
+            }
             firstLook = nil
             let item = Item()
             item.kind = card.kind
@@ -598,8 +633,14 @@ struct CaptureView: View {
             item.placeId = card.place_id
             // A partner's save may have synced in while the parser worked.
             loadLibrary()
-            withAnimation(.spring(duration: 0.4)) { draft = item }
+            withAnimation(reveal) { draft = item }
         } catch {
+            guard !Task.isCancelled else { return }
+            // Back to the composer, the input still in it.
+            withAnimation(reveal) {
+                reading = nil
+                peek = nil
+            }
             // ParseError already speaks to a person; everything else
             // (URLError, decoding) gets the same translation sync uses.
             errorMessage = (error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message

@@ -18,6 +18,8 @@ enum Voice {
     static var didGoBang: String { didGo + "!" }
     /// The section and archive name, in title case.
     static var didGoSection: String { plural ? "We Did Go" : "I Did Go" }
+    /// The morning-after answer: "We went" / "I went".
+    static var went: String { plural ? "We went" : "I went" }
     /// For a card that was marked missed first.
     static var didGoAfterAll: String { didGo + " after all" }
     /// The undo toast after marking something done.

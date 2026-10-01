@@ -13,7 +13,6 @@ struct ItemDetailView: View {
     @Bindable var item: Item
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
-    @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var done = false
     @State private var editing = false
@@ -52,22 +51,7 @@ struct ItemDetailView: View {
         return "Edited by \(name) · \(when)"
     }
 
-    private var dateLine: String? {
-        switch (item.startsOn, item.endsOn) {
-        case let (s?, e?) where s == e:
-            return DayString.text(s, date: .abbreviated)
-        case let (s?, e?):
-            let from = DayString.text(s, date: .abbreviated) ?? s
-            let to = DayString.text(e, date: .abbreviated) ?? e
-            return "\(from) – \(to)"
-        case let (s?, nil):
-            return "From \(DayString.text(s, date: .abbreviated) ?? s)"
-        case let (nil, e?):
-            return "Until \(DayString.text(e, date: .abbreviated) ?? e)"
-        default:
-            return nil
-        }
-    }
+    private var dateLine: String? { item.dateLine }
 
     private var heroURL: URL? {
         item.imageUrl.flatMap(URL.init(string:))
@@ -408,46 +392,7 @@ struct ItemDetailView: View {
     /// Full-bleed photo melting into the sheet through a theme-colored
     /// scrim, with the title and meta sitting on top of it.
     private func heroHeader(_ url: URL) -> some View {
-        Color.clear
-            .frame(height: 230)
-            .overlay {
-                // Hero tier: the one place full-size pixels are worth it.
-                CachedImage(url: url, variant: .hero) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        item.accentColor.opacity(0.25)
-                    }
-                }
-            }
-            .overlay {
-                LinearGradient(
-                    stops: [
-                        // A veil at the top keeps the floating controls
-                        // legible — dark under light glyphs, light under
-                        // cream's black ones.
-                        .init(
-                            color: AppBackground.theme.isLight
-                                ? .white.opacity(0.35) : .black.opacity(0.35),
-                            location: 0
-                        ),
-                        .init(color: .clear, location: 0.32),
-                        .init(color: AppBackground.sheet.opacity(0.7), location: 0.78),
-                        .init(color: AppBackground.sheet, location: 1),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-            .clipped()
-            // The filled image overflows the frame, and at fractional pixel
-            // positions the clip edge and the gradient's edge round
-            // differently, leaking a one-pixel line of raw photo just past
-            // the bottom. A sheet-colored strip straddling the boundary
-            // (1pt of overhang into the plain sheet below) buries it.
-            .overlay(alignment: .bottom) {
-                AppBackground.sheet.frame(height: 3).offset(y: 1)
-            }
+        HeroPhoto(url: url, placeholder: item.accentColor)
             .overlay(alignment: .bottomLeading) {
                 header
                     .padding(.horizontal, 20)
@@ -455,26 +400,9 @@ struct ItemDetailView: View {
             }
     }
 
-    /// Google's photos have to name who took them wherever they're shown
-    /// large. The parser puts the name on the link (`by`).
-    private var photoCredit: String? {
-        guard showsHero, let raw = item.imageUrl, raw.contains("/functions/v1/place-photo"),
-              let parts = URLComponents(string: raw)
-        else { return nil }
-        // Form encoding: "+" is a space (a real plus arrives as %2B).
-        let by = parts.percentEncodedQueryItems?.first { $0.name == "by" }?.value?
-            .replacingOccurrences(of: "+", with: "%20").removingPercentEncoding ?? ""
-        return by.isEmpty ? "Photo from Google Maps" : "Photo by \(by) on Google Maps"
-    }
+    private var photoCredit: String? { showsHero ? item.photoCredit : nil }
 
-    /// "Nunhead" under a "Nunhead" venue, or "Barbican" under "Barbican
-    /// Centre", says nothing new.
-    private var areaLine: String? {
-        guard let area = item.area else { return nil }
-        let squash = { (s: String) in s.lowercased().filter { $0.isLetter || $0.isNumber } }
-        if let venue = item.venue, venue != item.title, squash(venue).contains(squash(area)) { return nil }
-        return area
-    }
+    private var areaLine: String? { item.areaLine }
 
     private var header: some View {
         // At accessibility sizes the pair can't share a line without the
@@ -527,43 +455,7 @@ struct ItemDetailView: View {
 
         PlanOrRemind(item: item)
 
-        if let lat = item.lat, let lng = item.lng {
-            let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
-            Map(initialPosition: .region(.init(
-                center: coord,
-                span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
-            ))) {
-                Marker(item.venue ?? item.title, coordinate: coord)
-                    .tint(item.accentColor)
-            }
-            .frame(height: 190)
-            .allowsHitTesting(false)
-            .overlay(alignment: .bottomTrailing) {
-                Label("Open in \(TransportApp.current.name)", systemImage: "arrow.up.right")
-                    .font(.caption.weight(.medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
-                    .padding(8)
-            }
-            .clipShape(.rect(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(AppBackground.ink.opacity(0.10), lineWidth: 1)
-            )
-            .contentShape(.rect(cornerRadius: 18, style: .continuous))
-            .onTapGesture {
-                if let maps = item.directionsURL {
-                    Haptics.tap()
-                    openURL(maps)
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(item.directionsURL == nil
-                ? (item.venue ?? item.title)
-                : "Open in \(TransportApp.current.name)")
-            .accessibilityAddTraits(item.directionsURL == nil ? [] : .isButton)
-        }
+        PlaceMap(item: item)
 
         if let notes = item.notes, !notes.isEmpty {
             Text(notes)
@@ -713,4 +605,154 @@ struct ItemDetailView: View {
         }
     }
 
+}
+
+/// The details' header photo: full-bleed, melting into the sheet through a
+/// theme-colored scrim. Whatever sits on it goes in an overlay.
+struct HeroPhoto: View {
+    let url: URL?
+    /// A picture already on the phone (the capture drawer's link preview):
+    /// shown on its own, or under `url` until that one has loaded.
+    var image: UIImage? = nil
+    let placeholder: Color
+    var height: CGFloat = 230
+
+    var body: some View {
+        Color.clear
+            .frame(height: height)
+            .overlay {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    placeholder.opacity(0.25)
+                }
+            }
+            .overlay {
+                if let url {
+                    // Hero tier: the one place full-size pixels are worth it.
+                    CachedImage(url: url, variant: .hero) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().scaledToFill()
+                        }
+                    }
+                }
+            }
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        // A veil at the top keeps the floating controls
+                        // legible — dark under light glyphs, light under
+                        // cream's black ones.
+                        .init(
+                            color: AppBackground.theme.isLight
+                                ? .white.opacity(0.35) : .black.opacity(0.35),
+                            location: 0
+                        ),
+                        .init(color: .clear, location: 0.32),
+                        .init(color: AppBackground.sheet.opacity(0.7), location: 0.78),
+                        .init(color: AppBackground.sheet, location: 1),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .clipped()
+            // The filled image overflows the frame, and at fractional pixel
+            // positions the clip edge and the gradient's edge round
+            // differently, leaking a one-pixel line of raw photo just past
+            // the bottom. A sheet-colored strip straddling the boundary
+            // (1pt of overhang into the plain sheet below) buries it.
+            .overlay(alignment: .bottom) {
+                AppBackground.sheet.frame(height: 3).offset(y: 1)
+            }
+    }
+}
+
+/// Where it is, with a tap through to directions. Shared by the detail
+/// drawer and the capture drawer; nothing for a save without a location.
+struct PlaceMap: View {
+    let item: Item
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if let lat = item.lat, let lng = item.lng {
+            let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            Map(initialPosition: .region(.init(
+                center: coord,
+                span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
+            ))) {
+                Marker(item.venue ?? item.title, coordinate: coord)
+                    .tint(item.accentColor)
+            }
+            .frame(height: 190)
+            .allowsHitTesting(false)
+            .overlay(alignment: .bottomTrailing) {
+                Label("Open in \(TransportApp.current.name)", systemImage: "arrow.up.right")
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+                    .padding(8)
+            }
+            .clipShape(.rect(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(AppBackground.ink.opacity(0.10), lineWidth: 1)
+            )
+            .contentShape(.rect(cornerRadius: 18, style: .continuous))
+            .onTapGesture {
+                if let maps = item.directionsURL {
+                    Haptics.tap()
+                    openURL(maps)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(item.directionsURL == nil
+                ? (item.venue ?? item.title)
+                : "Open in \(TransportApp.current.name)")
+            .accessibilityAddTraits(item.directionsURL == nil ? [] : .isButton)
+        }
+    }
+}
+
+/// The quiet lines under a drawer's header, shared by the detail drawer
+/// and the capture drawer.
+extension Item {
+    var dateLine: String? {
+        switch (startsOn, endsOn) {
+        case let (s?, e?) where s == e:
+            return DayString.text(s, date: .abbreviated)
+        case let (s?, e?):
+            let from = DayString.text(s, date: .abbreviated) ?? s
+            let to = DayString.text(e, date: .abbreviated) ?? e
+            return "\(from) – \(to)"
+        case let (s?, nil):
+            return "From \(DayString.text(s, date: .abbreviated) ?? s)"
+        case let (nil, e?):
+            return "Until \(DayString.text(e, date: .abbreviated) ?? e)"
+        default:
+            return nil
+        }
+    }
+
+    /// "Nunhead" under a "Nunhead" venue, or "Barbican" under "Barbican
+    /// Centre", says nothing new.
+    var areaLine: String? {
+        guard let area else { return nil }
+        let squash = { (s: String) in s.lowercased().filter { $0.isLetter || $0.isNumber } }
+        if let venue, venue != title, squash(venue).contains(squash(area)) { return nil }
+        return area
+    }
+
+    /// Google's photos have to name who took them wherever they're shown
+    /// large. The parser puts the name on the link (`by`).
+    var photoCredit: String? {
+        guard let raw = imageUrl, raw.contains("/functions/v1/place-photo"),
+              let parts = URLComponents(string: raw)
+        else { return nil }
+        // Form encoding: "+" is a space (a real plus arrives as %2B).
+        let by = parts.percentEncodedQueryItems?.first { $0.name == "by" }?.value?
+            .replacingOccurrences(of: "+", with: "%20").removingPercentEncoding ?? ""
+        return by.isEmpty ? "Photo from Google Maps" : "Photo by \(by) on Google Maps"
+    }
 }
