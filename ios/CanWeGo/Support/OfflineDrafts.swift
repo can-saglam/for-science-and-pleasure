@@ -114,10 +114,10 @@ enum OfflineDrafts {
                 // as it was typed.
                 var tried = entry
                 tried.attempts += 1
-                let unreadable = if case ParseClient.ParseError.server(_, let status) = error {
-                    (400..<500).contains(status) && ![401, 403, 408].contains(status)
-                } else {
-                    false
+                let unreadable = switch error as? ParseClient.ParseError {
+                case .server(_, let status): (400..<500).contains(status) && ![401, 403, 408].contains(status)
+                case .tooVague: true
+                default: false
                 }
                 if unreadable || tried.attempts >= 5 {
                     let landed = entry.inLibrary ? true : await landAsTyped(entry, picture: picture, userId: userId)

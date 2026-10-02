@@ -28,12 +28,15 @@ enum ParseClient {
     enum ParseError: LocalizedError {
         case notConfigured
         case server(String, status: Int)
+        /// A search rather than a save ("modern art museums in London"),
+        /// which capture answers with its own note instead of a warning.
+        case tooVague(String)
 
         var errorDescription: String? {
             switch self {
             case .notConfigured:
                 return "Missing Secrets.plist. See ios/README.md."
-            case .server(let message, _):
+            case .server(let message, _), .tooVague(let message):
                 return message
             }
         }
@@ -129,8 +132,10 @@ enum ParseClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
-            let serverMessage = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(friendly(status: status, serverMessage: serverMessage), status: status)
+            let body = try? JSONDecoder().decode([String: String].self, from: data)
+            let message = friendly(status: status, serverMessage: body?["error"])
+            if status == 422, body?["code"] == "too_vague" { throw ParseError.tooVague(message) }
+            throw ParseError.server(message, status: status)
         }
         struct Envelope: Decodable { let card: Card }
         return try JSONDecoder().decode(Envelope.self, from: data).card

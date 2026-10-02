@@ -158,6 +158,7 @@ struct DayActivityView: View {
     let context: ActivityViewContext<DayActivityAttributes>
     let look: DayLook
     @Environment(\.activityFamily) private var family
+    @Environment(\.isLuminanceReduced) private var luminanceReduced
 
     var body: some View {
         switch family {
@@ -207,9 +208,12 @@ struct DayActivityView: View {
 
     /// Today-only days wear the cards' rose badge; the rest read as a
     /// quiet caption.
+    private var urgent: Bool {
+        ["Last day", "On today", "Opens today"].contains(context.state.label)
+    }
+
     @ViewBuilder
     private var label: some View {
-        let urgent = ["Last day", "On today", "Opens today"].contains(context.state.label)
         if urgent {
             Text(context.state.label)
                 .font(.caption2.weight(.semibold))
@@ -224,22 +228,67 @@ struct DayActivityView: View {
         }
     }
 
-    /// Apple Watch Smart Stack and CarPlay.
+    /// Apple Watch Smart Stack and CarPlay: the photo as a poster, fading
+    /// into the card colour under the title. The photo is decoded smaller
+    /// than the Lock Screen's: the watch drew that one as an empty square.
+    /// Dimmed with the wrist down.
     private var small: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(context.state.label)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(look.islandAccent)
+        let photo = LivePhoto.load(context.attributes.itemID, maxSide: 300)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(context.attributes.title)
+                .font(.custom("PPNeueGstaad-CondensedRegular", size: 19, relativeTo: .headline))
+                .foregroundStyle(look.ink)
+                .lineLimit(2)
+            if let line = smallLine {
+                Text(line)
+                    .font(.caption2)
+                    .foregroundStyle(context.state.hours.map(DayLook.isClosedLine) == true
+                        ? Color.red.mix(with: look.ink, by: 0.55)
+                        : look.ink.opacity(0.7))
                     .lineLimit(1)
-                Text(context.attributes.title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Thumb(look: look, side: 34, corner: 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .overlay(alignment: .topLeading) { smallBadge }
         .padding(8)
+        .background {
+            if let photo {
+                Image(uiImage: photo)
+                    .resizable()
+                    .scaledToFill()
+                    .opacity(luminanceReduced ? 0.4 : 1)
+                    .overlay(
+                        LinearGradient(
+                            stops: [
+                                .init(color: look.card.opacity(0), location: 0.1),
+                                .init(color: look.card.opacity(0.6), location: 0.45),
+                                .init(color: look.card, location: 0.88),
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+            }
+        }
+        .clipShape(.rect(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Today's hours, or the venue without its area when there are none:
+    /// on the wrist there's room for one line, and on the day the hours
+    /// are what decide the trip.
+    private var smallLine: String? {
+        context.state.hours ?? context.attributes.place?.components(separatedBy: " · ").first
+    }
+
+    /// Sits on the photo, so every label gets a capsule: rose for the
+    /// today-only days, the card colour for the rest.
+    private var smallBadge: some View {
+        Text(context.state.label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(urgent ? Color.red.mix(with: look.ink, by: 0.65) : look.ink)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(urgent ? Color.red.mix(with: look.card, by: 0.55) : look.card.opacity(0.85), in: .capsule)
     }
 }
 

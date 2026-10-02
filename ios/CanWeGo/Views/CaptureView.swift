@@ -15,6 +15,7 @@ struct CaptureView: View {
     @State private var imageJPEG: Data?
     @State private var busy = false
     @State private var errorMessage: String?
+    @State private var tooVague = false
 
     /// Unsaved model object; only inserted into the store on "Save".
     @State private var draft: Item?
@@ -245,7 +246,11 @@ struct CaptureView: View {
             .transition(.opacity)
         }
 
-        if let errorMessage, !offlineMode {
+        if tooVague, !offlineMode {
+            SearchNote()
+        }
+
+        if let errorMessage, !offlineMode, !tooVague {
             // The input is still in the field above — nothing is lost — so
             // the way forward is one tap, not a re-paste.
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -569,6 +574,7 @@ struct CaptureView: View {
     private func parse() async {
         busy = true
         errorMessage = nil
+        tooVague = false
         offline = false
         firstLook = nil
         defer { busy = false }
@@ -644,6 +650,7 @@ struct CaptureView: View {
             // ParseError already speaks to a person; everything else
             // (URLError, decoding) gets the same translation sync uses.
             errorMessage = (error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message
+            if case ParseClient.ParseError.tooVague = error { tooVague = true }
             if OfflineDrafts.isOffline(error) {
                 // No connection fails fast, usually before the quick read
                 // is back: wait for it, it's what gets saved.
@@ -684,6 +691,31 @@ struct CaptureView: View {
             try? await Task.sleep(for: .seconds(0.6))
             dismiss()
         }
+    }
+}
+
+/// A search instead of a save is a nudge, not a fault: no warning colours,
+/// and no retry, since the same words get the same answer.
+private struct SearchNote: View {
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.body.weight(.medium))
+                .foregroundStyle(AppBackground.ink)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("That\u{2019}s a search, not a save")
+                    .font(.displaySmall(18, relativeTo: .headline))
+                    .foregroundStyle(AppBackground.ink)
+                Text("Name one place or show, or paste a link to it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
     }
 }
 

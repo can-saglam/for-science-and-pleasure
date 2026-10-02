@@ -8,18 +8,22 @@ import UIKit
 /// read as four little thoughts instead of a wall.
 struct ItemForm: View {
     @Bindable var item: Item
+    /// What the event had before it became a place, so flipping back
+    /// within the same edit brings it all back.
+    @State private var eventOnly: EventFields?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
+            // First, because it decides which fields follow: a place has
+            // no dates, and its title already is the venue.
+            Picker("Kind", selection: $item.kind) {
+                Text("Event").tag(Item.Kind.event)
+                Text("Place").tag(Item.Kind.place)
+            }
+            .pickerStyle(.segmented)
+
             section("The basics") {
-                field("Title", icon: "pencil.line", text: $item.title)
-
-                Picker("Kind", selection: $item.kind) {
-                    Text("Event").tag(Item.Kind.event)
-                    Text("Place").tag(Item.Kind.place)
-                }
-                .pickerStyle(.segmented)
-
+                field(item.isPlace ? "Name of the place" : "What\u{2019}s on", icon: "pencil.line", text: $item.title)
                 field("Category", icon: "tag", text: optional($item.category))
             }
 
@@ -28,14 +32,21 @@ struct ItemForm: View {
             }
 
             section("Where") {
-                field("Venue", icon: "building.2", text: optional($item.venue))
+                if item.isEvent {
+                    field("Venue", icon: "building.2", text: optional($item.venue))
+                }
                 field("Area", icon: "mappin.and.ellipse", text: optional($item.area))
             }
 
-            section("When") {
-                OptionalDateRow(label: "Opens", icon: "calendar", value: $item.startsOn)
-                OptionalDateRow(label: "Closes", icon: "calendar.badge.checkmark", value: $item.endsOn)
-                RemindRow(item: item)
+            // A hand-picked reminder needs no dates, so a place can keep one.
+            if item.isEvent || item.hasCustomReminder {
+                section("When") {
+                    if item.isEvent {
+                        OptionalDateRow(label: "Opens", icon: "calendar", value: $item.startsOn)
+                        OptionalDateRow(label: "Closes", icon: "calendar.badge.checkmark", value: $item.endsOn)
+                    }
+                    RemindRow(item: item)
+                }
             }
 
             section("Extras") {
@@ -56,6 +67,57 @@ struct ItemForm: View {
                 .padding(12)
                 .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
             }
+        }
+        // Hidden dates would still count: a place with a closing date
+        // drops into Missed the day after. So a place saves without them.
+        .onChange(of: [item.id.uuidString, item.kind]) { old, new in
+            // A different item handed in isn't a flip.
+            guard old[0] == new[0] else {
+                eventOnly = nil
+                return
+            }
+            if new[1] == Item.Kind.place {
+                eventOnly = EventFields(item)
+                item.startsOn = nil
+                item.endsOn = nil
+                item.venue = nil
+                item.reconcileReminder()
+            } else if let stashed = eventOnly {
+                stashed.restore(into: item)
+                eventOnly = nil
+            }
+        }
+    }
+
+    private struct EventFields {
+        let startsOn: String?
+        let endsOn: String?
+        let venue: String?
+        let reminderOffsetDays: Int?
+        let reminderAnchor: String?
+        let remindAt: String?
+        let remindTime: String?
+
+        init(_ item: Item) {
+            startsOn = item.startsOn
+            endsOn = item.endsOn
+            venue = item.venue
+            reminderOffsetDays = item.reminderOffsetDays
+            reminderAnchor = item.reminderAnchor
+            remindAt = item.remindAt
+            remindTime = item.remindTime
+        }
+
+        /// Only into fields still empty: anything typed as a place stays.
+        func restore(into item: Item) {
+            item.startsOn = item.startsOn ?? startsOn
+            item.endsOn = item.endsOn ?? endsOn
+            item.venue = item.venue ?? venue
+            guard !item.hasReminder else { return }
+            item.reminderOffsetDays = reminderOffsetDays
+            item.reminderAnchor = reminderAnchor
+            item.remindAt = remindAt
+            item.remindTime = remindTime
         }
     }
 
@@ -163,7 +225,6 @@ private struct ThumbnailField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                fieldIcon("photo")
                 PhotosPicker(selection: $pick, matching: .images) {
                     HStack(spacing: 12) {
                         thumb
@@ -183,13 +244,13 @@ private struct ThumbnailField: View {
                 .disabled(uploading)
                 .accessibilityLabel(item.imageUrl == nil ? "Add a photo" : "Change photo")
 
-                if UIImagePickerController.isSourceTypeAvailable(.camera), !uploading {
+                if UIImagePickerController.isSourceTypeAvailable(.camera), item.imageUrl == nil, !uploading {
                     Button {
                         Haptics.tap()
                         cameraOpen = true
                     } label: {
                         Image(systemName: "camera")
-                            .font(.subheadline)
+                            .font(.body)
                             .foregroundStyle(AppBackground.ink.opacity(0.45))
                     }
                     .buttonStyle(.plain)
@@ -202,6 +263,7 @@ private struct ThumbnailField: View {
                         Task { await clear() }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
