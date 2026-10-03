@@ -30,15 +30,23 @@ enum ParseClient {
         case server(String, status: Int)
         /// A search rather than a save ("modern art museums in London"),
         /// which capture answers with its own note instead of a warning.
-        case tooVague(String)
+        /// `firm` once they've searched more than a few times today.
+        case tooVague(String, firm: Bool)
 
         var errorDescription: String? {
             switch self {
             case .notConfigured:
                 return "Missing Secrets.plist. See ios/README.md."
-            case .server(let message, _), .tooVague(let message):
+            case .server(let message, _), .tooVague(let message, _):
                 return message
             }
+        }
+
+        /// The day's lookups are used up. Never named as such: capture
+        /// says "tomorrow" and points at filling the card in by hand.
+        var isRestingForToday: Bool {
+            if case .server(_, 429) = self { return true }
+            return false
         }
     }
 
@@ -103,7 +111,7 @@ enum ParseClient {
         case 413:
             return "That photo is too big. Try a smaller screenshot."
         case 429:
-            return "That\u{2019}s today\u{2019}s reading done. Come back tomorrow, or fill the card in yourself."
+            return "Let\u{2019}s pick this up tomorrow. You can still fill the card in yourself today."
         case 500...:
             return "The server tripped over that one. Try again in a moment."
         default:
@@ -134,7 +142,9 @@ enum ParseClient {
         guard status == 200 else {
             let body = try? JSONDecoder().decode([String: String].self, from: data)
             let message = friendly(status: status, serverMessage: body?["error"])
-            if status == 422, body?["code"] == "too_vague" { throw ParseError.tooVague(message) }
+            if status == 422, body?["code"] == "too_vague" {
+                throw ParseError.tooVague(message, firm: body?["firm"] == "true")
+            }
             throw ParseError.server(message, status: status)
         }
         struct Envelope: Decodable { let card: Card }

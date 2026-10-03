@@ -187,7 +187,7 @@ struct ItemDetailView: View {
             ActivitySheet(items: [card.image])
                 .presentationDetents([.medium, .large])
         }
-        .sheet(item: $paywall) { PlusPaywall(reason: $0) { item.putBack() } }
+        .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }
         // The edit form needs the room, so entering edit expands the sheet.
         .onChange(of: editing) { _, isEditing in
             if isEditing { detent = .large }

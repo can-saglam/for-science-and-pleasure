@@ -1,8 +1,11 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 /** AI calls per person per day, parse + locate + suggest together. Plus
- * comes from the group: anyone covered by a member's subscription gets it. */
-export const DAILY = { free: 10, plus: 50 } as const;
+ * comes from the group: anyone covered by a member's subscription gets it.
+ * Never mentioned in the app: the limit people see is ten (or fifty) new
+ * saves a day (0043). This is the ceiling behind it, for lookups that are
+ * never saved, and twice that so nobody adding normally meets it. */
+export const DAILY = { free: 20, plus: 100 } as const;
 export type QuotaKind = "parse" | "locate" | "suggest";
 
 async function coveredByPlus(db: SupabaseClient, userId: string): Promise<boolean> {
@@ -48,6 +51,23 @@ export async function consumeHours(db: SupabaseClient, userId: string): Promise<
   const day = new Date().toISOString().slice(0, 10);
   const { data, error } = await db.rpc("bump_hours", { p_user_id: userId, p_day: day });
   return !error && typeof data === "number" && data <= DAILY_HOURS;
+}
+
+/** Searches that weren't saves, before the note gets firmer and a quick
+ * check answers text in place of a full lookup. */
+export const VAGUE_STRIKES = 4;
+
+export async function vagueStrikes(db: SupabaseClient, userId: string): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { data } = await db.from("usage_daily").select("vague").eq("user_id", userId).eq("day", day).maybeSingle();
+  return data?.vague ?? 0;
+}
+
+/** Today's count after this one. */
+export async function bumpVague(db: SupabaseClient, userId: string): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { data, error } = await db.rpc("bump_vague", { p_user_id: userId, p_day: day });
+  return !error && typeof data === "number" ? data : 0;
 }
 
 export const quotaResponse = () =>

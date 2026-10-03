@@ -15,7 +15,8 @@ struct CaptureView: View {
     @State private var imageJPEG: Data?
     @State private var busy = false
     @State private var errorMessage: String?
-    @State private var tooVague = false
+    /// A parse that came back as a nudge rather than a fault.
+    @State private var nudge: CaptureNudge?
 
     /// Unsaved model object; only inserted into the store on "Save".
     @State private var draft: Item?
@@ -35,8 +36,11 @@ struct CaptureView: View {
     @State private var headerHeight: CGFloat = 0
     @State private var inputHeight: CGFloat = 0
     @State private var confirmDiscard = false
-    /// Set when Save meets a full category: the card stays, Plus is offered.
+    /// Set when Save meets a full category or a full day: the card stays,
+    /// Plus is offered.
     @State private var paywall: PlusReason?
+    /// Plus, and today's fifty are in.
+    @State private var busyDay = false
     /// The on-device model's quick read, shown while the parser works.
     @State private var firstLook: Item?
     /// Set while the parser reads (and kept once its card is in): what it
@@ -208,9 +212,15 @@ struct CaptureView: View {
             }
         }
         .sheet(item: $paywall) { reason in
-            PlusPaywall(reason: reason) {
-                if let draft { commit(draft) }
-            }
+            PlusPaywall(
+                reason: reason,
+                incoming: draft,
+                onUnlocked: { if let draft { commit(draft) } },
+                onLater: reason == .daily ? saveForTomorrow : nil
+            )
+        }
+        .sheet(isPresented: $busyDay) {
+            BusyDaySheet(incoming: draft, onLater: saveForTomorrow)
         }
     }
 
@@ -246,11 +256,11 @@ struct CaptureView: View {
             .transition(.opacity)
         }
 
-        if tooVague, !offlineMode {
-            SearchNote()
+        if let nudge, !offlineMode {
+            NudgeNote(nudge: nudge)
         }
 
-        if let errorMessage, !offlineMode, !tooVague {
+        if let errorMessage, !offlineMode, nudge == nil {
             // The input is still in the field above — nothing is lost — so
             // the way forward is one tap, not a re-paste.
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -410,16 +420,6 @@ struct CaptureView: View {
             // Not `.disabled`: that would grey the button out under "Saved".
             .allowsHitTesting(!saved)
 
-            if !saved, !draft.isDone, let full = CategoryCap.overflow(draft, context: context) {
-                Label(
-                    "\(CategoryCap.plural(full)) already has \(CategoryCap.limit) coming up. Saving this one needs Plus, or a different category.",
-                    systemImage: "lock"
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
             if !saved, manual {
                 // A blank card is always in edit mode and the × already
                 // throws it away, so the one secondary action is the way
@@ -574,7 +574,7 @@ struct CaptureView: View {
     private func parse() async {
         busy = true
         errorMessage = nil
-        tooVague = false
+        nudge = nil
         offline = false
         firstLook = nil
         defer { busy = false }
@@ -650,7 +650,11 @@ struct CaptureView: View {
             // ParseError already speaks to a person; everything else
             // (URLError, decoding) gets the same translation sync uses.
             errorMessage = (error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message
-            if case ParseClient.ParseError.tooVague = error { tooVague = true }
+            if case ParseClient.ParseError.tooVague(_, let firm) = error {
+                nudge = firm ? .stillSearching : .search
+            } else if (error as? ParseClient.ParseError)?.isRestingForToday == true {
+                nudge = .tomorrow
+            }
             if OfflineDrafts.isOffline(error) {
                 // No connection fails fast, usually before the quick read
                 // is back: wait for it, it's what gets saved.
@@ -666,14 +670,35 @@ struct CaptureView: View {
     }
 
     /// Parse first, paywall second: the finished card is on screen when a
-    /// full category is mentioned, and it saves itself once Plus lands.
+    /// full day or a full category is mentioned, and it saves itself once
+    /// Plus lands.
     private func save(_ item: Item) {
+        if DailyCap.isFull(adding: item, context: context) {
+            Haptics.tap()
+            if GroupStore.shared.card?.isPlus == true { busyDay = true } else { paywall = .daily }
+            return
+        }
         if !item.isDone, let full = CategoryCap.overflow(item, context: context) {
             Haptics.tap()
             paywall = .category(full)
             return
         }
         commit(item)
+    }
+
+    /// Today is full: the card goes to the phone's inbox, which lands it
+    /// as soon as there's room — tomorrow, unless one of today's goes.
+    /// The drawer has already asked, so the inbox doesn't ask again.
+    private func saveForTomorrow() {
+        guard let draft, let userId = SupabaseAuth.shared.userId else { return }
+        guard let file = try? SharedInbox.write(SharedInbox.PendingSave(item: draft, userId: userId)) else { return }
+        SharedInbox.markAsked(file)
+        Haptics.success()
+        withAnimation(.easeInOut(duration: 0.25)) { saved = true }
+        Task {
+            try? await Task.sleep(for: .seconds(0.6))
+            dismiss()
+        }
     }
 
     private func commit(_ item: Item) {
@@ -694,9 +719,36 @@ struct CaptureView: View {
     }
 }
 
-/// A search instead of a save is a nudge, not a fault: no warning colours,
-/// and no retry, since the same words get the same answer.
-private struct SearchNote: View {
+enum CaptureNudge {
+    case search
+    /// The fifth search of the day, and after.
+    case stillSearching
+    /// The day's lookups are used up; never named as such.
+    case tomorrow
+}
+
+/// A search instead of a save, or a day that's had enough, is a nudge,
+/// not a fault: no warning colours, and no retry, since the same words
+/// get the same answer.
+private struct NudgeNote: View {
+    let nudge: CaptureNudge
+
+    private var title: String {
+        switch nudge {
+        case .search: "That\u{2019}s a search, not a save"
+        case .stillSearching: "We save, we don\u{2019}t search"
+        case .tomorrow: "Let\u{2019}s pick this up tomorrow"
+        }
+    }
+
+    private var detail: String {
+        switch nudge {
+        case .search: "Name one place or show, or paste a link to it."
+        case .stillSearching: "Found somewhere you like? Paste its link, share a screenshot, or type its name."
+        case .tomorrow: "You can still fill the card in yourself with Add manually."
+        }
+    }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "info.circle")
@@ -704,10 +756,10 @@ private struct SearchNote: View {
                 .foregroundStyle(AppBackground.ink)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("That\u{2019}s a search, not a save")
+                Text(title)
                     .font(.displaySmall(18, relativeTo: .headline))
                     .foregroundStyle(AppBackground.ink)
-                Text("Name one place or show, or paste a link to it.")
+                Text(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

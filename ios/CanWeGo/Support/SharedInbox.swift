@@ -60,7 +60,9 @@ enum SharedInbox {
             .appending(path: "PendingSaves", directoryHint: .isDirectory)
     }
 
-    static func write(_ save: PendingSave) throws {
+    /// The file's name, for `markAsked`.
+    @discardableResult
+    static func write(_ save: PendingSave) throws -> String {
         guard let directory else {
             throw NSError(
                 domain: "CanWeGo", code: 2,
@@ -70,6 +72,28 @@ enum SharedInbox {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let file = directory.appending(path: "\(UUID().uuidString).json")
         try JSONEncoder().encode(save).write(to: file, options: .atomic)
+        return file.lastPathComponent
+    }
+
+    // MARK: - Parked saves
+
+    /// Saves held back for a full day or a full category stay in the
+    /// inbox and land by themselves once there's room. The Plus drawer
+    /// asks about each one once; these are the files it has asked about.
+    private static let askedKey = "inboxParkedAsked"
+    private static var defaults: UserDefaults { UserDefaults(suiteName: groupID) ?? .standard }
+
+    static var asked: Set<String> {
+        Set(defaults.stringArray(forKey: askedKey) ?? [])
+    }
+
+    /// Replaces the record: files that have since landed drop out of it.
+    static func setAsked(_ files: [String]) {
+        defaults.set(files, forKey: askedKey)
+    }
+
+    static func markAsked(_ file: String) {
+        setAsked(Array(asked.union([file])))
     }
 
     /// Files this account may import. Decode failures and other people's
@@ -130,6 +154,38 @@ extension SharedInbox.PendingSave {
         imageUrl = card.image_url
         source = card.source
         placeId = card.place_id
+        self.userId = userId.uuidString
+        groupId = GroupStore.shared.card?.groupId.uuidString
+    }
+}
+
+extension SharedInbox.PendingSave {
+    /// A card on screen (the share sheet's, or capture's "Save it for
+    /// tomorrow") as it waits in the inbox.
+    @MainActor
+    init(item: Item, userId: UUID) {
+        self.init(kind: item.kind, title: item.title)
+        summary = item.summary
+        venue = item.venue
+        area = item.area
+        address = item.address
+        category = item.category
+        price = item.price
+        startsOn = item.startsOn
+        endsOn = item.endsOn
+        reminderOffsetDays = item.reminderOffsetDays
+        reminderAnchor = item.reminderAnchor
+        remindAt = item.remindAt
+        remindTime = item.remindTime
+        url = item.url
+        notes = item.notes
+        lat = item.lat
+        lng = item.lng
+        colorHex = item.colorHex
+        imageUrl = item.imageUrl
+        source = item.source
+        placeId = item.placeId
+        status = item.status
         self.userId = userId.uuidString
         groupId = GroupStore.shared.card?.groupId.uuidString
     }

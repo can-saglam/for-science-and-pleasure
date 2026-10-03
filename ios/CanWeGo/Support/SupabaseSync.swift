@@ -132,7 +132,6 @@ enum SupabaseSync {
         SavedURLIndex.rebuild(from: fresh)
         SpotlightIndex.sync(items: fresh)
         WidgetStore.sync(items: fresh)
-        CategoryCap.publish(fresh)
         await MembersStore.shared.refresh()
         await HomeStore.shared.refresh()
     }
@@ -296,6 +295,13 @@ enum SupabaseSync {
         if rejectedDetail?.contains("category_full") == true, let category = first.category {
             return SyncProblem(
                 message: "\(title)\(more) is only on this phone: \(CategoryCap.plural(category)) is full on the free plan. Plus removes the limit.",
+                detail: rejectedDetail
+            )
+        }
+        // The daily add trigger: another phone of theirs added the last one.
+        if rejectedDetail?.contains("daily_full") == true {
+            return SyncProblem(
+                message: "\(title)\(more) is only on this phone for now: that\u{2019}s as many new things as you can add in a day. It\u{2019}ll sync tomorrow.",
                 detail: rejectedDetail
             )
         }
@@ -504,6 +510,7 @@ enum SupabaseSync {
     private static func push(
         context: ModelContext, since cursor: Date, serverTimes: [UUID: Date] = [:]
     ) async throws {
+        releaseDailyRefusals()
         let locals = try context.fetch(FetchDescriptor<Item>())
         let dirty = locals.filter { item in
             guard !isQuarantined(item) else { return false }
@@ -538,6 +545,19 @@ enum SupabaseSync {
         for (item, _) in refused { record[item.id.uuidString] = item.updatedAt }
         rejected = record
         rejectedDetail = refused.first?.1.detail
+        if refused.contains(where: { $0.1.detail?.contains("daily_full") == true }) {
+            defaults.set(DayString.today(), forKey: dailyRefusedKey)
+        }
+    }
+
+    /// The day a row was last refused for the daily add limit. Those rows
+    /// go back in the next day without needing an edit.
+    private static let dailyRefusedKey = "supabaseDailyRefusedDay"
+
+    private static func releaseDailyRefusals() {
+        guard let day = defaults.string(forKey: dailyRefusedKey), day != DayString.today() else { return }
+        rejected = [:]
+        defaults.removeObject(forKey: dailyRefusedKey)
     }
 
     private static func upsert(rows: [Row]) async throws {

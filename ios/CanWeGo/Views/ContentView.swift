@@ -97,15 +97,17 @@ struct ContentView: View {
     @State private var undoBin = UndoBin.shared
     @State private var syncStatus = SyncStatus.shared
     @State private var group = GroupStore.shared
-    /// A share-sheet save is waiting on a full category. CWG_PAYWALL
-    /// (screenshot runs) opens it straight away: `browse`, `seats`, or a
-    /// category.
-    @State private var inboxPaywall: PlusReason? = ProcessInfo.processInfo.environment["CWG_PAYWALL"].map {
-        switch $0 {
+    /// A share-sheet or Siri save is waiting on a full day or a full
+    /// category. CWG_PAYWALL (screenshot runs) opens it straight away:
+    /// `browse`, `seats`, `daily`, or a category.
+    @State private var inboxAsk: ParkedAsk? = ProcessInfo.processInfo.environment["CWG_PAYWALL"].map {
+        let reason: PlusReason = switch $0 {
         case "browse": .browsing
         case "seats": .seats
+        case "daily": .daily
         default: .category($0)
         }
+        return ParkedAsk(id: "screenshot", reason: reason, item: nil)
     }
     /// An item summoned from outside the lists: a tapped reminder
     /// notification or a Spotlight result.
@@ -183,12 +185,14 @@ struct ContentView: View {
         .sheet(isPresented: $captureOpen) {
             CaptureView()
         }
-        .sheet(item: $inboxPaywall) { reason in
-            PlusPaywall(
-                reason: reason,
-                note: "Your share is waiting on this phone. It\u{2019}ll land by itself once there\u{2019}s room."
-            ) {
-                drainInbox()
+        .sheet(item: $inboxAsk) { ask in
+            if ask.reason == .daily, group.card?.isPlus == true {
+                BusyDaySheet(incoming: ask.item)
+            } else {
+                PlusPaywall(
+                    reason: ask.reason, incoming: ask.item, holding: ask.item?.title,
+                    onUnlocked: { drainInbox() }
+                )
             }
         }
         // The kill switch. Server-driven; CWG_FORCE_UPDATE only exists so
@@ -361,7 +365,7 @@ struct ContentView: View {
     /// save that was opened from outside.
     private func offerFollowUp() {
         #if !APP_EXTENSION
-        guard followUp == nil, deepLinked == nil, !captureOpen, joinCode == nil, inboxPaywall == nil,
+        guard followUp == nil, deepLinked == nil, !captureOpen, joinCode == nil, inboxAsk == nil,
               syncStatus.hasSyncedOnce, !syncStatus.updateRequired, !group.libraryIsForeign,
               scenePhase == .active
         else { return }
@@ -456,7 +460,6 @@ struct ContentView: View {
             // The widget's snapshot rebuilds after the pull, so it
             // rotates through the freshest library.
             WidgetStore.sync(items: items.filter { !$0.isDeleted })
-            CategoryCap.publish(items)
             offerFollowUp()
             await LocationBackfill.run(context: context)
         }
@@ -466,9 +469,10 @@ struct ContentView: View {
         Task { await HomeStore.shared.refresh() }
     }
 
-    /// Brings the share extension's saves in. One that would overflow a
-    /// full free category stays parked: the paywall asks once, and it
-    /// lands by itself as soon as there's room (or Plus).
+    /// Brings the share extension's (and Siri's) saves in. One past
+    /// today's adds or a full free category stays parked: the drawer asks
+    /// once, and it lands by itself as soon as there's room — tomorrow,
+    /// for a full day — or Plus.
     @discardableResult
     private func drainInbox() -> [String] {
         // Same rule as the share sheet's "already saved": a deleted save
@@ -476,7 +480,7 @@ struct ContentView: View {
         var existing = Set(items.filter { !$0.isDeleted }.compactMap { $0.url.map(SavedURLIndex.normalize) })
         var claimed: [Item] = []
         var claimedURLs: [String] = []
-        var parked: [(file: String, category: String)] = []
+        var parked: [(file: String, reason: PlusReason, item: Item)] = []
         // A foreign library is about to be replaced — leave the files
         // so they can land once this account's store is in place.
         if !group.libraryIsForeign {
@@ -488,10 +492,16 @@ struct ContentView: View {
                     continue
                 }
                 let item = Item(pending: save)
-                if !item.isDone, let full = CategoryCap.overflow(item, context: context) {
-                    parked.append((claim.file.lastPathComponent, full))
+                if DailyCap.isFull(adding: item, context: context) {
+                    parked.append((claim.file.lastPathComponent, .daily, item))
                     continue
                 }
+                if !item.isDone, let full = CategoryCap.overflow(item, context: context) {
+                    parked.append((claim.file.lastPathComponent, .category(full), item))
+                    continue
+                }
+                // Shared on an earlier day, landing now: one of today's adds.
+                if item.createdAt < DailyCap.startOfToday { item.createdAt = .now }
                 item.addedByEmail = SupabaseAuth.shared.email
                 if item.createdBy == nil { item.createdBy = SupabaseAuth.shared.userId }
                 item.updatedBy = SupabaseAuth.shared.userId
@@ -519,17 +529,13 @@ struct ContentView: View {
                 for item in claimed { await SupabaseSync.announceSave(item) }
             }
         }
-        let asked = Set(Self.parkedDefaults.stringArray(forKey: Self.parkedKey) ?? [])
+        let asked = SharedInbox.asked
         if let fresh = parked.first(where: { !asked.contains($0.file) }), !captureOpen {
-            Self.parkedDefaults.set(parked.map(\.file), forKey: Self.parkedKey)
-            inboxPaywall = .category(fresh.category)
+            SharedInbox.setAsked(parked.map(\.file))
+            inboxAsk = ParkedAsk(id: fresh.file, reason: fresh.reason, item: fresh.item)
         }
         return claimedURLs
     }
-
-    /// Parked saves the paywall has already asked about, by inbox file.
-    private static let parkedKey = "inboxParkedAsked"
-    private static var parkedDefaults: UserDefaults { UserDefaults(suiteName: SharedInbox.groupID) ?? .standard }
 
     /// A card landing on the other tab: go there, so the glow is seen.
     private func followLanding(_ id: UUID?) {
@@ -704,4 +710,12 @@ private struct UndoButton: View {
 #Preview {
     ContentView()
         .modelContainer(for: Item.self, inMemory: true)
+}
+
+/// A parked save the Plus drawer is asking about, by inbox file.
+struct ParkedAsk: Identifiable {
+    let id: String
+    let reason: PlusReason
+    /// The save itself, on top of the drawer's stack. Not in the store.
+    let item: Item?
 }

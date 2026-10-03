@@ -246,23 +246,12 @@ struct ShareView: View {
         }
         .padding(.top, 4)
 
-        // The app holds a save that would overflow a full free category in
-        // the inbox and asks about Plus when it opens; nothing is lost.
-        if !draft.isDone, draft.timeBucket != .past, CategoryCap.lastKnownFull(draft.category),
-           let category = draft.category {
-            Label(
-                "\(CategoryCap.plural(category)) is full on the free plan. This will wait in your inbox; open Can We Go? to finish.",
-                systemImage: "tray.full"
-            )
+        // A save past a full category or a full day says the same: the
+        // app holds it and asks about Plus when it opens; nothing is lost.
+        Text("It'll appear in the app the next time you open it.")
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            Text("It'll appear in the app the next time you open it.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-        }
+            .frame(maxWidth: .infinity)
     }
 
     private var duplicateBlock: some View {
@@ -463,30 +452,8 @@ struct ShareView: View {
             stage = .signedOut
             return
         }
-        var pending = SharedInbox.PendingSave(kind: item.kind, title: item.title)
-        pending.summary = item.summary
-        pending.venue = item.venue
-        pending.area = item.area
-        pending.address = item.address
-        pending.category = item.category
-        pending.price = item.price
-        pending.startsOn = item.startsOn
-        pending.endsOn = item.endsOn
-        pending.reminderOffsetDays = item.reminderOffsetDays
-        pending.reminderAnchor = item.reminderAnchor
-        pending.remindAt = item.remindAt
-        pending.remindTime = item.remindTime
-        pending.url = item.url
-        pending.lat = item.lat
-        pending.lng = item.lng
-        pending.colorHex = item.colorHex
-        pending.imageUrl = item.imageUrl
-        pending.source = item.source
-        pending.placeId = item.placeId
-        pending.status = item.status
+        var pending = SharedInbox.PendingSave(item: item, userId: userId)
         pending.allowDuplicate = saveAnyway ? true : nil
-        pending.userId = userId.uuidString
-        pending.groupId = GroupStore.shared.card?.groupId.uuidString
         finish(pending)
     }
 

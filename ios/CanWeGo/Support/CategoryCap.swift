@@ -57,27 +57,4 @@ enum CategoryCap {
         if label.hasSuffix("y") { return String(label.dropLast()) + "ies" }
         return label + "s"
     }
-
-    // MARK: - For the share extension
-
-    /// The extension has no store of its own, so the app leaves it the
-    /// counts after every sync and import. Only used for wording: the
-    /// extension parks every save in the inbox either way.
-    private static let snapshotKey = "categoryCapSnapshot"
-    private static var defaults: UserDefaults { UserDefaults(suiteName: SharedInbox.groupID) ?? .standard }
-
-    @MainActor
-    static func publish(_ items: [Item]) {
-        let snapshot: [String: Int] = applies ? tally(items) : [:]
-        if defaults.dictionary(forKey: snapshotKey) as? [String: Int] != snapshot {
-            defaults.set(snapshot, forKey: snapshotKey)
-        }
-    }
-
-    /// True when the last snapshot says `category` is already full.
-    static func lastKnownFull(_ category: String?) -> Bool {
-        let k = key(category)
-        guard !k.isEmpty, let snapshot = defaults.dictionary(forKey: snapshotKey) as? [String: Int] else { return false }
-        return (snapshot[k] ?? 0) >= limit
-    }
 }

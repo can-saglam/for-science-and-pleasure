@@ -11,6 +11,8 @@ struct ItemCard: View {
     /// Context-specific meta line ("Closes Fri 29 Aug · venue")
     /// — replaces both the subtitle and the countdown label.
     var meta: String? = nil
+    /// Cards stacked so only their top shows (the Plus drawer's fan).
+    var oneLineTitle = false
 
     private var subtitle: String {
         if let meta { return meta }
@@ -156,7 +158,7 @@ struct ItemCard: View {
                     .multilineTextAlignment(.leading)
                     // Big type wraps rather than clips: a truncated title is
                     // a missing title to someone reading at that size.
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : (oneLineTitle ? 1 : 2))
                 // With a thumbnail bleeding in from the right, the countdown
                 // moves down beside the subtitle so titles keep their room.
                 if !stackedTimeLabel, let label = slotLabel {
@@ -583,7 +585,7 @@ struct ItemCardRow: View {
             ActivitySheet(items: [card.image])
                 .presentationDetents([.medium, .large])
         }
-        .sheet(item: $paywall) { PlusPaywall(reason: $0) { item.putBack() } }
+        .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }
     }
 
     /// The glow: the card's accent pulled toward the ink so it reads on

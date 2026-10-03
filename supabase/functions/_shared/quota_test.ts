@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { consumeQuota, DAILY } from "./quota.ts";
+import { bumpVague, consumeQuota, DAILY, VAGUE_STRIKES, vagueStrikes } from "./quota.ts";
 
 /** A fake client: `usage` is today's usage_daily row, `plus` whether the
  * entitlements count comes back non-zero. Counting goes through the
@@ -33,9 +33,9 @@ function stub(
   } as never;
 }
 
-Deno.test("ten a day free, fifty with Plus", () => {
-  assertEquals(DAILY.free, 10);
-  assertEquals(DAILY.plus, 50);
+Deno.test("twenty a day free, a hundred with Plus: twice the saves people see", () => {
+  assertEquals(DAILY.free, 20);
+  assertEquals(DAILY.plus, 100);
 });
 
 Deno.test("first use of the day counts one of its kind", async () => {
@@ -49,7 +49,7 @@ Deno.test("first use of the day counts one of its kind", async () => {
 
 Deno.test("kinds share one allowance", async () => {
   const bumps: unknown[] = [];
-  const ok = await consumeQuota(stub({ parse: 6, locate: 1, suggest: 3 }, false, (a) => bumps.push(a)), "u1", "parse");
+  const ok = await consumeQuota(stub({ parse: 12, locate: 2, suggest: 6 }, false, (a) => bumps.push(a)), "u1", "parse");
   assertEquals(ok, false);
   assertEquals(bumps, []);
 });
@@ -66,12 +66,33 @@ Deno.test("a failed count refuses rather than letting it through uncounted", asy
   assertEquals(ok, false);
 });
 
-Deno.test("Plus keeps going past ten", async () => {
-  const ok = await consumeQuota(stub({ parse: 10, locate: 0, suggest: 0 }, true, () => {}), "u1", "parse");
+Deno.test("Plus keeps going past twenty", async () => {
+  const ok = await consumeQuota(stub({ parse: 20, locate: 0, suggest: 0 }, true, () => {}), "u1", "parse");
   assertEquals(ok, true);
 });
 
-Deno.test("Plus stops at fifty", async () => {
-  const ok = await consumeQuota(stub({ parse: 45, locate: 0, suggest: 5 }, true, () => {}), "u1", "parse");
+Deno.test("Plus stops at a hundred", async () => {
+  const ok = await consumeQuota(stub({ parse: 95, locate: 0, suggest: 5 }, true, () => {}), "u1", "parse");
   assertEquals(ok, false);
+});
+
+Deno.test("the note gets firmer after four searches", () => {
+  assertEquals(VAGUE_STRIKES, 4);
+});
+
+Deno.test("search strikes read today's row, zero without one", async () => {
+  assertEquals(await vagueStrikes(stub({ vague: 3 }, false, () => {}), "u1"), 3);
+  assertEquals(await vagueStrikes(stub(null, false, () => {}), "u1"), 0);
+});
+
+Deno.test("a strike is counted through bump_vague and returns today's total", async () => {
+  let called = "";
+  const db = {
+    rpc(name: string, args: Record<string, unknown>) {
+      called = `${name}:${args.p_user_id}`;
+      return Promise.resolve({ data: 5, error: null });
+    },
+  } as never;
+  assertEquals(await bumpVague(db, "u1"), 5);
+  assertEquals(called, "bump_vague:u1");
 });

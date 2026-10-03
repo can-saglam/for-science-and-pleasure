@@ -2,19 +2,23 @@ import StoreKit
 import SwiftData
 import SwiftUI
 
-/// Why the paywall is up. Money is only ever mentioned at two moments —
-/// a fifth save in a category, a third person — or when someone asks.
+/// Why the paywall is up. Money is only ever mentioned at three moments —
+/// a fifth save of a kind, an eleventh save in a day, a third person — or
+/// when someone asks.
 enum PlusReason: Hashable, Identifiable {
     case browsing
     case seats
     /// The category (as stored) that's full.
     case category(String)
+    /// Today's ten new saves are in.
+    case daily
 
     var id: String {
         switch self {
         case .browsing: "browsing"
         case .seats: "seats"
         case .category(let c): "category-\(c)"
+        case .daily: "daily"
         }
     }
 }
@@ -59,17 +63,24 @@ private struct Plan: Identifiable {
     ]
 }
 
-/// The one paywall: Settings, the My group card, a full category and a
-/// full group all open it. It leads with the library itself — the saves
-/// that filled the category, the seats still empty — then the plans. In a
-/// group that's already Plus it shows who's covering it instead.
+/// The one paywall: Settings, the My group card, a full category, a full
+/// day and a full group all open it. It leads with the library itself —
+/// the save they were adding on top of the ones that filled the list or
+/// the day, the seats still empty — then the plans. In a group that's
+/// already Plus it shows who's covering it instead.
 struct PlusPaywall: View {
     var reason: PlusReason = .browsing
-    /// A line of context from the caller, under the benefits.
-    var note: String?
+    /// The save that met the limit, on top of the stack. Not in the store.
+    var incoming: Item?
+    /// The title of a save already parked on the phone, which lands by
+    /// itself later: said in the line under the plans.
+    var holding: String?
     /// Runs once the server says the group is Plus — the capture sheet
-    /// uses it to save the card it was holding.
+    /// uses it to save the card it was holding. First of the two, so a
+    /// trailing closure lands here.
     var onUnlocked: (() -> Void)?
+    /// "Save it for tomorrow": parks the save it was holding.
+    var onLater: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.purchase) private var purchase
@@ -180,46 +191,34 @@ struct PlusPaywall: View {
         .accessibilityHidden(true)
     }
 
-    /// The saves the sheet is about: the ones filling a full category, or
-    /// a few of the library's liveliest — photos first.
+    /// The saves the sheet is about, back to front: the ones filling a
+    /// full category or today's adds, with the one they were adding on
+    /// top; otherwise a few of the library's liveliest — photos first.
     private var heroCards: [Item] {
         let live = items.filter(CategoryCap.counts)
         let pool: [Item]
-        if case .category(let c) = reason {
+        switch reason {
+        case .category(let c):
             let key = CategoryCap.key(c)
             pool = live.filter { CategoryCap.key($0.category) == key }
-        } else {
+        case .daily:
+            pool = DailyCap.today(items, me: me)
+        default:
             pool = live
         }
-        let photographed = pool.filter { $0.imageUrl != nil } + pool.filter { $0.imageUrl == nil }
-        let limit = if case .category = reason { CategoryCap.limit } else { 3 }
-        return Array(photographed.prefix(limit)).reversed()
+        let others = pool.filter { $0.id != incoming?.id }
+        let photographed = others.filter { $0.imageUrl != nil } + others.filter { $0.imageUrl == nil }
+        let room = switch reason {
+        case .category: CategoryCap.limit
+        case .daily: 4
+        default: 3
+        }
+        let behind = Array(photographed.prefix(room - (incoming == nil ? 0 : 1))).reversed()
+        return behind + [incoming].compactMap(\.self)
     }
 
-    /// Back to front: each card behind shows its title above the next.
-    private static let fanSeats: [(tilt: Double, x: Double, y: Double)] = [
-        (-5, -26, -54), (4, 24, -20), (-2, -16, 14), (0, 8, 50),
-    ]
-
     private func fan(_ cards: [Item]) -> some View {
-        let seats = Array(Self.fanSeats.suffix(cards.count))
-        return ZStack {
-            ForEach(Array(cards.enumerated()), id: \.element.id) { i, item in
-                let seat = seats[i]
-                ItemCard(item: item)
-                    .frame(width: 272)
-                    .allowsHitTesting(false)
-                    .rotationEffect(.degrees(dealt ? seat.tilt : 0))
-                    .offset(x: dealt ? seat.x : 0, y: dealt ? seat.y : 90)
-                    .scaleEffect(dealt ? 1 : 0.88)
-                    .opacity(dealt ? 1 : 0)
-                    .shadow(color: .black.opacity(AppBackground.theme.isLight ? 0.10 : 0.35), radius: 16, y: 8)
-                    .animation(
-                        reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(i) * 0.1),
-                        value: dealt
-                    )
-            }
-        }
+        CardFan(cards: cards, dealt: dealt)
     }
 
     /// The group as a row of seats: who's in (a star on whoever holds
@@ -259,22 +258,19 @@ struct PlusPaywall: View {
                 .scaleEffect(dealt ? 1 : 0.6)
                 .opacity(dealt ? 1 : 0)
             }
+            let waiting = Self.waitingColours(after: members)
             ForEach(0..<empty, id: \.self) { i in
                 VStack(spacing: 8) {
                     Image(systemName: "plus")
                         .font(.title2.weight(.medium))
-                        .foregroundStyle(AppBackground.ink.opacity(0.55))
+                        .foregroundStyle(AppBackground.ink.opacity(0.5))
                         .frame(width: size, height: size)
-                        .background(AppBackground.wash(0.05), in: .circle)
-                        .overlay(
-                            Circle().strokeBorder(
-                                AppBackground.ink.opacity(0.35),
-                                style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
-                            )
-                        )
-                    Text("With Plus")
-                        .font(.caption)
-                        .foregroundStyle(AppBackground.ink.opacity(0.55))
+                        .background(AvatarColour.color(waiting[i % waiting.count]).opacity(0.32), in: .circle)
+                    Text(i == 0 ? "A friend" : "And another")
+                        .font((size > 68 ? Font.footnote : Font.caption).weight(.semibold))
+                        .foregroundStyle(AppBackground.ink.opacity(0.62))
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 .scaleEffect(dealt ? 1 : 0.6)
                 .opacity(dealt ? 1 : 0)
@@ -282,6 +278,13 @@ struct PlusPaywall: View {
             }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.6, bounce: 0.3), value: dealt)
+    }
+
+    /// An empty seat is a pale wash of a colour nobody in the group has yet.
+    private static func waitingColours(after members: [GroupCard.Member]) -> [String] {
+        let taken = Set(members.compactMap(\.avatarColour))
+        let free = ["sky", "amber", "lilac", "rose", "teal", "mint", "coral", "plum"].filter { !taken.contains($0) }
+        return free.isEmpty ? ["sky", "amber"] : free
     }
 
     /// An empty library has nothing to fan: the wordmark instead.
@@ -300,21 +303,13 @@ struct PlusPaywall: View {
 
     // MARK: - Words
 
-    private var eyebrow: String {
-        if isCovered { return "Can We Go? Plus" }
-        switch reason {
-        case .browsing: return "Can We Go? Plus"
-        case .seats: return "Your group \u{00B7} \(group.card?.members.count ?? 2) of 2 seats"
-        case .category(let c): return "\(CategoryCap.plural(c)) \u{00B7} \(CategoryCap.limit) of \(CategoryCap.limit)"
-        }
-    }
-
     private var title: String {
         if isCovered { return "You\u{2019}ve got Plus" }
         switch reason {
         case .browsing: return "Plan without limits"
         case .seats: return "Bring two more along"
-        case .category(let c): return "Room for every \(Item.categoryLabel(c).lowercased())"
+        case .category: return "Room for one more?"
+        case .daily: return "That\u{2019}s \(Self.spelled(DailyCap.free)) for today"
         }
     }
 
@@ -322,12 +317,22 @@ struct PlusPaywall: View {
         if isCovered { return coveredLine }
         switch reason {
         case .browsing:
-            return "Can We Go? is free. Plus removes the limits for everyone in your group."
+            return "Can We Go? is free to use. Plus takes the caps off, for everyone in your group."
         case .seats:
-            return "A free group is for two people. With Plus, up to four can share one library."
+            return "Free groups are just for two. With Plus, four of you can share one library."
         case .category(let c):
-            return "On the free plan you can have \(CategoryCap.limit) upcoming \(CategoryCap.plural(c).lowercased()) at a time. Plus removes the limit for your whole group."
+            return "You\u{2019}ve already got \(Self.spelled(CategoryCap.limit)) \(CategoryCap.plural(c).lowercased()) lined up, the most a free group can keep of any one kind. Plus lifts the cap for all of you."
+        case .daily:
+            return "You\u{2019}ve added \(Self.spelled(DailyCap.free)) things today, the most the free plan takes in a day. With Plus, you can add up to \(Self.spelled(DailyCap.plus))."
         }
+    }
+
+    /// "four", "ten", "fifty": limits read as words in a sentence.
+    static func spelled(_ n: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        formatter.locale = Locale(identifier: "en_GB")
+        return formatter.string(from: n as NSNumber) ?? "\(n)"
     }
 
     private var coveredLine: String {
@@ -347,11 +352,13 @@ struct PlusPaywall: View {
 
     private var headline: some View {
         VStack(spacing: 12) {
-            Text(eyebrow)
-                .font(.caption.weight(.bold))
-                .tracking(1.4)
-                .textCase(.uppercase)
-                .foregroundStyle(AppBackground.ink.opacity(0.6))
+            if isCovered {
+                Text("Can We Go? Plus")
+                    .font(.caption.weight(.bold))
+                    .tracking(1.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(AppBackground.ink.opacity(0.6))
+            }
             Text(title)
                 .font(.displaySmallBold(42, relativeTo: .largeTitle))
                 .lineSpacing(-4)
@@ -369,12 +376,22 @@ struct PlusPaywall: View {
     // MARK: - Benefits
 
     private func benefits(unlocked: Bool) -> some View {
-        VStack(spacing: 0) {
-            benefit("infinity", "Save as much as you like", "No limit of \(CategoryCap.limit) per category.", unlocked)
-            Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
-            benefit("person.3.fill", "Up to four people", "Invite two more to your library.", unlocked)
-            Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
-            benefit("sparkles", "More adds each day", "Up to 50 links or screenshots a day, instead of 10.", unlocked)
+        let room = benefit(
+            "sparkles", "Line up as much as you like",
+            "Lists keep growing with no cap, and you can add up to \(Self.spelled(DailyCap.plus)) new things a day.", unlocked
+        )
+        let seats = benefit("person.3.fill", "Room for four", "Bring two more friends into your library.", unlocked)
+        return VStack(spacing: 0) {
+            // The one that answers this moment goes first.
+            if case .seats = reason {
+                seats
+                Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
+                room
+            } else {
+                room
+                Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
+                seats
+            }
         }
         .padding(.vertical, 6)
         .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 22, style: .continuous))
@@ -417,32 +434,42 @@ struct PlusPaywall: View {
             } else {
                 ForEach(plans) { planTile($0) }
             }
-            Text("One subscription covers everyone in your group.")
+            Text("One subscription covers your whole group.")
                 .font(.footnote)
                 .foregroundStyle(AppBackground.ink.opacity(0.62))
                 .padding(.top, 4)
         }
         .padding(.top, 24)
 
-        let asides = [note, reason.isCategory ? "Been and ended saves don\u{2019}t count, so ticking one off makes room too." : nil]
-            .compactMap(\.self)
-        if !asides.isEmpty || message != nil || plus.problem != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(asides, id: \.self) { line in
-                    Label(line, systemImage: "info.circle")
-                        .foregroundStyle(AppBackground.ink.opacity(0.62))
-                }
-                if let problem = message ?? plus.problem {
-                    Label(problem, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(AppBackground.warning)
-                }
-            }
-            .font(.footnote)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 20)
+        if let problem = message ?? plus.problem {
+            Label(problem, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(AppBackground.warning)
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 20)
         }
     }
+
+    /// The quiet way out, under the plans: what happens to the save if
+    /// they'd rather not.
+    private var notNow: AttributedString? {
+        if onLater != nil, case .daily = reason {
+            var text = AttributedString("Not now? ")
+            var link = AttributedString("Save it for tomorrow")
+            link.link = Self.laterURL
+            link.underlineStyle = .single
+            link.inlinePresentationIntent = .stronglyEmphasized
+            text += link
+            text += AttributedString(" and it\u{2019}ll be in your library in the morning.")
+            return text
+        }
+        guard let holding else { return nil }
+        let when = if case .daily = reason { "in the morning" } else { "as soon as there\u{2019}s room" }
+        return AttributedString("Not now? We\u{2019}ll hold on to \u{201C}\(holding)\u{201D} and add it \(when).")
+    }
+
+    private static let laterURL = URL(string: "canwego-later://tomorrow")!
 
     /// Yearly against twelve months of monthly, rounded down.
     private var yearlySaving: Int? {
@@ -598,6 +625,23 @@ struct PlusPaywall: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if let notNow {
+                    Text(notNow)
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.ink.opacity(0.72))
+                        .tint(AppBackground.ink)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 6)
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard url == Self.laterURL else { return .systemAction }
+                            Haptics.tap()
+                            onLater?()
+                            dismiss()
+                            return .handled
+                        })
+                }
+
                 HStack(spacing: 18) {
                     Button(restoring ? "Restoring\u{2026}" : "Restore") {
                         Haptics.tap()
@@ -679,10 +723,121 @@ struct PlusPaywall: View {
     }
 }
 
-private extension PlusReason {
-    var isCategory: Bool {
-        if case .category = self { return true }
-        return false
+// MARK: - Card fan
+
+/// Saves dealt into a loose stack, back to front: each card behind shows
+/// its title above the next, and the last one sits on top.
+private struct CardFan: View {
+    let cards: [Item]
+    let dealt: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let seats: [(tilt: Double, x: Double, y: Double)] = [
+        (-3, -20, -84), (3, 20, -38), (-1.5, -10, 8), (1, 6, 56),
+    ]
+
+    var body: some View {
+        let seats = Array(Self.seats.suffix(cards.count))
+        // By their tops: centred, a taller card would ride up over the
+        // title of the one behind it.
+        ZStack(alignment: .top) {
+            ForEach(Array(cards.enumerated()), id: \.element.id) { i, item in
+                let seat = seats[i]
+                ItemCard(item: item, oneLineTitle: true)
+                    .frame(width: 272)
+                    .allowsHitTesting(false)
+                    .rotationEffect(.degrees(dealt ? seat.tilt : 0))
+                    .offset(x: dealt ? seat.x : 0, y: dealt ? seat.y : 90)
+                    .scaleEffect(dealt ? 1 : 0.88)
+                    .opacity(dealt ? 1 : 0)
+                    .shadow(color: .black.opacity(AppBackground.theme.isLight ? 0.10 : 0.35), radius: 16, y: 8)
+                    .animation(
+                        reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(i) * 0.1),
+                        value: dealt
+                    )
+            }
+        }
+    }
+}
+
+// MARK: - Busy day
+
+/// Plus, and today's fifty are in: no selling, just what happens to this
+/// one. Closing it leaves the card as it was.
+struct BusyDaySheet: View {
+    /// The save that met the limit, on top. Not in the store.
+    var incoming: Item?
+    /// Parks the save for the morning. Nil when it's already parked.
+    var onLater: (() -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
+    @State private var dealt = false
+
+    private var cards: [Item] {
+        let behind = DailyCap.today(items, me: SupabaseAuth.shared.userId)
+            .filter { $0.id != incoming?.id }
+        let photographed = behind.filter { $0.imageUrl != nil } + behind.filter { $0.imageUrl == nil }
+        return Array(photographed.prefix(incoming == nil ? 3 : 2)).reversed() + [incoming].compactMap(\.self)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            CardFan(cards: cards, dealt: dealt)
+                .frame(maxWidth: .infinity)
+                .frame(height: 190)
+                .padding(.top, 70)
+                .accessibilityHidden(true)
+            Text("Busy day!")
+                .font(.displaySmallBold(42, relativeTo: .largeTitle))
+                .accessibilityAddTraits(.isHeader)
+                .padding(.top, 18)
+            Text("That\u{2019}s \(PlusPaywall.spelled(DailyCap.plus)) new things today, the most anyone can add in a day. We\u{2019}ll keep this one and add it first thing tomorrow.")
+                .font(.subheadline)
+                .foregroundStyle(AppBackground.ink.opacity(0.72))
+                .lineSpacing(2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 12)
+            Button {
+                Haptics.success()
+                onLater?()
+                dismiss()
+            } label: {
+                Text("Save for tomorrow")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .prominentGlass()
+            .controlSize(.large)
+            .padding(.top, 26)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 20)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .topTrailing) {
+            Button {
+                Haptics.tap()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .accessibilityLabel("Close")
+            .padding(.top, 24)
+            .padding(.trailing, 20)
+        }
+        .foregroundStyle(AppBackground.ink)
+        .background { ThemeFill(color: AppBackground.sheet) }
+        .presentationDetents([.height(560)])
+        .presentationDragIndicator(.visible)
+        .appColorScheme()
+        .onAppear { dealt = true }
     }
 }
 
@@ -701,9 +856,9 @@ struct PlusSection: View {
     @State private var note: String?
 
     private var status: String {
-        guard let card = group.card else { return "Unlimited saves and room for four" }
+        guard let card = group.card else { return "No cap on lists, and room for four" }
         guard card.isPlus else {
-            return "Free: \(CategoryCap.limit) per category, two people"
+            return "Free: \(CategoryCap.limit) of a kind, \(DailyCap.free) new a day, two people"
         }
         let holders = card.members.filter(\.isPlus)
         if holders.contains(where: { $0.userId == SupabaseAuth.shared.userId }) { return "On, covered by you" }

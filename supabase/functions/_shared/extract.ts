@@ -65,6 +65,45 @@ export class VagueInputError extends Error {
   }
 }
 
+/// The quick check for someone who has already searched several times
+/// today: typed words only, one short call, no web search. True only when
+/// the model is sure the words name no particular thing; anything else
+/// (a name, unsure, an error) goes on to the full lookup.
+export async function looksLikeSearch(text: string): Promise<boolean> {
+  try {
+    const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-5",
+      max_tokens: 64,
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: { search: { type: "boolean" } },
+            required: ["search"],
+            additionalProperties: false,
+          },
+        },
+      },
+      messages: [{
+        role: "user",
+        content: [
+          "Someone typed this into an app that saves one event or place at a time.",
+          "Set search to true only if it clearly names no particular venue, show, exhibition, restaurant, event, artist or performer: a category, a list, a question or a search ('good brunch spots near me', 'rooftop bars with a view', 'gigs this weekend').",
+          "A name of one thing, even misspelt or partial ('the new Kapoor show at the Hayward', 'Bao Borough', 'that ramen place in Soho called Koya'), is not a search. If unsure, set search to false.",
+          `Input:\n${text.slice(0, 500)}`,
+        ].join("\n\n"),
+      }],
+    });
+    const block = response.content.find((b) => b.type === "text");
+    if (!block || block.type !== "text") return false;
+    return (JSON.parse(block.text) as { search?: boolean }).search === true;
+  } catch {
+    return false;
+  }
+}
+
 /// What the model returns: the card plus its own reading of whether the
 /// input pointed at one real thing, and the thing's own page. Neither
 /// leaves this module as is — the page becomes the save's url once checked.
