@@ -215,8 +215,7 @@ struct CaptureView: View {
             PlusPaywall(
                 reason: reason,
                 incoming: draft,
-                onUnlocked: { if let draft { commit(draft) } },
-                onLater: reason == .daily ? saveForTomorrow : nil
+                onUnlocked: { if let draft { commit(draft) } }
             )
         }
         .sheet(isPresented: $busyDay) {

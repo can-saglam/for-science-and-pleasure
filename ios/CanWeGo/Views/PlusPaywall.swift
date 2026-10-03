@@ -72,15 +72,9 @@ struct PlusPaywall: View {
     var reason: PlusReason = .browsing
     /// The save that met the limit, on top of the stack. Not in the store.
     var incoming: Item?
-    /// The title of a save already parked on the phone, which lands by
-    /// itself later: said in the line under the plans.
-    var holding: String?
     /// Runs once the server says the group is Plus — the capture sheet
-    /// uses it to save the card it was holding. First of the two, so a
-    /// trailing closure lands here.
+    /// uses it to save the card it was holding.
     var onUnlocked: (() -> Void)?
-    /// "Save it for tomorrow": parks the save it was holding.
-    var onLater: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.purchase) private var purchase
@@ -451,26 +445,6 @@ struct PlusPaywall: View {
         }
     }
 
-    /// The quiet way out, under the plans: what happens to the save if
-    /// they'd rather not.
-    private var notNow: AttributedString? {
-        if onLater != nil, case .daily = reason {
-            var text = AttributedString("Not now? ")
-            var link = AttributedString("Save it for tomorrow")
-            link.link = Self.laterURL
-            link.underlineStyle = .single
-            link.inlinePresentationIntent = .stronglyEmphasized
-            text += link
-            text += AttributedString(" and it\u{2019}ll be in your library in the morning.")
-            return text
-        }
-        guard let holding else { return nil }
-        let when = if case .daily = reason { "in the morning" } else { "as soon as there\u{2019}s room" }
-        return AttributedString("Not now? We\u{2019}ll hold on to \u{201C}\(holding)\u{201D} and add it \(when).")
-    }
-
-    private static let laterURL = URL(string: "canwego-later://tomorrow")!
-
     /// Yearly against twelve months of monthly, rounded down.
     private var yearlySaving: Int? {
         guard let yearly = plans.first(where: \.isYearly),
@@ -624,23 +598,6 @@ struct PlusPaywall: View {
                     .foregroundStyle(AppBackground.ink.opacity(0.6))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-
-                if let notNow {
-                    Text(notNow)
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.ink.opacity(0.72))
-                        .tint(AppBackground.ink)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.vertical, 6)
-                        .environment(\.openURL, OpenURLAction { url in
-                            guard url == Self.laterURL else { return .systemAction }
-                            Haptics.tap()
-                            onLater?()
-                            dismiss()
-                            return .handled
-                        })
-                }
 
                 HStack(spacing: 18) {
                     Button(restoring ? "Restoring\u{2026}" : "Restore") {

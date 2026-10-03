@@ -190,7 +190,7 @@ struct ContentView: View {
                 BusyDaySheet(incoming: ask.item)
             } else {
                 PlusPaywall(
-                    reason: ask.reason, incoming: ask.item, holding: ask.item?.title,
+                    reason: ask.reason, incoming: ask.item,
                     onUnlocked: { drainInbox() }
                 )
             }
