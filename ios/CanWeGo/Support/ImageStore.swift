@@ -157,6 +157,7 @@ enum ImageStore {
         if let data = try? Data(contentsOf: file(for: url)) {
             image = await decoded(data, maxSide: variant.maxSide)
         } else if network {
+            guard mayFetch(url) else { return nil }
             guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
             let status = (response as? HTTPURLResponse)?.statusCode
             if let status, [404, 410].contains(status) {
@@ -165,7 +166,11 @@ enum ImageStore {
             }
             guard status.map({ (200 ..< 300).contains($0) }) ?? true,
                   let fresh = await decoded(data, maxSide: variant.maxSide)
-            else { return nil }
+            else {
+                let raw = url.absoluteString
+                failed.withLock { $0[raw] = .now }
+                return nil
+            }
             try? data.write(to: file(for: url), options: .atomic)
             setDead(url, false)
             image = fresh
@@ -295,17 +300,45 @@ enum ImageStore {
     /// like a missing one and asks the page for a fresh og:image. A network
     /// blip never lands here — only a real "gone" answer.
     private static let deadKey = "deadImageURLs"
+    /// When each dead URL last answered 404/410.
+    private static let deadCheckedKey = "deadImageCheckedAt"
 
     static func isDead(_ url: String) -> Bool {
         (UserDefaults.standard.stringArray(forKey: deadKey) ?? []).contains(url)
     }
 
     private static func setDead(_ url: URL, _ dead: Bool) {
-        var set = Set(UserDefaults.standard.stringArray(forKey: deadKey) ?? [])
+        let defaults = UserDefaults.standard
         let raw = url.absoluteString
+        var checked = defaults.dictionary(forKey: deadCheckedKey) as? [String: Date] ?? [:]
+        if dead || checked[raw] != nil {
+            checked[raw] = dead ? .now : nil
+            defaults.set(checked, forKey: deadCheckedKey)
+        }
+        var set = Set(defaults.stringArray(forKey: deadKey) ?? [])
         guard set.contains(raw) != dead else { return }
         if dead { set.insert(raw) } else { set.remove(raw) }
-        UserDefaults.standard.set(Array(set), forKey: deadKey)
+        defaults.set(Array(set), forKey: deadKey)
+    }
+
+    // MARK: - Failed fetches
+
+    /// Cards re-run their fetch every time scrolling brings them back, so
+    /// a URL that answered with a refusal, a server error or bytes that
+    /// aren't a picture would be downloaded again each time. It rests for
+    /// a while instead; a dead one is asked again a day later. A dropped
+    /// connection isn't remembered: that retries as soon as it's back.
+    private static let failed = OSAllocatedUnfairLock(initialState: [String: Date]())
+    private static let failedRest: TimeInterval = 15 * 60
+    private static let deadRest: TimeInterval = 24 * 3600
+
+    private static func mayFetch(_ url: URL) -> Bool {
+        let raw = url.absoluteString
+        let now = Date.now
+        if let at = failed.withLock({ $0[raw] }), now.timeIntervalSince(at) < failedRest { return false }
+        let checked = UserDefaults.standard.dictionary(forKey: deadCheckedKey) as? [String: Date]
+        if let at = checked?[raw], now.timeIntervalSince(at) < deadRest { return false }
+        return true
     }
 
     /// One light prune per launch: once the cache passes ~200 MB, the
