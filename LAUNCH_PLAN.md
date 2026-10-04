@@ -453,9 +453,11 @@ than a hope.
   string exists in the app.
 - **All AI features stay free** — the free/paid line is capacity (items,
   group size), not intelligence. Cost protection comes from quotas:
-- **LLM quota** in `limits.ts`: **10 AI calls/day per free user, 50/day with
-  Plus**, counted across parse/suggest/locate, with a gentle "come back
-  tomorrow" at the limit.
+- **Daily adds** (4 Oct, replacing a per-call AI quota nobody could see):
+  **10 new saves a day per person free, 50 with Plus**, a count of saves
+  rather than attempts. Behind it, a hidden ceiling of 20 / 100 lookups a
+  day in `_shared/quota.ts`, and repeated vague searches are turned away
+  before they spend one.
 
 ## Phase 4 — Launch polish
 
@@ -650,14 +652,14 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 ### Phase 2
 - [x] Sign in with Apple via Supabase id_token exchange — build 45. Provider enabled with the bundle id as client id (`supabase config push`, no secret: native flow only); `com.apple.developer.applesignin` entitlement; nonce hashed into the request, raw to Supabase. Sign-ups stay closed for now, so Apple only gets in when its verified email matches an existing account (auto-link) — the screen says so instead of GoTrue's "Signups not allowed". Email/password sits behind "Sign in with email instead"
 - [x] Merge Can + Joyce accounts via Apple with real emails; then disable email/password — both Apple identities linked by 19 Sep; the email provider is off on the hosted project (`email_provider_disabled`) and Apple sign-ups are open (`[auth] enable_signup = true`). Can's account email moved to his Apple Account address `cansaglam@konsider.it` (8 Sep, admin update, confirmed) so the first Apple sign-in links rather than being refused; 0022 lets the Shortcut's baked-in `added_by` (`cansaglam@gmail.com`) still resolve through item history. Joyce's stays `joycechoong@hotmail.sg` unless her Apple Account differs
-- [ ] Home confirmation step in onboarding (city not borough; metro name offered as default; free-text fix)
+- [x] Home confirmation step in onboarding (city not borough; metro name offered as default; free-text fix) — the home page detects or takes a typed city and offers the wider one ("Richmond is part of London. Use London instead"); editable later in My group (`HomeCitySheet`)
 - [x] Persist Apple's one-time full name before onboarding renders — `MembersStore.claimDisplayName` (fill-only: never overwrites a chosen name) runs inside the sign-in, short style ("Can")
-- [ ] Onboarding: personal group, display name (required), home detection (or typed; ambiguous → pick), solo/join, notification priming; skipped on a second device
+- [x] Onboarding: personal group, display name (required), home detection (or typed; ambiguous → pick), solo/join, notification priming; skipped on a second device — `OnboardingView` pages welcome → together → home → name → code → save → joined → notify; a second device with a group lands in the library
 - [x] Apple ID revocation check on launch (`AppleSignIn.checkCredentialState`: revoked/notFound → sign out, local store untouched; offline leaves it alone). Re-auth on refresh failure: a 4xx on renewal already signed out; the sign-in screen now explains it ("Your session expired — sign in again to keep syncing. Everything you saved is still here.") — `SupabaseAuth.sessionExpired`, cleared by the next sign-in. The SwiftData store is never touched by sign-out
 - [x] "Former member" tombstone on account deletion — 0021: `profiles` no longer cascades from `auth.users` and item attribution stops being a FK, so the row (id kept) outlives the account; the profiles read policy also covers anyone who saved/edited one of the group's items. Clearing name/colour + `former_at` is the delete-account function's job (Phase 4)
-- [ ] Guided first save with own link; share-sheet teaching (onboarding step + library card)
-- [ ] Invite codes + share-sheet message; reserve `canwego.app`, fix `/join/CODE` format
-- [ ] Join screen, clipboard code detection, dead-end screens (expired/revoked/full/unknown/own)
+- [x] Guided first save with own link; share-sheet teaching (onboarding step + library card, gone once a share-sheet save lands)
+- [x] Invite codes + share-sheet message; `/join/CODE` format fixed (`JoinGate` reads `canwego://join/…` and `https://canwego.app/join/…`). Reserving the `canwego.app` domain itself is still yours to do
+- [x] Join screen, clipboard code detection (`hasStrings`, no paste banner until confirmed), dead-end screens (expired/revoked/full/unknown/own)
 - [x] Two-rule membership (server): `membership_join` moves saves in with URL dedupe (twin keeps its row, gains the notes) and dissolves the emptied personal group; `membership_leave` provisions a fresh personal group (home + digest time inherited), copies the library on request, rotates the feed token; leaving a shared group *for* another is one call (`join` with `keep_copy`). iOS flows still to build
 - [x] Sync handles membership change as a state (9 Sep): the local store is *owned* (`GroupStore.libraryGroupId`/`libraryUserId`, recorded only after a successful pull) and `SupabaseSync.sync` is the single place that replaces it — when the owner isn't the signed-in account (decidable offline), the group changed (card refresh), a store nobody had claimed (pre-ownership installs, incl. iCloud-era duplicates), or a leave just happened (`replaceLibrary`). Order: salvage-push this person's own unsynced edits (403s set aside) → close item sheets → wipe → pull → record owner → rebuild Spotlight/widget/URL index/last-chance notifications, members/home/digest. Same-account changes get one "Now showing X" notice; account switches are silent behind the first-pull curtain. Leaving flushes edits *before* the server call. 403 on push now quarantines the row instead of freezing the cursor. **The SwiftData store is no longer mirrored to iCloud** (`cloudKitDatabase: .none`, same store name): the mirror resurrected old libraries after reinstall/account change and produced the duplicates seen on 9 Sep; Supabase is the one source of truth
 - [x] My group in Settings (build 47): auto name + pin/rename (blank → back to auto), members with palette avatars, "2 of 4 · London", Plus pill, your own display name (24 scalars, grapheme-safe), Invite someone → code sheet (Share primary, Copy), pending codes with "n days left" + cancel (swipe/long-press), Leave group with "Leave and keep a copy / Leave with an empty library" (both leave; nothing leaves the group), Plus-only warning. Presenters hang off the Settings list (`GroupUI` + `GroupPresentations`), not lazy rows. 0023: `membership_preview` stops returning the group's other live codes/id (a cancelled code could read out a live one); `user_is_plus`/`group_is_plus`/`group_auto_name` no longer executable by client roles
@@ -665,22 +667,23 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [x] Pushes carry threadIdentifier per group — `notify-save` and `send-reminders` both pass the group id as `thread-id`
 - [x] Tests for `group-membership`: `supabase/tests/membership_battery.py` (79 checks on staging, incl. a two-thread last-seat race and the HTTP path) + Deno unit tests for the code helpers. Rollback script `0021_membership_down.sql` rehearsed down → up
 - [x] Per-event Remind (`0024_item_reminders.sql`): `items.reminder_offset_days` / `reminder_anchor` / `remind_at`, `reminder_runs` send-state, `send-reminders` + `dispatch_reminders` at 10:00 home time. Weekly digest push, `digest_schedules` / `digest_runs`, and local last-chance notifications removed. Shortcut `digest` pull kept.
-- [ ] In-app account deletion with export-before-delete
+- [x] In-app account deletion with export-before-delete — build 77 (`delete-account`: tombstones the profile, dissolves a last-member group, revokes the Apple token; `SIWA_*` secrets set)
 
 ### Phase 3
-- [x] 4-active-items-per-category cap (active = saved and not ended): DB trigger on transitions to active (insert or putBack), ignoring routine upserts, bypassed by the membership function; paywall sheet; "n / 4" chips — `0030_plus_cap.sql` (tested in a rolled-back transaction, **not yet applied**; uncategorised saves never count), `CategoryCap` mirror, `PlusPaywall`, "3/4" on chips from 3 up
+- [x] 4-active-items-per-category cap (active = saved and not ended): DB trigger on transitions to active (insert or putBack), ignoring routine upserts, bypassed by the membership function; paywall sheet; "n / 4" chips — `0030_plus_cap.sql` (applied; uncategorised saves never count), `CategoryCap` mirror, `PlusPaywall`, "3/4" on chips from 3 up
 - [x] Unprompted upgrade: Plus section in Settings under My group (status, Manage, Restore); "Invite people" on a full free group opens the same paywall
 - [x] Parse-then-paywall ordering (capture and put-back; saves itself once Plus lands); share extension parks capped saves in the inbox, the app asks once and imports them when there's room
-- [x] CanWeGo Plus via StoreKit 2 + `record-entitlement` function writing per-user rows (no webhook); `group_is_plus`; Restore/Manage; `displayPrice` — `PlusStore` (appAccountToken = user id, finish only once recorded, daily re-post), `SubscriptionStoreView`, `ios/Plus.storekit` for local runs. **Still needed:** the two products in App Store Connect and the `ASC_*` secrets
-- [x] Nightly entitlement re-verification cron against the App Store Server API (`verify-entitlements` + `0031_plus_jobs.sql`, not yet applied)
-- [x] Per-user daily AI quota (10 free / 50 Plus), shared across parse/locate/suggest, in `_shared/quota.ts`
+- [x] CanWeGo Plus via StoreKit 2 + `record-entitlement` function writing per-user rows (no webhook); `group_is_plus`; Restore/Manage; `displayPrice` — `PlusStore` (appAccountToken = user id, finish only once recorded, daily re-post), `SubscriptionStoreView`, `ios/Plus.storekit` for local runs. `ASC_*` secrets set. **Still needed:** attach the two products to the version you submit, and a sandbox purchase on TestFlight
+- [x] Nightly entitlement re-verification cron against the App Store Server API (`verify-entitlements` + `0031_plus_jobs.sql`, applied)
+- [x] ~~Per-user daily AI quota (10 free / 50 Plus)~~ — replaced 4 Oct by a limit people can understand: **10 new saves a day per person free, 50 with Plus** (`0043_daily_adds.sql`: counted from home midnight, a delete frees the slot, server-enforced and mirrored by `DailyCap`; "That's ten for today" paywall, "Busy day!" at fifty, share-sheet and Siri saves over it land the next morning). Lookups keep a hidden ceiling of 20 / 100 a day in `_shared/quota.ts`, and from the fifth vague search of the day a quick check turns searches away ("We save, we don't search") without spending one
 
 ### Phase 4
-- [ ] Legal pages, App Store assets, privacy labels
+- [x] Legal pages — support, privacy and terms on GitHub Pages (`docs/`)
+- [ ] App Store assets (screenshots, description) and App Privacy labels
 - [x] Export my data — build 77, as three files people can open anywhere rather than JSON: a spreadsheet (CSV, every field), a calendar (ICS of dated events) and a readable list (Markdown), behind a half-height sheet explaining each; also offered before account deletion
 - [ ] App Review kit: free-tier demo group seeded to the cap, permanent invite code, nightly reset; review notes carry the code only — never an account password
 - [ ] Apple Small Business Program enrolment
-- [ ] Production APNs key check
+- [x] Production APNs key check — `apns.ts` tries production first, and TestFlight phones (production environment) receive save pushes, reminders and push-started Live Activities
 - [x] Google Places as the last resort — build 78, 24 Sep. Key `GOOGLE_MAPS_API_KEY` (restricted to Places API (New)). Every saved place gets Google's address and pin when the name matches; events ask only when nothing else could pin the venue; locate tries Google before web search. Photos only after the page, the official site and Wikipedia all miss, stored as a signed link to `place-photo` (fresh photo per load, so only the place ID is kept) with the credit in the link and on the detail page; the phone's thumbnail refresh still replaces a Google photo with the page's own. Existing blank places backfilled (`scripts/backfill-place-photos.ts`: 2 of 2). Still to do by hand: daily quota caps and a budget alert on the key
 - [ ] External TestFlight beta, then launch
 
