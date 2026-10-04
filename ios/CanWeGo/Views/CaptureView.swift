@@ -11,6 +11,9 @@ struct CaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// What a blank card starts as: the tab Add was tapped from.
+    var manualKind: String = Item.Kind.place
+
     @State private var text = ""
     @State private var imageJPEG: Data?
     @State private var busy = false
@@ -338,7 +341,7 @@ struct CaptureView: View {
     /// Skip the parser: a blank card straight into the form.
     private func startManual() {
         let blank = Item()
-        blank.kind = Item.Kind.place
+        blank.kind = manualKind
         blank.source = "manual"
         withAnimation(.snappy) {
             draft = blank

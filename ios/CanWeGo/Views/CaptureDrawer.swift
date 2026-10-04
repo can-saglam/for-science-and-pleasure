@@ -195,7 +195,7 @@ struct CaptureDrawer<Actions: View>: View {
                 line("calendar", draft.dateLine)
                 line("building.2", draft.venue != draft.title ? draft.venue : nil)
                 line("map", draft.areaLine)
-                line("sterlingsign.circle", draft.price)
+                line("banknote", draft.price)
                 line("camera", draft.photoCredit)
             } else {
                 line("calendar", lookDate, placeholder: 150)

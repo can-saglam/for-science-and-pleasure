@@ -183,7 +183,7 @@ struct ContentView: View {
         // lands exactly where the read would.
         .background { plusButtonProbe }
         .sheet(isPresented: $captureOpen) {
-            CaptureView()
+            CaptureView(manualKind: tab == 1 ? Item.Kind.place : Item.Kind.event)
         }
         .sheet(item: $inboxAsk) { ask in
             if ask.reason == .daily, group.card?.isPlus == true {

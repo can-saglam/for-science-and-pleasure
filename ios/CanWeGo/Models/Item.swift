@@ -278,6 +278,13 @@ enum DayString {
         text(day, Date.FormatStyle(date: dateStyle, time: .omitted))
     }
 
+    /// Two saved days as one range, saying what they share once:
+    /// "17 Jul – 25 Oct 2026", "3–9 Nov 2026", both years when they differ.
+    static func text(from start: String, to end: String) -> String? {
+        guard let from = date(start), let to = date(end), from < to else { return nil }
+        return (from..<to).formatted(Date.IntervalFormatStyle(date: .abbreviated, time: .omitted, timeZone: timeZone))
+    }
+
     /// Sunday of the current home week, as a day string. "This week" means
     /// through Sunday, not a rolling seven days.
     static func endOfThisWeek() -> String {

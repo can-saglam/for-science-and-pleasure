@@ -447,7 +447,7 @@ struct ItemDetailView: View {
             HoursRow(hours: hours, loading: hoursLoading)
             metaRow("building.2", item.venue != item.title ? item.venue : nil)
             metaRow("map", areaLine)
-            metaRow("sterlingsign.circle", item.price)
+            metaRow("banknote", item.price)
             metaRow("person", addedBy)
             metaRow("pencil", editedBy)
             metaRow("camera", photoCredit)
@@ -723,6 +723,7 @@ extension Item {
         case let (s?, e?) where s == e:
             return DayString.text(s, date: .abbreviated)
         case let (s?, e?):
+            if let range = DayString.text(from: s, to: e) { return range }
             let from = DayString.text(s, date: .abbreviated) ?? s
             let to = DayString.text(e, date: .abbreviated) ?? e
             return "\(from) – \(to)"
