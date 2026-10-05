@@ -23,8 +23,14 @@ enum LocationBackfill {
         }
     }
 
+    /// One run at a time, as with thumbnails.
+    @MainActor private static var running = false
+
     @MainActor
     static func run(context: ModelContext) async {
+        guard !running else { return }
+        running = true
+        defer { running = false }
         guard let all = try? context.fetch(FetchDescriptor<Item>()) else { return }
         let missing = all.filter { item in
             item.deletedAt == nil && item.lat == nil && item.lng == nil
@@ -40,18 +46,20 @@ enum LocationBackfill {
         let home = HomeStore.shared.home
         var found: [(id: UUID, lat: Double, lng: Double)] = []
         var tried = 0
-        for item in missing where tried < perRun {
-            guard let address = item.address else { continue }
-            let key = item.id.uuidString
+        let queue = missing.map { (id: $0.id, address: $0.address) }
+        for entry in queue where tried < perRun {
+            guard let address = entry.address else { continue }
+            let key = entry.id.uuidString
             let misses = counts[key] ?? 0
             if let last = attempts[key], Date.now.timeIntervalSince(last) < retryAfter(misses: misses) {
                 continue
             }
             tried += 1
             if let spot = await coordinate(for: address, home: home) {
+                guard let item = context.item(entry.id) else { continue }
                 item.lat = spot.latitude
                 item.lng = spot.longitude
-                found.append((item.id, spot.latitude, spot.longitude))
+                found.append((entry.id, spot.latitude, spot.longitude))
                 attempts.removeValue(forKey: key)
                 counts.removeValue(forKey: key)
             } else {

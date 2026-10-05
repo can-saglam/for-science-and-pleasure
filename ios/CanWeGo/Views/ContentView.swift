@@ -528,8 +528,12 @@ struct ContentView: View {
             ShareTip.hasShared = true
             // Show where the newest one went.
             if let last = claimed.last { undoBin.land(last.id) }
+            let ids = claimed.map(\.id)
             Task {
-                for item in claimed { await SupabaseSync.announceSave(item) }
+                for id in ids {
+                    guard let item = context.item(id) else { continue }
+                    await SupabaseSync.announceSave(item)
+                }
             }
         }
         let asked = SharedInbox.asked

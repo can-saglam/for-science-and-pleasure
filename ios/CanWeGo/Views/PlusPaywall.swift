@@ -593,9 +593,11 @@ struct PlusPaywall: View {
                 .controlSize(.large)
                 .disabled(chosen == nil || buying)
 
+                // What's charged after the trial, legible next to the button
+                // that offers the trial (App Review guideline 3.1.2).
                 Text(renewalTerms)
-                    .font(.caption2)
-                    .foregroundStyle(AppBackground.ink.opacity(0.6))
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.ink.opacity(0.85))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 

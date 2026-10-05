@@ -54,6 +54,7 @@ struct LibraryView: View {
     /// The pull itself, which the "?" follows. Written as the list
     /// scrolls and read only by the wordmark.
     @State private var pull = PullDistance()
+    @State private var pullFeedback = PullFeedback()
     /// One tip at a time: the share tip first, then the widget tip once it's
     /// dismissed or no longer needed.
     @State private var tips = TipGroup(.firstAvailable) {
@@ -793,6 +794,7 @@ struct LibraryView: View {
         // Pull-to-refresh answers either way: a thump and "Updated just
         // now", or a brief notice when the sync couldn't get through.
         .refreshable {
+            pullFeedback.caught()
             refreshing = true
             await SupabaseSync.sync(context: context)
             refreshing = false
@@ -814,6 +816,7 @@ struct LibraryView: View {
             return past > 0 ? (past * 2).rounded() / 2 : 0
         } action: { _, points in
             pull.points = points
+            pullFeedback.pulled(to: points)
         }
         // Tapping the tab you're already on brings the list home.
         .scrollPosition($scrollPosition)
@@ -828,6 +831,7 @@ struct LibraryView: View {
         // real drag (the interacting phase) counts.
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
+            pullFeedback.dragging = phase == .interacting
             guard searchOpen, query.isEmpty, phase == .interacting,
                   Date.now.timeIntervalSince(searchOpenedAt) > 0.45
             else { return }

@@ -39,8 +39,14 @@ struct HoursRow: View {
                 .accessibilityHint(hours.isClosed ? "" : expanded ? "Hides the week" : "Shows the week")
 
                 if expanded {
-                    week(hours)
-                        .transition(.opacity)
+                    VStack(alignment: .leading, spacing: 6) {
+                        week(hours)
+                        Text("From Google Maps")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 28)
+                    }
+                    .transition(.opacity)
                 }
             }
         } else if loading {

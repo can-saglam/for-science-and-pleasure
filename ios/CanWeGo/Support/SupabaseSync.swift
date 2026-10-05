@@ -48,7 +48,7 @@ enum SupabaseSync {
     /// would be refused once the membership has moved.
     static func flush(context: ModelContext) async -> Bool {
         guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return false }
-        while running { try? await Task.sleep(for: .milliseconds(100)) }
+        while running, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
         do {
             // A cursor at the epoch (signed out and back in) means every
             // row counts as unsynced; the server ignores what it already has.
@@ -58,6 +58,19 @@ enum SupabaseSync {
             SyncStatus.shared.problem = SyncProblem(error)
             return false
         }
+    }
+
+    /// Sign-out's last chance for this account's unsynced edits: once
+    /// another account signs in here, the store is replaced. A few seconds
+    /// at most, so the button never hangs on a bad connection.
+    static func flushBeforeSignOut(context: ModelContext) async {
+        let flushing = Task { await flush(context: context) }
+        let limit = Task {
+            try? await Task.sleep(for: .seconds(4))
+            flushing.cancel()
+        }
+        _ = await flushing.value
+        limit.cancel()
     }
 
     /// Runs a sync that replaces the library whatever the ownership record
@@ -87,11 +100,16 @@ enum SupabaseSync {
     private static func salvage(context: ModelContext) async throws {
         let me = SupabaseAuth.shared.userId
         let email = SupabaseAuth.shared.email
+        // Sign-out resets the cursor, so after another account's session
+        // every row looks unsynced. Those are the last person's, not this
+        // one's to push into their own group.
+        let owner = GroupStore.shared.libraryUserId
+        let sameAccount = owner == nil || owner == me
         let locals = try context.fetch(FetchDescriptor<Item>())
         let mine = locals.filter { item in
             guard !isQuarantined(item) else { return false }
             if let me, item.createdBy == me || item.updatedBy == me { return true }
-            if item.updatedAt > lastSyncAt { return true }
+            if sameAccount, item.updatedAt > lastSyncAt { return true }
             // Saves made before the app stamped ids, or offline before the
             // first pull: the email is the only attribution they carry.
             return item.createdBy == nil && item.addedByEmail != nil && item.addedByEmail == email
@@ -590,18 +608,22 @@ enum SupabaseSync {
         guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
         // Undone before the request left: don't put it back.
         if item.isDeleted { return }
+        let id = item.id
+        let context = item.modelContext
         do {
             try await upsert(rows: [row(from: item)])
+            // Gone in a library swap meanwhile: it landed, nothing to add.
+            guard let item = context?.item(id) else { return }
             // Undone while the upsert was in flight. That write can land
             // after the delete and resurrect the save, so put the delete back.
             if item.isDeleted {
-                setDeleted(item.id, true)
+                setDeleted(id, true)
                 return
             }
             var request = try await request(path: "functions/v1/notify-save")
             request.httpMethod = "POST"
             request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "item_id": item.id.uuidString.lowercased(),
+                "item_id": id.uuidString.lowercased(),
             ])
             _ = try await URLSession.shared.data(for: request)
         } catch {
@@ -826,8 +848,9 @@ enum SupabaseSync {
     /// if it can't land now (offline, signed out), the item is stamped so
     /// the next regular sync carries the change as a full row instead.
     static func patchOrSync(_ item: Item, _ fields: [String: Any], context: ModelContext) async {
-        let landed = await patch(item.id, fields)
-        if !landed {
+        let id = item.id
+        let landed = await patch(id, fields)
+        if !landed, let item = context.item(id) {
             item.updatedAt = .now
             try? context.save()
         }
@@ -839,5 +862,17 @@ enum SupabaseSync {
     static func setDeleted(_ id: UUID, _ deleted: Bool) {
         let stamp: Any = deleted ? isoFractional.string(from: .now) : NSNull()
         Task { await patch(id, ["deleted_at": stamp]) }
+    }
+}
+
+extension ModelContext {
+    /// The save as the store has it now, or nil once it's gone. Anything
+    /// that waits on the network holds the id, not the `Item`, and looks
+    /// it up again after: a library swap deletes every row meanwhile, and
+    /// touching a deleted model traps.
+    func item(_ id: UUID) -> Item? {
+        var fetch = FetchDescriptor<Item>(predicate: #Predicate { $0.id == id })
+        fetch.fetchLimit = 1
+        return try? self.fetch(fetch).first
     }
 }

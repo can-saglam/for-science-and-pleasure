@@ -24,8 +24,15 @@ enum ThumbnailBackfill {
         }
     }
 
+    /// One run at a time: every foreground starts one, and overlapping runs
+    /// would fetch the same pages and overwrite each other's back-off.
+    @MainActor private static var running = false
+
     @MainActor
     static func run(context: ModelContext) async {
+        guard !running else { return }
+        running = true
+        defer { running = false }
         guard let all = try? context.fetch(FetchDescriptor<Item>()) else { return }
         // A Google Maps photo is only ever the last resort: the saved
         // page's own picture replaces it whenever one turns up.
@@ -43,11 +50,12 @@ enum ThumbnailBackfill {
         counts = counts.filter { liveURLs.contains($0.key) }
 
         var found: [(id: UUID, image: String)] = []
-        for item in missing {
+        let queue = missing.map { (id: $0.id, url: $0.url, image: $0.imageUrl) }
+        for entry in queue {
             // Social posts' og:image is a signed CDN URL that expires within
             // days — never a thumbnail. Those saves get their picture from
             // the venue's own site at parse time, or stay on the colour block.
-            guard let raw = item.url, let url = URL(string: raw),
+            guard let raw = entry.url, let url = URL(string: raw),
                   url.scheme?.hasPrefix("http") == true,
                   !isMapsLink(url), !SocialPrefetch.isSocial(url)
             else { continue }
@@ -57,7 +65,8 @@ enum ThumbnailBackfill {
             }
             // The page still pointing at the dead picture counts as nothing
             // found — back off, rather than try again next foreground.
-            if let image = await pageImage(at: url), image != item.imageUrl {
+            if let image = await pageImage(at: url), image != entry.image {
+                guard let item = context.item(entry.id) else { continue }
                 item.imageUrl = image
                 found.append((item.id, image))
                 attempts.removeValue(forKey: raw)

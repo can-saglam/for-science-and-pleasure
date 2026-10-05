@@ -117,7 +117,9 @@ struct ShareCard: View {
     @MainActor
     static func render(_ item: Item) async -> Rendered? {
         var photo: UIImage?
-        if let url = item.imageUrl.flatMap(URL.init(string:)) {
+        // A Google Maps photo can't leave the app without its credit, and
+        // the postcard has no room for one: it goes out on its colour.
+        if item.photoCredit == nil, let url = item.imageUrl.flatMap(URL.init(string:)) {
             photo = await ImageStore.fetch(url, variant: .hero)
         }
         let renderer = ImageRenderer(content: ShareCard(item: item, image: photo))

@@ -280,8 +280,11 @@ struct SettingsView: View {
                                 // any sign-out, this one included. Dismiss so
                                 // the sign-in screen isn't trapped under this
                                 // sheet.
-                                SupabaseAuth.shared.signOut()
-                                dismiss()
+                                Task {
+                                    await SupabaseSync.flushBeforeSignOut(context: context)
+                                    SupabaseAuth.shared.signOut()
+                                    dismiss()
+                                }
                             }
                             Button("Cancel", role: .cancel) {}
                         } message: {
