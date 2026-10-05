@@ -224,7 +224,20 @@ struct LibraryView: View {
             ("Closing soon", closingSoon),
             ("On now", onNow),
             ("Coming up", comingUp),
-        ].filter { !$0.1.isEmpty }
+        ]
+        .filter { !$0.1.isEmpty }
+        .map { ($0.0, plannedFirst($0.1)) }
+    }
+
+    /// A plan still ahead leads its section, soonest day and time first
+    /// (a timed plan before an untimed one that day); the rest keep the
+    /// section's own order. It drops back once the day has gone by.
+    private static func plannedFirst(_ list: [Item]) -> [Item] {
+        let planned = list.filter { $0.upcomingPlan != nil }
+        guard !planned.isEmpty else { return list }
+        let when = { (item: Item) in (item.upcomingPlan ?? "", item.planTime ?? "~") }
+        return planned.sorted { when($0) != when($1) ? when($0) < when($1) : newerFirst($0, $1) }
+            + list.filter { $0.upcomingPlan == nil }
     }
 
     // MARK: - The journal (the old We Did Go, folded in)

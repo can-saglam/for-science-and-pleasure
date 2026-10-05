@@ -105,8 +105,16 @@ export function activityLabel(
   if (endsOn === today) return "Last day";
   if (startsOn === today) return "Opens today";
   if (startsOn && startsOn > today) return `Opens ${inDays(daysBetween(today, startsOn))}`;
-  if (endsOn && endsOn > today) return `Closes ${inDays(daysBetween(today, endsOn))}`;
+  if (endsOn && endsOn > today) {
+    const left = daysBetween(today, endsOn);
+    return left > 7 ? `On until ${dayMonth(endsOn)}` : `Closes ${inDays(left)}`;
+  }
   return "Today";
+}
+
+/** "10 Jan" for a YYYY-MM-DD day. */
+function dayMonth(day: string): string {
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
 export function activityPlace(item: Pick<ActivityItem, "venue" | "area">): string | null {
@@ -201,11 +209,11 @@ export function planEnd(
   return new Date(Math.min(...ends.map((d) => d.getTime())));
 }
 
-/** "Going 17:00" on the Lock Screen when there's a time; the usual line
- * otherwise. */
-export function planLabel(item: Pick<ActivityItem, "kind" | "starts_on" | "ends_on" | "plan_time">, today: string): string {
+/** "Going 17:00" on the Lock Screen when there's a time; "Planned for
+ * today" otherwise. */
+export function planLabel(item: Pick<ActivityItem, "plan_time">): string {
   const time = planClock(item.plan_time);
-  return time ? `Going ${time}` : activityLabel(item.kind, item.starts_on, item.ends_on, today);
+  return time ? `Going ${time}` : "Planned for today";
 }
 
 /** The plan's one notification, and its Live Activity's alert. */
@@ -228,7 +236,7 @@ export function startAps(
   hours: string | null = null,
   plan = false,
 ): Record<string, unknown> {
-  const label = plan ? planLabel(item, today) : activityLabel(item.kind, item.starts_on, item.ends_on, today);
+  const label = plan ? planLabel(item) : activityLabel(item.kind, item.starts_on, item.ends_on, today);
   const place = activityPlace(item);
   const body = plan ? planAlertBody(item) : place ? `${label} · ${place}` : label;
   const end = Math.floor(endsAt.getTime() / 1000);
@@ -350,7 +358,7 @@ export async function runActivities(
       const label = !item
         ? "Today"
         : plan
-        ? planLabel({ ...item, plan_time: run.plan_time }, run.remind_at)
+        ? planLabel({ plan_time: run.plan_time })
         : activityLabel(item.kind, item.starts_on, item.ends_on, run.remind_at);
       await endOn(run.item_id, label, dismissAt);
       if (plan && gone && !pastDay) {

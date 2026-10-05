@@ -300,8 +300,7 @@ struct ContentView: View {
                     undoToast(Voice.didGoTo(done.title)) {
                         undoBin.undoDone(in: context)
                     }
-                }
-            }
+                }            }
             .padding(.horizontal, 24)
             .padding(.bottom, 72)
             .accessibilityElement(children: .contain)
@@ -609,8 +608,9 @@ struct ContentView: View {
                 undo()
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.leading, 18)
+        .padding(.trailing, 10)
+        .padding(.vertical, 10)
         .glassEffect(.regular, in: .capsule)
         .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
     }
@@ -672,9 +672,9 @@ struct ContentView: View {
     }
 }
 
-/// "Undo" in a capsule whose outline drains over the window it's good
-/// for — how long you have, without a number. Holds a full ring under
-/// Reduce Motion.
+/// The undo arrow in a circle lightly tinted with the theme's accent, its
+/// outline draining over the window it's good for — how long you have,
+/// without a number. Holds a full ring under Reduce Motion.
 private struct UndoButton: View {
     let seconds: Double
     let reduceMotion: Bool
@@ -686,19 +686,19 @@ private struct UndoButton: View {
             TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
                 let elapsed = context.date.timeIntervalSince(shownAt)
                 let remaining = reduceMotion ? 1 : max(0, 1 - elapsed / seconds)
-                Text("Undo")
+                Image(systemName: "arrow.uturn.backward")
                     .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(AppBackground.ink.opacity(0.08), in: .capsule)
+                    .frame(width: 32, height: 32)
+                    .background(AppBackground.accent.opacity(0.28), in: .circle)
                     .overlay(
-                        Capsule()
+                        Circle()
                             .trim(from: 0, to: remaining)
                             .stroke(AppBackground.ink.opacity(0.55), style: .init(lineWidth: 1.5, lineCap: .round))
-                            // Trim runs from the capsule's trailing middle;
-                            // flipped so the ring drains away from the eye.
-                            .rotationEffect(.degrees(180))
+                            // Trim runs from three o'clock; turned so the
+                            // ring starts at the top and drains from there.
+                            .rotationEffect(.degrees(-90))
                     )
+                    .contentShape(.circle)
             }
         }
         .buttonStyle(.plain)

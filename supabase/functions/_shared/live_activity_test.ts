@@ -30,6 +30,8 @@ Deno.test("activityLabel reads the day against the save's dates", () => {
     ["event", "2026-09-25", "2026-10-30", "Opens tomorrow"],
     ["event", "2026-09-27", null, "Opens in 3 days"],
     ["event", "2026-09-01", "2026-10-01", "Closes in 7 days"],
+    ["event", "2026-09-01", "2026-10-02", "On until 2 Oct"],
+    ["event", "2026-09-01", "2027-01-10", "On until 10 Jan"],
     ["event", "2026-09-01", "2026-09-25", "Closes tomorrow"],
     ["event", null, null, "Today"],
     ["place", null, null, "Today"],
@@ -189,8 +191,8 @@ Deno.test("planEnd: closing, four hours after, midnight, or eight hours — the 
 
 Deno.test("a plan's label and alert say when", () => {
   const item = { kind: "event", starts_on: "2026-09-01", ends_on: today, venue: "Hayward Gallery", area: "South Bank" };
-  assert(planLabel({ ...item, plan_time: "17:00:00" }, today) === "Going 17:00", "timed label");
-  assert(planLabel({ ...item, plan_time: null }, today) === "Last day", "untimed keeps the usual line");
+  assert(planLabel({ plan_time: "17:00:00" }) === "Going 17:00", "timed label");
+  assert(planLabel({ plan_time: null }) === "Planned for today", "untimed label");
   assert(planAlertBody({ ...item, plan_time: "17:00:00" }) === "Going at 17:00 · Hayward Gallery · South Bank", "timed alert");
   assert(planAlertBody({ venue: null, area: null, plan_time: null }) === "Going today", "untimed alert");
 });
