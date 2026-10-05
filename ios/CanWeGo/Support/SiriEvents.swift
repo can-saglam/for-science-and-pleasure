@@ -189,7 +189,7 @@ struct SaveEventQuery: EntityQuery {
 
 @available(iOS 27.0, *)
 @AppIntent(schema: .calendar.createEvent)
-struct AddEventByVoiceIntent {
+struct AddEventByVoiceIntent: LongRunningIntent {
     var title: String
     var startDate: Date
     var endDate: Date?
@@ -212,7 +212,7 @@ struct AddEventByVoiceIntent {
         case .alreadySaved(let twin): SaveEventEntity(twin)
         case .added(let card, let id): SaveEventEntity(id: id, card: card)
         }
-        return .result(value: entity, dialog: outcome.dialog, view: await outcome.card())
+        return .result(value: entity, dialog: outcome.dialog, view: await outcome.card(voiceOnly: Siri.voiceOnly(self)))
     }
 
     /// "Amar Kanwar, Serpentine North": the venue Siri heard goes with the

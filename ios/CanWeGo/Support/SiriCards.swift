@@ -147,13 +147,16 @@ struct SiriSavesCard: View {
 }
 
 /// The one save an add is about: what was found, or what's already there.
+/// Empty with no screen to show it on.
 struct SiriSaveCard: View {
-    let row: SiriCardRow
+    let row: SiriCardRow?
 
     var body: some View {
-        SiriRow(row: row, large: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+        if let row {
+            SiriRow(row: row, large: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+        }
     }
 }
 

@@ -18,6 +18,20 @@ enum WidgetStore {
         var hasImage: Bool
     }
 
+    /// What the Lock Screen widget picks from (mirrored there as
+    /// `LockItem`): events still to go to, and any save with a plan ahead.
+    /// Raw days, so its "Closes in 3 days" stays right as the days pass.
+    private struct LockEntry: Codable {
+        var id: UUID
+        var title: String
+        var place: String?
+        var startsOn: String?
+        var endsOn: String?
+        var oneDay: Bool
+        var planOn: String?
+        var planTime: String?
+    }
+
     private static var directory: URL? {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: SharedInbox.groupID)?
@@ -69,6 +83,20 @@ enum WidgetStore {
                 imageURL: item.imageUrl.flatMap(URL.init(string:))
             )
         }
+        let lock = items
+            .filter { !$0.isDeleted && ($0.upcomingPlan != nil || ($0.isEvent && !$0.isDone && !$0.isMissed)) }
+            .map { item in
+                LockEntry(
+                    id: item.id,
+                    title: item.title,
+                    place: [item.venue, item.area].compactMap(\.self).first { $0 != item.title },
+                    startsOn: item.startsOn,
+                    endsOn: item.endsOn,
+                    oneDay: item.isOneDay,
+                    planOn: item.upcomingPlan,
+                    planTime: item.planTime
+                )
+            }
 
         writeTheme(ThemeStore.shared.current)
         Task.detached(priority: .utility) {
@@ -109,9 +137,12 @@ enum WidgetStore {
             if let data = try? JSONEncoder().encode(written) {
                 try? data.write(to: directory.appending(path: "items.json"), options: .atomic)
             }
+            if let data = try? JSONEncoder().encode(lock) {
+                try? data.write(to: directory.appending(path: "lock.json"), options: .atomic)
+            }
 
             // Sweep photos of items that left the rotation (done, deleted).
-            let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "version.txt", "theme.json"])
+            let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "lock.json", "version.txt", "theme.json"])
             let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
             for file in files where !keep.contains(file) {
                 try? FileManager.default.removeItem(at: directory.appending(path: file))

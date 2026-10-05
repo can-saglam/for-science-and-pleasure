@@ -37,6 +37,12 @@ struct LibraryView: View {
     @State private var searchOpen = false
     @State private var searchOpenedAt = Date.distantPast
     @FocusState private var searchFocused: Bool
+    /// Apple Intelligence is ready, checked as search opens: questions
+    /// typed into search can be put to the library.
+    @State private var askable = false
+    /// The question last put to the library; the answer stands while the
+    /// search still reads the same.
+    @State private var asked: String?
     @State private var archiveOpen = false
     @State private var archiveSide: ArchiveSide = .all
     /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
@@ -89,6 +95,17 @@ struct LibraryView: View {
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
         return true
+    }
+
+    /// The search, when it reads like a question for the library.
+    private var askQuestion: String? {
+        #if APP_EXTENSION
+        return nil
+        #else
+        guard searchOpen, askable, #available(iOS 27.0, *) else { return nil }
+        let question = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return AskLibraryRow.isQuestion(question) ? question : nil
+        #endif
     }
 
     // Chip order must be fully deterministic: dictionary iteration order is
@@ -469,6 +486,10 @@ struct LibraryView: View {
                 .focused($searchFocused)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
+                .onSubmit {
+                    guard let question = askQuestion else { return }
+                    withAnimation(.snappy) { asked = question }
+                }
             Button {
                 closeSearch()
             } label: {
@@ -488,6 +509,9 @@ struct LibraryView: View {
         .task {
             searchFocused = true
             searchOpenedAt = .now
+            #if !APP_EXTENSION
+            if #available(iOS 27.0, *) { askable = LibraryAsk.isAvailable }
+            #endif
         }
         .onDisappear { searchFocused = false }
     }
@@ -511,6 +535,7 @@ struct LibraryView: View {
             searchOpen = false
             query = ""
         }
+        asked = nil
     }
 
     private func showRefreshNotice(_ text: String, icon: String) {
@@ -655,6 +680,15 @@ struct LibraryView: View {
                 .padding(.top, 6)
                 .cardListRow()
 
+            #if !APP_EXTENSION
+            if #available(iOS 27.0, *), let question = askQuestion {
+                AskLibraryRow(question: question, asked: $asked) { id in
+                    selected = items.first { $0.id == id && !$0.isDeleted }
+                }
+                .cardListRow()
+            }
+            #endif
+
             if categories.count > 1 || areas.count > 1 {
                 // Not cardListRow(): its insets would win over these, and
                 // the row above and below the chips wants to be tighter.
@@ -722,7 +756,7 @@ struct LibraryView: View {
                     // bottom content margin.
                     .frame(minHeight: max(listHeight - 24, 0))
                     .cardListRow()
-                } else {
+                } else if askQuestion == nil {
                     EmptyState(
                         title: base.isEmpty ? emptyTitle : "Nothing matches",
                         message: base.isEmpty ? emptyPrompt : "Try a different word, or clear the filters.",

@@ -179,7 +179,7 @@ struct SaveItemQuery: EntityQuery {
 
 @available(iOS 27.0, *)
 @AppIntent(schema: .reminders.createReminder)
-struct AddSaveByVoiceIntent {
+struct AddSaveByVoiceIntent: LongRunningIntent {
     var title: String
     var dueDate: DateComponents?
     var images: [IntentFile]
@@ -199,6 +199,6 @@ struct AddSaveByVoiceIntent {
         case .alreadySaved(let twin): SaveItemEntity(twin)
         case .added(let card, let id): SaveItemEntity(id: id, card: card)
         }
-        return .result(value: entity, dialog: outcome.dialog, view: await outcome.card())
+        return .result(value: entity, dialog: outcome.dialog, view: await outcome.card(voiceOnly: Siri.voiceOnly(self)))
     }
 }

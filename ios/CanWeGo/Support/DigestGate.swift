@@ -9,9 +9,11 @@ enum ItemGate {
 
 /// A picture sent from Visual Intelligence, or a suggestion's link, to be
 /// looked up and saved, parked until the composer opens and takes it.
+/// `pendingOpen` is the Control Center button: the composer, empty.
 enum CaptureGate {
     static var pendingImage: Data?
     static var pendingLink: String?
+    static var pendingOpen = false
 
     static func take() -> Data? {
         defer { pendingImage = nil }
@@ -63,7 +65,8 @@ extension Notification.Name {
     static let cwgLibraryWillSwap = Notification.Name("cwgLibraryWillSwap")
     /// Siri or Shortcuts parked a save in the shared inbox.
     static let cwgInboxChanged = Notification.Name("cwgInboxChanged")
-    /// `CaptureGate` holds a picture or a link for the composer.
+    /// `CaptureGate` holds a picture or a link for the composer, or asks
+    /// for it to open.
     static let cwgCaptureImage = Notification.Name("cwgCaptureImage")
     /// `SearchGate` holds a search for one of the tabs.
     static let cwgSearchSaves = Notification.Name("cwgSearchSaves")
