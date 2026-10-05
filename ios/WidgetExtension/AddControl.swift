@@ -8,7 +8,9 @@ struct AddControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "com.cansaglam.CanWeGo.add") {
             ControlWidgetButton(action: AddSaveControlIntent()) {
-                Label("Add to Can We Go", systemImage: "plus")
+                // Controls take symbols only, never a full-colour image, so
+                // this is the app icon's "GO?" as a custom symbol.
+                Label("Add to Can We Go", image: "GoMark")
             }
         }
         .displayName("Add to Can We Go")

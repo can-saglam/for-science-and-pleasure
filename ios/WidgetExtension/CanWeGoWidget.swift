@@ -9,6 +9,7 @@ struct CanWeGoWidgets: WidgetBundle {
     var body: some Widget {
         RandomSaveWidget()
         UpNextWidget()
+        OnNowWidget()
         DayActivityWidget()
         AddControl()
     }

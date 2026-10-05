@@ -9,9 +9,11 @@ import GeoToolbox
 // read back and parked like any Siri add; the schema's other fields are
 // accepted and ignored.
 
+/// Indexed, and listed in full by its query: Siri only adds to a calendar
+/// it can find, and finds them through Spotlight.
 @available(iOS 27.0, *)
 @AppEntity(schema: .calendar.calendar)
-struct SaveCalendarEntity {
+struct SaveCalendarEntity: IndexedEntity {
     static let defaultQuery = SaveCalendarQuery()
 
     let id: String
@@ -30,9 +32,13 @@ struct SaveCalendarEntity {
 }
 
 @available(iOS 27.0, *)
-struct SaveCalendarQuery: EntityStringQuery {
+struct SaveCalendarQuery: EntityStringQuery, EnumerableEntityQuery {
     func entities(for identifiers: [String]) async throws -> [SaveCalendarEntity] {
         identifiers.contains(SaveCalendarEntity.canWeGo.id) ? [.canWeGo] : []
+    }
+
+    func allEntities() async throws -> [SaveCalendarEntity] {
+        [.canWeGo]
     }
 
     func entities(matching string: String) async throws -> [SaveCalendarEntity] {

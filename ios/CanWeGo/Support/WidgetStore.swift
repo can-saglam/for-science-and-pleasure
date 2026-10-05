@@ -148,6 +148,7 @@ enum WidgetStore {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? data.write(to: file, options: .atomic)
         WidgetCenter.shared.reloadTimelines(ofKind: "UpNext")
+        WidgetCenter.shared.reloadTimelines(ofKind: "OnNow")
     }
 
     /// Sorted keys, so the same library always encodes to the same bytes

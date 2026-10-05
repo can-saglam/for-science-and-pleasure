@@ -43,6 +43,13 @@ enum SpotlightIndex {
         #if !APP_EXTENSION
         // "Open <save> in Can We Go" matches against the current titles.
         CanWeGoShortcuts.updateAppShortcutParameters()
+        if #available(iOS 27.0, *) {
+            Task.detached(priority: .utility) {
+                let index = CSSearchableIndex.default()
+                try? await index.indexAppEntities([SaveCalendarEntity.canWeGo])
+                try? await index.indexAppEntities([SaveListEntity.events, .places])
+            }
+        }
         #endif
     }
 

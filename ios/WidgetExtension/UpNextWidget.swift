@@ -80,6 +80,8 @@ enum UpNext {
 
     static func day(_ date: Date) -> String { format.string(from: date) }
 
+    static func date(_ day: String) -> Date? { format.date(from: day) }
+
     private static func days(from: String, to: String) -> Int? {
         guard let a = format.date(from: from), let b = format.date(from: to) else { return nil }
         return Calendar.current.dateComponents([.day], from: a, to: b).day
@@ -139,6 +141,7 @@ enum UpNext {
 
 struct UpNextView: View {
     let entry: UpNextEntry
+    var empty = "Nothing this week"
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
@@ -154,7 +157,7 @@ struct UpNextView: View {
             if let pick = entry.pick {
                 Label("\(pick.label): \(UpNext.short(pick.item.title))", systemImage: "calendar")
             } else {
-                Label("Nothing this week", systemImage: "calendar")
+                Label(empty, systemImage: "calendar")
             }
         default:
             rectangular
@@ -168,24 +171,36 @@ struct UpNextView: View {
                     .font(.caption2.weight(.bold))
                     .widgetAccentable()
                     .lineLimit(1)
-                Text(pick.item.title)
-                    .font(.headline)
-                    .lineLimit(pick.item.place == nil ? 2 : 1)
-                if let place = pick.item.place {
-                    Text(place)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                // Two lines of title with the venue under it; at large
+                // text sizes the venue gives way before the title does.
+                ViewThatFits(in: .vertical) {
+                    details(pick.item, place: pick.item.place)
+                    details(pick.item, place: nil)
                 }
             } else {
                 Label("CAN WE GO?", systemImage: "calendar")
                     .font(.caption2.weight(.bold))
                     .widgetAccentable()
-                Text("Nothing this week")
+                Text(empty)
                     .font(.headline)
                     .lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func details(_ item: LockItem, place: String?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(item.title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(2)
+            if let place {
+                Text(place)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
     }
 }

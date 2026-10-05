@@ -19,9 +19,11 @@ enum SaveListType: String {
     ]
 }
 
+/// Indexed and enumerable, like the calendar: Siri adds only to lists it
+/// can find.
 @available(iOS 27.0, *)
 @AppEntity(schema: .reminders.list)
-struct SaveListEntity {
+struct SaveListEntity: IndexedEntity {
     static let defaultQuery = SaveListQuery()
 
     let id: String
@@ -43,9 +45,13 @@ struct SaveListEntity {
 }
 
 @available(iOS 27.0, *)
-struct SaveListQuery: EntityStringQuery {
+struct SaveListQuery: EntityStringQuery, EnumerableEntityQuery {
     func entities(for identifiers: [String]) async throws -> [SaveListEntity] {
         suggested().filter { identifiers.contains($0.id) }
+    }
+
+    func allEntities() async throws -> [SaveListEntity] {
+        suggested()
     }
 
     func entities(matching string: String) async throws -> [SaveListEntity] {

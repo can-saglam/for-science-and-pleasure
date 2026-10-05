@@ -245,13 +245,6 @@ struct ShareView: View {
             .controlSize(.large)
         }
         .padding(.top, 4)
-
-        // A save past a full category or a full day says the same: the
-        // app holds it and asks about Plus when it opens; nothing is lost.
-        Text("It'll appear in the app the next time you open it.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
     }
 
     private var duplicateBlock: some View {
