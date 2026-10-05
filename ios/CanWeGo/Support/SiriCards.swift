@@ -1,22 +1,22 @@
 import ImageIO
 import SwiftUI
 
-/// A save as Siri's card shows it. Siri draws the card once, like a widget,
-/// so nothing can load while it's up: the photo is read before the view is
-/// made, and a save without one wears its category glyph on its colour.
+/// A save as Siri's card shows it: the library's card. Siri draws it once,
+/// like a widget, so nothing can load while it's up: the photo and its
+/// melt are read before the view is made.
 struct SiriCardRow: Identifiable {
     let id: UUID
     let title: String
     let place: String?
     let when: String?
     let plan: String?
-    let glyph: String
     let tint: Color
     let imageURL: URL?
     /// Only a save already in the library: one still in the inbox would
     /// open to "this save is gone".
     let opens: Bool
     var photo: UIImage?
+    var melt: UIImage?
 
     var link: URL? {
         opens ? URL(string: "canwego://item/\(id.uuidString)") : nil
@@ -29,8 +29,7 @@ struct SiriCardRow: Identifiable {
         place = Self.place(venue: item.venue, area: item.area, title: item.title)
         when = item.timeLabel
         plan = item.planPillText
-        glyph = item.glyph
-        tint = item.colorHex.flatMap(Color.init(hex:)) ?? Self.fallbackTint
+        tint = item.accentColor
         imageURL = item.imageUrl.flatMap(URL.init(string:))
         opens = true
     }
@@ -42,7 +41,6 @@ struct SiriCardRow: Identifiable {
         place = Self.place(venue: card.venue, area: card.area, title: card.title)
         when = Self.days(card.starts_on, card.ends_on)
         plan = nil
-        glyph = Item.glyph(kind: card.kind, category: card.category)
         tint = card.color.flatMap(Color.init(hex:)) ?? Self.fallbackTint
         imageURL = card.image_url.flatMap(URL.init(string:))
         opens = false
@@ -68,18 +66,21 @@ enum SiriCards {
     /// The widget's copy of the photo when there is one: every upcoming
     /// event has it on disk. Otherwise whatever the app already holds,
     /// and only with `wait` the network too, for two seconds at most —
-    /// past that the card goes out with its glyph.
+    /// past that the card goes out plain.
     static func dressed(_ row: SiriCardRow, wait: Bool = false) async -> SiriCardRow {
         var row = row
         if row.opens, let data = WidgetStore.photo(for: row.id), let image = thumbnail(data) {
             row.photo = image
-            return row
+        } else if let url = row.imageURL {
+            if ImageStore.cached(url) == nil, wait {
+                await ImageStore.warm(url, variant: .card, limit: .seconds(2))
+            }
+            row.photo = ImageStore.cached(url).map(shrunk)
+            row.melt = ImageStore.cachedMelt(url)
         }
-        guard let url = row.imageURL else { return row }
-        if ImageStore.cached(url) == nil, wait {
-            await ImageStore.warm(url, variant: .card, limit: .seconds(2))
+        if let photo = row.photo, row.melt == nil {
+            row.melt = await ImageStore.meltUnderlay(photo)
         }
-        row.photo = ImageStore.cached(url).map(shrunk)
         return row
     }
 
@@ -90,8 +91,8 @@ enum SiriCards {
         return rows
     }
 
-    /// Drawn at most 72 pt; 3× of that, and no more, goes into the card.
-    private static let side: CGFloat = 216
+    /// The melt is 150 pt wide; 3× of that, and no more, goes into the card.
+    private static let side: CGFloat = 450
 
     private static func thumbnail(_ data: Data) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
@@ -131,7 +132,7 @@ struct SiriSavesCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(rows) { row in
                 SiriRow(row: row, large: false)
             }
@@ -173,63 +174,79 @@ private struct SiriRow: View {
         }
     }
 
-    private var side: CGFloat { large ? 72 : 52 }
+    private var radius: CGFloat { large ? 18 : 14 }
+    private var background: Color { ItemCard.background(row.tint) }
 
+    /// The list card's grey, fixed: the system one turns vibrant on Siri's
+    /// glass and comes out the card's colour, brightened.
+    private var label: Color {
+        let traits = UITraitCollection(userInterfaceStyle: AppBackground.theme.isLight ? .light : .dark)
+        return Color(uiColor: .secondaryLabel.resolvedColor(with: traits))
+    }
+
+    /// The library's card, in the app's theme whatever the system's
+    /// appearance: the panel is the theme's, so its ink must be too.
     private var content: some View {
-        HStack(spacing: 12) {
-            thumb
-                .frame(width: side, height: side)
-                .clipShape(.rect(cornerRadius: side * 0.22, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(large ? .title3.weight(.semibold) : .headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(large ? 3 : 2)
-                if let place = row.place {
-                    Text(place)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if row.when != nil || row.plan != nil {
-                    HStack(spacing: 6) {
-                        if let when = row.when {
-                            Text(when)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let plan = row.plan {
-                            Label(plan, systemImage: "calendar")
-                                .labelStyle(.titleAndIcon)
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(.quaternary, in: .capsule)
-                        }
-                    }
-                    .font(.caption.weight(.medium))
+        VStack(alignment: .leading, spacing: large ? 5 : 3) {
+            Text(row.title)
+                .font(large ? .displaySmall(22, relativeTo: .body) : .displaySmall(18, relativeTo: .subheadline))
+                .lineLimit(2)
+            if let place = row.place {
+                Text(place)
+                    .font(large ? .subheadline : .caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .padding(.top, 2)
-                }
             }
-            Spacer(minLength: 0)
+            if row.when != nil || row.plan != nil {
+                HStack(spacing: 6) {
+                    if let when = row.when {
+                        Text(when)
+                            .foregroundStyle(label)
+                    }
+                    if let plan = row.plan {
+                        planPill(plan)
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .padding(.top, 1)
+            }
         }
+        .multilineTextAlignment(.leading)
+        .padding(.horizontal, large ? 16 : 14)
+        .padding(.vertical, large ? 13 : 10)
+        .padding(.trailing, row.photo == nil ? 0 : 64)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .trailing) {
+            if let photo = row.photo {
+                MeltLayers(sharp: photo, blurred: row.melt ?? photo, cardBackground: background, width: 150)
+                    .compositingGroup()
+                    .frame(width: 150)
+                    .clipped()
+            }
+        }
+        .background(background, in: .rect(cornerRadius: radius, style: .continuous))
+        .clipShape(.rect(cornerRadius: radius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(ItemCard.border(row.tint), lineWidth: 1)
+        )
+        .foregroundStyle(AppBackground.ink)
+        .environment(\.colorScheme, AppBackground.theme.colorScheme)
         .contentShape(.rect)
     }
 
-    @ViewBuilder
-    private var thumb: some View {
-        if let photo = row.photo {
-            Image(uiImage: photo)
-                .resizable()
-                .scaledToFill()
-        } else {
-            ZStack {
-                // Deepened so the white glyph holds on a pale colour.
-                Rectangle().fill(row.tint.mix(with: .black, by: 0.3).gradient)
-                Image(systemName: row.glyph)
-                    .font(.system(size: side * 0.38, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
+    private func planPill(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "calendar")
+                .imageScale(.small)
+            Text(text)
         }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(AppBackground.ink.opacity(0.75))
+        .padding(.leading, 7)
+        .padding(.trailing, 9)
+        .padding(.vertical, 4)
+        .background(AppBackground.ink.opacity(0.08), in: .capsule)
     }
 }

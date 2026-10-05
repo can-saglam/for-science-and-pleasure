@@ -322,14 +322,18 @@ struct ItemCard: View {
     // Cards live on the theme base: fold the accent into it and lift it
     // slightly, so every card reads as a tinted panel of the same material
     // rather than a foreign swatch. Mix amounts are tuned per theme.
-    private var cardBackground: Color {
+    private var cardBackground: Color { Self.background(item.accentColor) }
+
+    private var cardBorder: Color { Self.border(item.accentColor) }
+
+    static func background(_ accent: Color) -> Color {
         AppBackground.base
-            .mix(with: item.accentColor, by: AppBackground.theme.cardAccentMix)
+            .mix(with: accent, by: AppBackground.theme.cardAccentMix)
             .mix(with: AppBackground.theme.cardLiftColor, by: AppBackground.theme.cardLiftAmount)
     }
 
-    private var cardBorder: Color {
-        item.accentColor.mix(with: AppBackground.theme.ink, by: 0.35).opacity(0.30)
+    static func border(_ accent: Color) -> Color {
+        accent.mix(with: AppBackground.theme.ink, by: 0.35).opacity(0.30)
     }
 }
 
@@ -360,44 +364,7 @@ private struct MeltImage: View {
     var body: some View {
         ZStack {
             if let sharp, let blurred {
-                filled(Image(uiImage: blurred))
-                filled(Image(uiImage: sharp))
-                    .mask(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0.25),
-                                .init(color: .black, location: 0.8),
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                // Multiply pulls bright content toward the card color in
-                // the melt zone — white posters tint instead of glaring —
-                // and leaves the photo untouched at the right edge.
-                LinearGradient(
-                    stops: [
-                        .init(color: cardBackground, location: 0),
-                        .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: 0.45),
-                        .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: 0.95),
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .blendMode(.multiply)
-                LinearGradient(
-                    stops: [
-                        .init(color: cardBackground, location: 0),
-                        .init(color: cardBackground.opacity(0.95), location: 0.15),
-                        .init(color: cardBackground.opacity(0.75), location: 0.3),
-                        .init(color: cardBackground.opacity(0.45), location: 0.45),
-                        .init(color: cardBackground.opacity(0.18), location: 0.6),
-                        .init(color: cardBackground.opacity(0.05), location: 0.75),
-                        .init(color: cardBackground.opacity(0), location: 0.9),
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
+                MeltLayers(sharp: sharp, blurred: blurred, cardBackground: cardBackground, width: 150)
             }
         }
         .compositingGroup()
@@ -417,12 +384,64 @@ private struct MeltImage: View {
             }
         }
     }
+}
+
+/// The melt itself, from images already in hand: the list card's, and
+/// Siri's, which is drawn once and can't wait for a load.
+struct MeltLayers: View {
+    let sharp: UIImage
+    let blurred: UIImage
+    let cardBackground: Color
+    let width: CGFloat
+
+    var body: some View {
+        ZStack {
+            filled(Image(uiImage: blurred))
+            filled(Image(uiImage: sharp))
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.25),
+                            .init(color: .black, location: 0.8),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+            // Multiply pulls bright content toward the card color in
+            // the melt zone — white posters tint instead of glaring —
+            // and leaves the photo untouched at the right edge.
+            LinearGradient(
+                stops: [
+                    .init(color: cardBackground, location: 0),
+                    .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: 0.45),
+                    .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: 0.95),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .blendMode(.multiply)
+            LinearGradient(
+                stops: [
+                    .init(color: cardBackground, location: 0),
+                    .init(color: cardBackground.opacity(0.95), location: 0.15),
+                    .init(color: cardBackground.opacity(0.75), location: 0.3),
+                    .init(color: cardBackground.opacity(0.45), location: 0.45),
+                    .init(color: cardBackground.opacity(0.18), location: 0.6),
+                    .init(color: cardBackground.opacity(0.05), location: 0.75),
+                    .init(color: cardBackground.opacity(0), location: 0.9),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+    }
 
     private func filled(_ image: Image) -> some View {
         image
             .resizable()
             .scaledToFill()
-            .frame(width: 150)
+            .frame(width: width)
             .clipped()
     }
 }

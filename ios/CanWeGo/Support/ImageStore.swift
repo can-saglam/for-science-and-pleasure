@@ -248,6 +248,11 @@ enum ImageStore {
         return (sharp, blurred)
     }
 
+    /// The melt underlay for a photo from outside the cache.
+    static func meltUnderlay(_ image: UIImage) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) { melted(image) }.value
+    }
+
     /// Gaussian-blurred copy for the melt underlay, computed once per image.
     /// Blurred pixels carry no detail, so it's baked at a quarter of the
     /// card's resolution (a sixteenth of the work and memory) and stretched

@@ -125,11 +125,11 @@ final class SaveIntentTests: XCTestCase {
         } catch {}
     }
 
-    /// iOS 27's "add … to Can We Go": Events and Places are the lists, and
-    /// an empty title is refused before anything is looked up.
-    func testSiriListsAreEventsAndPlaces() async throws {
+    /// iOS 27's "add … to Can We Go": the app's name, Events and Places are
+    /// the lists, and an empty title is refused before anything is looked up.
+    func testSiriListsAreCanWeGoEventsAndPlaces() async throws {
         let lists = try await definitions.entities["SaveListEntity"].suggestedEntities()
-        XCTAssertEqual(try lists.map { try $0.name as String }, ["Events", "Places"])
+        XCTAssertEqual(try lists.map { try $0.name as String }, ["Can We Go", "Events", "Places"])
         do {
             try await definitions.intents["AddSaveByVoiceIntent"].makeIntent(title: " ").run()
             XCTFail("an empty title adds nothing")
