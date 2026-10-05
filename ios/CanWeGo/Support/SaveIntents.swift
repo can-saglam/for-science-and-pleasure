@@ -205,6 +205,9 @@ struct SaveLinkIntent: AppIntent {
             return .result(dialog: "That page is slow to read. It\u{2019}ll be in your saves next time you open Can We Go.")
         }
         try SaveInbox.park(card, url: card.url ?? link.absoluteString, userId: userId)
+        if let held = SaveInbox.held(card, in: SaveLibrary.all()) {
+            return .result(dialog: "\u{201c}\(card.title)\u{201d} is saved for later. \(held)")
+        }
         return .result(dialog: "Saved \u{201c}\(card.title)\u{201d}.")
     }
 }
@@ -232,14 +235,17 @@ struct AddToLibraryIntent: AppIntent {
 
     enum Outcome {
         case alreadySaved(Item)
-        case added(ParseClient.Card, id: UUID)
+        /// `held`: why it waits in the inbox instead of landing now.
+        case added(ParseClient.Card, id: UUID, held: String?)
 
         @MainActor
         var sentence: String {
             switch self {
             case .alreadySaved(let twin):
                 "\u{201c}\(twin.title)\u{201d} is already in your saves. \(DuplicateFinder.describe(twin))"
-            case .added(let card, _):
+            case .added(let card, _, let held?):
+                "\u{201c}\(card.title)\u{201d} is saved for later. \(held)"
+            case .added(let card, _, nil):
                 "Added \u{201c}\(card.title)\u{201d}."
             }
         }
@@ -247,9 +253,9 @@ struct AddToLibraryIntent: AppIntent {
         @MainActor
         var dialog: IntentDialog {
             switch self {
-            case .alreadySaved:
+            case .alreadySaved, .added(_, _, _?):
                 IntentDialog("\(sentence)")
-            case .added(let card, _):
+            case .added(let card, _, nil):
                 IntentDialog(full: "\(sentence)", supporting: "Added to \(AddToLibraryIntent.list(card.kind)).")
             }
         }
@@ -263,7 +269,7 @@ struct AddToLibraryIntent: AppIntent {
             return switch self {
             case .alreadySaved(let twin):
                 SiriSaveCard(row: await SiriCards.dressed(SiriCardRow(twin), wait: true))
-            case .added(let card, let id):
+            case .added(let card, let id, _):
                 SiriSaveCard(row: await SiriCards.dressed(SiriCardRow(card, id: id)))
             }
         }
@@ -340,7 +346,7 @@ struct AddToLibraryIntent: AppIntent {
         }
         let id = UUID()
         try SaveInbox.park(card, url: card.url, userId: userId, id: id)
-        return .added(card, id: id)
+        return .added(card, id: id, held: SaveInbox.held(card, in: library))
     }
 
     /// A save that's probably the same thing under another title ("Jaga
@@ -427,20 +433,13 @@ enum SaveInbox {
     @available(iOS 27.0, *)
     private static func lookUpLong(_ text: String, in intent: some LongRunningIntent) async throws -> ParseClient.Card {
         let lookup = Task { try await lookUp(text, within: longLookUp) }
-        let quick = try await withTaskCancellationHandler {
-            try await withThrowingTaskGroup(of: ParseClient.Card?.self) { group in
-                group.addTask { try await lookup.value }
-                group.addTask {
-                    try await Task.sleep(for: quickLookUp)
-                    return nil
-                }
-                defer { group.cancelAll() }
-                return try await group.next() ?? nil
-            }
+        let quick = await withTaskCancellationHandler {
+            await settled(lookup, within: quickLookUp)
         } onCancel: {
             lookup.cancel()
         }
-        if let quick { return quick }
+        try Task.checkCancellation()
+        if let quick { return try quick.get() }
         intent.progress.totalUnitCount = 1
         intent.progress.localizedDescription = "Looking it up"
         let card = try await intent.performBackgroundTask {
@@ -452,6 +451,44 @@ enum SaveInbox {
         }
         intent.progress.completedUnitCount = 1
         return card
+    }
+
+    /// The lookup's outcome if it lands within `limit`, nil while it's still
+    /// going. Waiting on a task's value can't be abandoned (a task group
+    /// holding it would wait out the whole lookup), so both sides race into
+    /// a stream and the first one in wins.
+    private static func settled(
+        _ lookup: Task<ParseClient.Card, Error>, within limit: Duration
+    ) async -> Result<ParseClient.Card, Error>? {
+        let (stream, race) = AsyncStream.makeStream(of: Result<ParseClient.Card, Error>?.self)
+        let landed = Task { race.yield(await lookup.result) }
+        let timer = Task {
+            try? await Task.sleep(for: limit)
+            race.yield(nil)
+        }
+        defer {
+            landed.cancel()
+            timer.cancel()
+            race.finish()
+        }
+        for await first in stream { return first }
+        return nil
+    }
+
+    /// Why a parked save won't land when the app claims it, if it won't:
+    /// the claim's own two checks, against the library as it stands.
+    @MainActor
+    static func held(_ card: ParseClient.Card, in library: [Item]) -> String? {
+        if DailyCap.applies, DailyCap.today(library, me: SupabaseAuth.shared.userId).count >= DailyCap.limit {
+            return "That\u{2019}s today\u{2019}s \(DailyCap.limit) saves, so it goes in tomorrow."
+        }
+        if CategoryCap.applies, let category = card.category {
+            let key = CategoryCap.key(category)
+            if !key.isEmpty, CategoryCap.tally(library)[key, default: 0] >= CategoryCap.limit {
+                return "\(CategoryCap.plural(category)) is full on the free plan, so it waits in Can\u{00A0}We\u{00A0}Go until there\u{2019}s room."
+            }
+        }
+        return nil
     }
 
     static func park(_ card: ParseClient.Card, url: String?, userId: UUID, id: UUID? = nil) throws {

@@ -83,20 +83,7 @@ enum WidgetStore {
                 imageURL: item.imageUrl.flatMap(URL.init(string:))
             )
         }
-        let lock = items
-            .filter { !$0.isDeleted && ($0.upcomingPlan != nil || ($0.isEvent && !$0.isDone && !$0.isMissed)) }
-            .map { item in
-                LockEntry(
-                    id: item.id,
-                    title: item.title,
-                    place: [item.venue, item.area].compactMap(\.self).first { $0 != item.title },
-                    startsOn: item.startsOn,
-                    endsOn: item.endsOn,
-                    oneDay: item.isOneDay,
-                    planOn: item.upcomingPlan,
-                    planTime: item.planTime
-                )
-            }
+        let lock = lockData(items)
 
         writeTheme(ThemeStore.shared.current)
         Task.detached(priority: .utility) {
@@ -137,9 +124,7 @@ enum WidgetStore {
             if let data = try? JSONEncoder().encode(written) {
                 try? data.write(to: directory.appending(path: "items.json"), options: .atomic)
             }
-            if let data = try? JSONEncoder().encode(lock) {
-                try? data.write(to: directory.appending(path: "lock.json"), options: .atomic)
-            }
+            try? lock?.write(to: directory.appending(path: "lock.json"), options: .atomic)
 
             // Sweep photos of items that left the rotation (done, deleted).
             let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "lock.json", "version.txt", "theme.json"])
@@ -150,6 +135,41 @@ enum WidgetStore {
 
             WidgetCenter.shared.reloadAllTimelines()
         }
+    }
+
+    /// Just the Lock Screen's file, written in place: for leaving the app,
+    /// when a plan set or moved this session would otherwise wait for the
+    /// next foreground. Reloads only when something changed, since reloads
+    /// from the background count against the widget's budget.
+    static func syncLock(items: [Item]) {
+        guard let directory, let data = lockData(items) else { return }
+        let file = directory.appending(path: "lock.json")
+        guard (try? Data(contentsOf: file)) != data else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
+        WidgetCenter.shared.reloadTimelines(ofKind: "UpNext")
+    }
+
+    /// Sorted keys, so the same library always encodes to the same bytes
+    /// and `syncLock` can tell nothing changed.
+    private static func lockData(_ items: [Item]) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let entries = items
+            .filter { !$0.isDeleted && ($0.upcomingPlan != nil || ($0.isEvent && !$0.isDone && !$0.isMissed)) }
+            .map { item in
+                LockEntry(
+                    id: item.id,
+                    title: item.title,
+                    place: [item.venue, item.area].compactMap(\.self).first { $0 != item.title },
+                    startsOn: item.startsOn,
+                    endsOn: item.endsOn,
+                    oneDay: item.isOneDay,
+                    planOn: item.upcomingPlan,
+                    planTime: item.planTime
+                )
+            }
+        return try? encoder.encode(entries)
     }
 
     private static func shrunk(_ image: UIImage, maxSide: CGFloat) -> UIImage {

@@ -30,6 +30,8 @@
 	<string>Used when you tap Use my location to set a home city, to show you on the map, and for distance chips on saved places.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Snap a poster or flyer to save it straight to your list.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Saves the postcard you made to your Photos.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>Adds events you choose to your calendar.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

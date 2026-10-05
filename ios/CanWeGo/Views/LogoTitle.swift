@@ -6,9 +6,9 @@ import SwiftUI
 ///
 /// Two small moments live here. The library header, the welcome page and
 /// Settings write the mark in by hand the first time each shows in a
-/// session (`CanWeGoLogoWriteOn`). And while the library is refreshing,
-/// the "?" rocks on its dot — the mark asking the question while the
-/// answer is fetched.
+/// session (`CanWeGoLogoWriteOn`). And on the library, the "?" is turned
+/// by pull-to-refresh: clockwise on its dot as the finger pulls, rocking
+/// while the answer is fetched, then springing home.
 struct LogoTitle: View {
     /// Where a mark writes itself in. Each place does it once per session;
     /// the next time it shows, the mark is simply there.
@@ -17,6 +17,8 @@ struct LogoTitle: View {
     var height: CGFloat = 28
     /// The list is pulling from the server: the "?" rocks until it's done.
     var refreshing = false
+    /// How far the list is pulled past its top.
+    var pull: PullDistance? = nil
     /// Writes in by hand rather than standing still. Only the three places
     /// above ask; a mark rendered offscreen (the share postcard) must never
     /// start blank.
@@ -26,9 +28,10 @@ struct LogoTitle: View {
     /// When each place first started writing this session.
     private static var written: [Moment: Date] = [:]
 
-    init(height: CGFloat = 28, refreshing: Bool = false, writes: Moment? = nil) {
+    init(height: CGFloat = 28, refreshing: Bool = false, pull: PullDistance? = nil, writes: Moment? = nil) {
         self.height = height
         self.refreshing = refreshing
+        self.pull = pull
         self.writes = writes
         _animates = State(initialValue: writes.map(Self.mayWrite) ?? false)
     }
@@ -39,22 +42,33 @@ struct LogoTitle: View {
     private static func mayWrite(_ moment: Moment) -> Bool {
         written[moment].map { Date.now.timeIntervalSince($0) < 0.3 } ?? true
     }
-    /// The "?"'s lean, in degrees.
-    @State private var tilt: Double = 0
+    /// The "?"'s rock on its dot while refreshing, in degrees.
+    @State private var sway: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// The pull as a turn, in degrees clockwise: close to the finger at
+    /// first, giving less the further it goes, never past 75°.
+    private var turn: Double {
+        guard !reduceMotion, let points = pull?.points, points > 0 else { return 0 }
+        return 75 * (1 - 1 / (1 + points / 70))
+    }
+
     var body: some View {
+        let turn = turn
         ZStack {
             // The letters, with the "?" cut out…
             mark.mask {
                 QuestionMarkRegion(inverted: true)
                     .fill(.black, style: FillStyle(eoFill: true))
             }
-            // …and the "?" alone, free to rock on its dot. One element for
+            // …and the "?" alone, free to turn on its dot. One element for
             // VoiceOver: this copy stays silent.
             mark
                 .mask { QuestionMarkRegion().fill(.black) }
-                .rotationEffect(.degrees(tilt), anchor: QuestionMarkRegion.pivot)
+                .rotationEffect(.degrees(turn + sway), anchor: QuestionMarkRegion.pivot)
+                // A soft spring behind the finger: it trails a beat and
+                // settles with a little wobble, on the way round and back.
+                .animation(.spring(response: 0.32, dampingFraction: 0.58), value: turn)
                 .accessibilityHidden(writes != nil)
         }
         .frame(width: height * 5.01, height: height)
@@ -72,15 +86,15 @@ struct LogoTitle: View {
         .onChange(of: refreshing) { _, now in
             guard !reduceMotion else { return }
             if now {
-                // Lean one way, then sway between the two until it's done.
-                withAnimation(.easeInOut(duration: 0.28)) { tilt = -11 }
+                // Let go: back past upright, then rocking until it's done.
+                withAnimation(.spring(duration: 0.35, bounce: 0.3)) { sway = -9 }
                 Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(0.28))
+                    try? await Task.sleep(for: .seconds(0.35))
                     guard refreshing else { return }
-                    withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { tilt = 11 }
+                    withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { sway = 9 }
                 }
             } else {
-                withAnimation(.spring(duration: 0.5, bounce: 0.45)) { tilt = 0 }
+                withAnimation(.spring(duration: 0.55, bounce: 0.5)) { sway = 0 }
             }
         }
     }
@@ -144,7 +158,7 @@ extension LogoTitle {
     struct QuestionMarkRegion: Shape {
         var inverted = false
 
-        /// The dot of the "?": the point it rocks on.
+        /// The dot of the "?": the point it turns on.
         static let pivot = UnitPoint(x: 0.965, y: 0.97)
 
         func path(in rect: CGRect) -> Path {
@@ -168,12 +182,19 @@ extension View {
     /// Puts the wordmark at the leading edge of the navigation bar; all
     /// the controls group at the trailing end. No glass behind it — the
     /// system capsule would squeeze the wide mark into a circle.
-    func logoTitle(refreshing: Bool = false) -> some View {
+    func logoTitle(refreshing: Bool = false, pull: PullDistance? = nil) -> some View {
         toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                LogoTitle(refreshing: refreshing, writes: .library)
+                LogoTitle(refreshing: refreshing, pull: pull, writes: .library)
             }
             .sharedBackgroundVisibility(.hidden)
         }
     }
+}
+
+/// How far a list is pulled down past its top, in points. Its own object
+/// so the frame-by-frame updates redraw the wordmark alone, not the list.
+@Observable
+final class PullDistance {
+    var points: CGFloat = 0
 }

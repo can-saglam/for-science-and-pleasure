@@ -174,6 +174,9 @@ enum SupabaseSync {
         guard await buildIsCurrent() else { return }
         do {
             let cursor = lastSyncAt
+            // The next cursor. Taken before anything is read, so an edit
+            // stamped while this round is in flight is still ahead of it.
+            let started = Date.now
             let fresh = cursor == .distantPast
             let group = GroupStore.shared
             guard await group.refresh() else {
@@ -238,7 +241,7 @@ enum SupabaseSync {
             // Only a fully clean round advances the cursor — a failed push
             // leaves its dirty items behind it, retried on the next sync.
             if let pushError { throw pushError }
-            lastSyncAt = .now
+            lastSyncAt = started
             // A row the server refused on its own merits is set aside
             // (see `upsert`) so it can't hold everything else hostage — but
             // it stays visible in Settings until the item is edited again.
@@ -477,9 +480,11 @@ enum SupabaseSync {
         init(from decoder: Decoder) { row = try? Row(from: decoder) }
     }
 
-    /// One pull page, decoded off the main actor.
-    nonisolated private static func decodePage(_ data: Data) throws -> [Row] {
-        try decoder.decode([LenientRow].self, from: data).compactMap(\.row)
+    /// One pull page, decoded off the main actor. `served` counts every row
+    /// the server sent, including any that didn't decode, for paging.
+    nonisolated private static func decodePage(_ data: Data) throws -> (rows: [Row], served: Int) {
+        let page = try decoder.decode([LenientRow].self, from: data)
+        return (page.compactMap(\.row), page.count)
     }
 
     private static var encoder: JSONEncoder {
@@ -676,17 +681,19 @@ enum SupabaseSync {
             let page = try await Task.detached(priority: .userInitiated) {
                 try decodePage(data)
             }.value
-            rows.append(contentsOf: page)
+            rows.append(contentsOf: page.rows)
 
             let range = http?.value(forHTTPHeaderField: "Content-Range")
             if let total = contentRangeTotal(range) {
-                if rows.count >= total || page.isEmpty { break }
-                offset += pageSize
+                // Paged by what was served: a row that didn't decode must
+                // not send the next request past the end (a 416).
+                if offset + page.served >= total || page.served == 0 { break }
+                offset += page.served
                 continue
             }
             // A full page with no range would be silently truncated — fail
             // rather than treat the server as empty or complete.
-            if page.count >= pageSize {
+            if page.served >= pageSize {
                 throw SyncProblem(
                     message: "Couldn't fetch the latest saves.",
                     detail: "Pull truncated without a Content-Range."

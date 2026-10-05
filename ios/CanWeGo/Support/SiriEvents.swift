@@ -210,7 +210,7 @@ struct AddEventByVoiceIntent: LongRunningIntent {
         let outcome = try await AddToLibraryIntent.add(Self.description(title: title, location: place), asking: self)
         let entity = switch outcome {
         case .alreadySaved(let twin): SaveEventEntity(twin)
-        case .added(let card, let id): SaveEventEntity(id: id, card: card)
+        case .added(let card, let id, _): SaveEventEntity(id: id, card: card)
         }
         return .result(value: entity, dialog: outcome.dialog, view: await outcome.card(voiceOnly: Siri.voiceOnly(self)))
     }

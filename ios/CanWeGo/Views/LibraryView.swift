@@ -51,6 +51,9 @@ struct LibraryView: View {
     @State private var undoBin = UndoBin.shared
     /// A pull-to-refresh in flight: the wordmark's "?" rocks meanwhile.
     @State private var refreshing = false
+    /// The pull itself, which the "?" follows. Written as the list
+    /// scrolls and read only by the wordmark.
+    @State private var pull = PullDistance()
     /// One tip at a time: the share tip first, then the widget tip once it's
     /// dismissed or no longer needed.
     @State private var tips = TipGroup(.firstAvailable) {
@@ -383,7 +386,7 @@ struct LibraryView: View {
             // No navigation title: the wordmark owns the leading edge, and
             // the bottom bar already says which tab you're on.
             .navigationBarTitleDisplayMode(.inline)
-            .logoTitle(refreshing: refreshing)
+            .logoTitle(refreshing: refreshing, pull: pull)
             // Our own search control, not `.searchable`: the system pins
             // its search item to the far trailing end and won't hide it on
             // the map — this one sits left of the group and steps aside, so
@@ -803,6 +806,14 @@ struct LibraryView: View {
                 Haptics.success()
                 showRefreshNotice("Updated just now", icon: "checkmark")
             }
+        }
+        // Only past the top, and to the half point: an ordinary scroll
+        // changes nothing here and costs nothing.
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            let past = -(geometry.contentOffset.y + geometry.contentInsets.top)
+            return past > 0 ? (past * 2).rounded() / 2 : 0
+        } action: { _, points in
+            pull.points = points
         }
         // Tapping the tab you're already on brings the list home.
         .scrollPosition($scrollPosition)

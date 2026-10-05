@@ -9,7 +9,7 @@ Can We Go? is a shared list of places and events you mean to go to.
 - The cards you save: titles, dates, notes, links, photos you attach, and who in the group added them.
 - A home city, if you set one, so dates and distances read in that city.
 - Whether you subscribe to Can We Go? Plus, and until when, so your group gets its benefits.
-- A device token, if you allow notifications, so someone else in the group can be told when you save something.
+- A device token, if you allow notifications, so someone else in the group can be told when you save something. It is stored with an ID Apple gives the app on your phone, so a reinstall replaces the old token instead of adding another.
 
 Your phone’s own location stays on your phone. It is only used there, to show how far away a place is.
 
@@ -34,8 +34,10 @@ A screenshot or link you share or paste is sent to our parse function so we can 
 
 ## Deleting your account
 
+Everything above is kept for as long as you have an account. Deleting it removes it all, apart from saves left in a shared library, as below.
+
 Settings → Delete account exports your library first, then removes your login. A shared library is left for the people still in it. A solo library is deleted with you. A Plus subscription is managed by Apple: cancel it in Settings → Apple Account → Subscriptions.
 
 ## Contact
 
-Open an issue at [github.com/can-saglam/for-science-and-pleasure/issues](https://github.com/can-saglam/for-science-and-pleasure/issues). A private email address is coming soon.
+Email [hello@canwego.app](mailto:hello@canwego.app).

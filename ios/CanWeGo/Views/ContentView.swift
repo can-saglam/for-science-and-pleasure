@@ -350,6 +350,7 @@ struct ContentView: View {
         // then refresh the shared URL index.
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active { becameActive() }
+            if phase == .background { WidgetStore.syncLock(items: items.filter { !$0.isDeleted }) }
         }
         // Any local save (add, edit, done, delete-undo…) syncs to the shared
         // table after a short debounce.
@@ -504,6 +505,9 @@ struct ContentView: View {
                 item.addedByEmail = SupabaseAuth.shared.email
                 if item.createdBy == nil { item.createdBy = SupabaseAuth.shared.userId }
                 item.updatedBy = SupabaseAuth.shared.userId
+                // Ahead of the sync cursor, so the regular push carries it
+                // even if the announce below doesn't land.
+                item.updatedAt = .now
                 context.insert(item)
                 do {
                     try context.save()
