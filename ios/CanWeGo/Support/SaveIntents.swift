@@ -116,7 +116,7 @@ struct ClosingSoonIntent: AppIntent {
 /// it's about come as cards under it.
 struct AskLibraryIntent: AppIntent {
     static let title: LocalizedStringResource = "Ask Your Saves"
-    static let description = IntentDescription("Answers a question about your saves, like \u{201c}anything free this weekend?\u{201d}, on this iPhone with Apple Intelligence.")
+    static let description = IntentDescription("Answers a question about your saves, like \u{201c}anything free this weekend?\u{201d}, right on this device.")
     @Parameter(title: "Question", requestValueDialog: "What would you like to know?")
     var question: String
 
