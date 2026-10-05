@@ -47,7 +47,7 @@ enum SpotlightIndex {
             Task.detached(priority: .utility) {
                 let index = CSSearchableIndex.default()
                 try? await index.indexAppEntities([SaveCalendarEntity.canWeGo])
-                try? await index.indexAppEntities([SaveListEntity.events, .places])
+                try? await index.indexAppEntities([SaveListEntity.canWeGo, .events, .places])
             }
         }
         #endif

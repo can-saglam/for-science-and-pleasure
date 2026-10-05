@@ -20,7 +20,8 @@ enum SaveListType: String {
 }
 
 /// Indexed and enumerable, like the calendar: Siri adds only to lists it
-/// can find.
+/// can find. Which list is picked never matters, the parser decides event
+/// or place; "Can We Go" exists so the app's own name is a list.
 @available(iOS 27.0, *)
 @AppEntity(schema: .reminders.list)
 struct SaveListEntity: IndexedEntity {
@@ -30,6 +31,7 @@ struct SaveListEntity: IndexedEntity {
     var name: String
     var type: SaveListType
 
+    static let canWeGo = SaveListEntity(id: "canwego", name: "Can We Go")
     static let events = SaveListEntity(id: "event", name: "Events")
     static let places = SaveListEntity(id: "place", name: "Places")
 
@@ -40,7 +42,15 @@ struct SaveListEntity: IndexedEntity {
     }
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)", image: .init(systemName: id == "place" ? "building.columns" : "calendar"))
+        switch id {
+        case "canwego":
+            DisplayRepresentation(
+                title: "\(name)", image: .init(systemName: "bookmark"),
+                synonyms: ["Can We Go list", "My Can We Go list", "Can We Go saves", "My saves"]
+            )
+        case "place": DisplayRepresentation(title: "\(name)", image: .init(systemName: "building.columns"))
+        default: DisplayRepresentation(title: "\(name)", image: .init(systemName: "calendar"))
+        }
     }
 }
 
@@ -55,8 +65,10 @@ struct SaveListQuery: EntityStringQuery, EnumerableEntityQuery {
     }
 
     func entities(matching string: String) async throws -> [SaveListEntity] {
-        let asked = string.lowercased()
-        return suggested().filter { asked.contains($0.name.lowercased().dropLast()) }
+        // Letters only, last one dropped: "event", "can we go?" and
+        // "CanWeGo" all find their list.
+        let asked = Self.letters(string)
+        return suggested().filter { asked.contains(Self.letters($0.name).dropLast()) }
     }
 
     func suggestedEntities() async throws -> [SaveListEntity] {
@@ -64,7 +76,11 @@ struct SaveListQuery: EntityStringQuery, EnumerableEntityQuery {
     }
 
     private func suggested() -> [SaveListEntity] {
-        [.events, .places]
+        [.canWeGo, .events, .places]
+    }
+
+    private static func letters(_ text: String) -> String {
+        text.lowercased().filter(\.isLetter)
     }
 }
 
