@@ -401,6 +401,7 @@ enum SupabaseSync {
         var lat: Double?
         var lng: Double?
         var place_id: String?
+        var showings: ShowingsColumn?
         var added_by_email: String?
         var group_id: UUID?
         var updated_by: UUID?
@@ -448,6 +449,8 @@ enum SupabaseSync {
             try c.encode(lng, forKey: .lng)
             // Null never clears the server's (0041): only moving the save does.
             try c.encode(place_id, forKey: .place_id)
+            // Nor does it clear showings (0044).
+            try c.encode(showings, forKey: .showings)
             try c.encode(added_by_email, forKey: .added_by_email)
             try c.encode(group_id, forKey: .group_id)
             try c.encode(updated_by, forKey: .updated_by)
@@ -455,6 +458,23 @@ enum SupabaseSync {
             try c.encode(created_at, forKey: .created_at)
             try c.encode(updated_at, forKey: .updated_at)
             try c.encode(deleted_at, forKey: .deleted_at)
+        }
+    }
+
+    /// `items.showings`, read leniently: a list this build can't read is no
+    /// list, never a failed pull.
+    private struct ShowingsColumn: Codable {
+        let list: [Showing]
+
+        init(_ list: [Showing]) { self.list = list }
+
+        init(from decoder: Decoder) throws {
+            list = (try? decoder.singleValueContainer().decode([Showing].self)) ?? []
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            try c.encode(list)
         }
     }
 
@@ -660,6 +680,7 @@ enum SupabaseSync {
             lat: item.lat,
             lng: item.lng,
             place_id: item.placeId,
+            showings: item.showingsJSON == nil ? nil : ShowingsColumn(item.showings),
             added_by_email: item.addedByEmail ?? SupabaseAuth.shared.email,
             group_id: item.groupId,
             updated_by: item.updatedBy,
@@ -810,6 +831,7 @@ enum SupabaseSync {
         item.lat = row.lat
         item.lng = row.lng
         item.placeId = row.place_id
+        item.showingsJSON = Showing.encode(row.showings?.list)
         item.addedByEmail = row.added_by_email
         item.groupId = row.group_id
         item.updatedBy = row.updated_by

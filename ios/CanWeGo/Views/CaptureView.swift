@@ -639,6 +639,7 @@ struct CaptureView: View {
             item.imageUrl = card.image_url
             item.source = card.source
             item.placeId = card.place_id
+            item.showings = card.showings ?? []
             // A partner's save may have synced in while the parser worked.
             loadLibrary()
             withAnimation(reveal) { draft = item }

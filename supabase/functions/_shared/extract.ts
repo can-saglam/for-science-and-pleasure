@@ -49,6 +49,15 @@ export interface ParsedCard {
   starts_on: string | null;
   ends_on: string | null;
   website: string | null;
+  showings: Showing[] | null;
+}
+
+/// One of an event's separate performances: a festival film's screening,
+/// a night of a play's run, a tour date. `time` is HH:MM on the local clock.
+export interface Showing {
+  date: string;
+  time: string | null;
+  note: string | null;
 }
 
 /// Thrown when the input is a search, not a save — "modern art museums in
@@ -176,10 +185,32 @@ const cardSchema = (home: Home) => ({
       description:
         "The web page for this exact event or place, opened when someone taps the save. An event: its own main page — its listing on the venue's or organiser's site, the homepage of a festival or fair with a site of its own, or the official ticket page when that is where the organiser lists it. A place: its official homepage (for one branch of a chain, that branch's page). Never a sub-page such as about, FAQs, visitor information or checkout. Only a URL that appeared in the input, the fetched page, or your search results — never one you constructed. null when there is no such page: never a venue homepage or what's-on list standing in for an event, an aggregator, social media, or a maps link.",
     },
+    showings: {
+      type: ["array", "null"],
+      description:
+        "For an event that happens as separate dated performances listed by the source — a festival film's screenings, the nights of a play's run, a comedy or music tour's dates, a cinema's showtimes: each one listed, in date order, earliest first. Only ones the source actually lists, never inferred from a run's dates or a schedule pattern. null for an exhibition or anything open every day through a run, for a single event whose source gives no time, and for a place.",
+      items: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "YYYY-MM-DD" },
+          time: {
+            type: ["string", "null"],
+            description: "Start time as 24-hour HH:MM on the local clock, null if the source gives none",
+          },
+          note: {
+            type: ["string", "null"],
+            description:
+              "A short label the source prints with this one, a few words at most: 'Relaxed screening', 'Q&A', 'Audio described', 'Sold out', or the venue or city when the performances aren't all at the same place. null otherwise.",
+          },
+        },
+        required: ["date", "time", "note"],
+        additionalProperties: false,
+      },
+    },
   },
   required: [
     "is_specific", "kind", "title", "summary", "venue", "area", "address",
-    "category", "price", "booking_url", "starts_on", "ends_on", "website", "link",
+    "category", "price", "booking_url", "starts_on", "ends_on", "website", "link", "showings",
   ],
   additionalProperties: false,
 }) as const;
@@ -297,6 +328,40 @@ export function isThisRun(html: string, dates: string[]): boolean {
   const years = new Set(dates.map((d) => d.slice(0, 4)));
   const found = [...pageText(html).matchAll(FULL_DATE_RE)].map((m) => m[1] ?? m[2]);
   return !found.length || found.some((y) => years.has(y));
+}
+
+const SHOWING_TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+const MAX_SHOWINGS = 30;
+
+function isDay(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/// The model's showings, kept only where they help pick one: real days
+/// from today on, one per day and time, in order. A lone showing stays
+/// only with a time; its day alone is already the card's.
+export function cleanShowings(raw: unknown, kind: string, today: string): Showing[] | null {
+  if (kind !== "event" || !Array.isArray(raw)) return null;
+  const seen = new Set<string>();
+  const kept: Showing[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const { date, time, note } = entry as Record<string, unknown>;
+    if (!isDay(date) || date < today) continue;
+    const clock = typeof time === "string" ? time.trim().match(SHOWING_TIME_RE) : null;
+    const hm = clock ? `${clock[1].padStart(2, "0")}:${clock[2]}` : null;
+    const key = `${date} ${hm ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = typeof note === "string" ? note.trim().slice(0, 40) : "";
+    kept.push({ date, time: hm, note: label || null });
+  }
+  kept.sort((a, b) => `${a.date} ${a.time ?? ""}`.localeCompare(`${b.date} ${b.time ?? ""}`));
+  const showings = kept.slice(0, MAX_SHOWINGS);
+  if (!showings.length || (showings.length === 1 && !showings[0].time)) return null;
+  return showings;
 }
 
 /// An event as a page's JSON-LD describes it. Venues often print only
@@ -657,6 +722,14 @@ export async function extractCard(
   }
   const { is_specific, link: proposedLink, ...card } = JSON.parse(textBlock.text) as ModelCard;
   card.category = normaliseCategory(card.kind, card.category);
+  card.showings = cleanShowings(card.showings, card.kind, today);
+  if (card.showings) {
+    // The run covers every showing, so each one can be planned.
+    const first = card.showings[0].date;
+    const last = card.showings[card.showings.length - 1].date;
+    if (!card.starts_on || first < card.starts_on) card.starts_on = first;
+    if (!card.ends_on || last > card.ends_on) card.ends_on = last;
+  }
   const seen = new Set<string>();
   for (const block of response.content) {
     if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;

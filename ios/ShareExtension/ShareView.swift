@@ -365,6 +365,7 @@ struct ShareView: View {
         item.imageUrl = card.image_url
         item.source = card.source
         item.placeId = card.place_id
+        item.showings = card.showings ?? []
         return item
     }
 

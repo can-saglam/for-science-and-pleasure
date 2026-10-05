@@ -1,4 +1,4 @@
--- Undoes 0044: back to 0042's items_default_group and 0043's daily count.
+-- Undoes 0045: back to 0042's items_default_group and 0043's daily count.
 
 drop trigger if exists items_pin_inserted_at on public.items;
 drop function if exists public.items_pin_inserted_at();

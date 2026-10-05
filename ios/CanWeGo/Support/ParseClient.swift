@@ -23,6 +23,7 @@ enum ParseClient {
         let image_url: String?
         let source: String?
         let place_id: String?
+        let showings: [Showing]?
     }
 
     enum ParseError: LocalizedError {

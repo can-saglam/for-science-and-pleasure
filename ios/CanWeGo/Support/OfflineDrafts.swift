@@ -187,6 +187,7 @@ enum OfflineDrafts {
         put(\.colorHex, card.color)
         put(\.imageUrl, card.image_url)
         put(\.source, card.source)
+        put(\.showingsJSON, Showing.encode(card.showings))
         item.reconcileReminder()
         item.updatedAt = .now
         try? context.save()

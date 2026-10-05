@@ -139,18 +139,34 @@ struct PlanSheet: View {
         self.onFinish = onFinish
         let today = DayString.today()
         let planned = item.upcomingPlan
-        let first = item.plannableDays?.lowerBound ?? today
+        // Without a plan, the first showing still ahead is put forward.
+        let showing = planned == nil ? Self.showings(of: item).first : nil
+        let first = showing?.date ?? item.plannableDays?.lowerBound ?? today
         let grid = DayString.addingDays(Self.gridDays - 1, to: today) ?? today
-        let day = planned ?? (first <= grid ? first : nil)
+        let day = planned ?? (showing != nil || first <= grid ? first : nil)
         _day = State(initialValue: day)
-        _timed = State(initialValue: planned != nil && item.planTime != nil)
-        let own = planned != nil ? item.planTime : nil
+        _timed = State(initialValue: planned != nil ? item.planTime != nil : showing?.time != nil)
+        let own = planned != nil ? item.planTime : showing?.time
         let clock = own ?? Self.suggestedTime(day: day, ranges: nil)
         _time = State(initialValue: DayString.instant(day: today, time: clock) ?? .now)
         _suggested = State(initialValue: own == nil ? clock : nil)
         let later = planned.map { $0 > grid } ?? (first > grid)
         _later = State(initialValue: later)
         _detent = State(initialValue: later ? .large : .medium)
+    }
+
+    /// The listed showings that can still be planned: in the run, and not
+    /// already started today.
+    static func showings(of item: Item) -> [Showing] {
+        guard let range = item.plannableDays else { return [] }
+        let today = DayString.today()
+        return item.showings.filter { showing in
+            guard range.contains(showing.date) else { return false }
+            guard showing.date == today, let time = showing.time,
+                  let at = DayString.instant(day: today, time: time)
+            else { return true }
+            return at > .now
+        }
     }
 
     /// 14:00 when the venue is open then with an hour to spare, otherwise the
@@ -238,6 +254,9 @@ struct PlanSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if !showings.isEmpty {
+                        showingsRow
+                    }
                     if later {
                         laterPicker
                     } else {
@@ -330,6 +349,93 @@ struct PlanSheet: View {
             if on { resuggest() }
         }
         .task { await loadHours() }
+    }
+
+    // MARK: - Showings
+
+    private var showings: [Showing] { Self.showings(of: item) }
+
+    /// One tap picks a showing's day and time; any day can still be picked
+    /// below.
+    private var showingsRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Showings")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+                .accessibilityAddTraits(.isHeader)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(showings, id: \.self) { showingChip($0) }
+                }
+                // Every chip as tall as the tallest, noted or not.
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    private func isChosen(_ showing: Showing) -> Bool {
+        guard day == showing.date else { return false }
+        guard let time = showing.time else { return !timed }
+        return timed && clock == time
+    }
+
+    private func choose(_ showing: Showing) {
+        Haptics.selection()
+        withAnimation(.snappy) {
+            day = showing.date
+            if let clock = showing.time, let at = DayString.instant(day: today, time: clock) {
+                time = at
+                timed = true
+                suggested = nil
+            } else {
+                timed = false
+            }
+            if !gridDays.contains(showing.date) { later = true }
+        }
+    }
+
+    /// "Tue 13 Oct", "18:15", and the note the page printed with it.
+    private func showingChip(_ showing: Showing) -> some View {
+        let chosen = isChosen(showing)
+        let date = DayString.text(showing.date, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? showing.date
+        return Button {
+            choose(showing)
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(date)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(chosen ? AppBackground.onProminent.opacity(0.8) : .secondary)
+                Text(showing.time.map(OpeningHours.time) ?? "Any time")
+                    .font(.body.weight(chosen ? .semibold : .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(chosen ? AppBackground.onProminent : AppBackground.ink)
+                if let note = showing.note {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(chosen ? AppBackground.onProminent.opacity(0.8) : .secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minWidth: 84, minHeight: 56, maxHeight: .infinity, alignment: .topLeading)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(chosen ? AppBackground.ink : AppBackground.wash(0.06))
+            }
+            .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            [
+                DayString.text(showing.date, .dateTime.weekday(.wide).day().month(.wide)) ?? showing.date,
+                showing.time.map(OpeningHours.time),
+                showing.note,
+            ].compactMap(\.self).joined(separator: ", ")
+        )
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
     // MARK: - Days

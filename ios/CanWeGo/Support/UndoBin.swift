@@ -30,6 +30,7 @@ struct ItemSnapshot {
     var lat: Double?
     var lng: Double?
     var placeId: String?
+    var showingsJSON: String?
     var addedByEmail: String?
     var createdAt: Date
     var updatedAt: Date
@@ -45,7 +46,7 @@ extension Item {
             remindAt: remindAt, remindTime: remindTime,
             planOn: planOn, planTime: planTime, plannedBy: plannedBy, price: price,
             category: category, notes: notes, status: status,
-            colorHex: colorHex, lat: lat, lng: lng, placeId: placeId,
+            colorHex: colorHex, lat: lat, lng: lng, placeId: placeId, showingsJSON: showingsJSON,
             addedByEmail: addedByEmail, createdAt: createdAt, updatedAt: updatedAt
         )
     }
@@ -78,6 +79,7 @@ extension Item {
         lat = s.lat
         lng = s.lng
         placeId = s.placeId
+        showingsJSON = s.showingsJSON
         addedByEmail = s.addedByEmail
         createdAt = s.createdAt
         updatedAt = s.updatedAt

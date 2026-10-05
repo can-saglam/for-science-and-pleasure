@@ -15,7 +15,7 @@
 -- Parked until after launch: it rewrites the insert triggers every save
 -- runs through, so it gets the staging rehearsal (tests/README.md) first.
 -- Then this moves to migrations/ and the down file to rollback/.
--- Rollback: rollback/0044_server_insert_stamp_down.sql.
+-- Rollback: rollback/0045_server_insert_stamp_down.sql.
 
 alter table public.items add column if not exists inserted_at timestamptz;
 

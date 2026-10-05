@@ -68,6 +68,10 @@ final class Item {
     var planTime: String?
     /// Who set the plan — stamped server-side from the login.
     var plannedBy: UUID?
+    /// The event's separate performances as its page listed them, as the
+    /// JSON array the server keeps (`items.showings`). Read through
+    /// `showings`; written only from a parse.
+    var showingsJSON: String?
     /// Manual position in the Places list (long-press drag). Local-only —
     /// never synced, so each of you can keep your own order.
     var sortOrder: Double?
@@ -88,6 +92,31 @@ final class Item {
     }
 
     init() {}
+}
+
+/// One of an event's performances: a screening, a night of a run, a tour
+/// date. `date` is `yyyy-MM-dd`, `time` `HH:mm`, both on the home clock.
+struct Showing: Codable, Hashable, Sendable {
+    let date: String
+    let time: String?
+    let note: String?
+
+    static func encode(_ showings: [Showing]?) -> String? {
+        guard let showings, !showings.isEmpty, let data = try? JSONEncoder().encode(showings) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func decode(_ json: String?) -> [Showing] {
+        guard let json else { return [] }
+        return (try? JSONDecoder().decode([Showing].self, from: Data(json.utf8))) ?? []
+    }
+}
+
+extension Item {
+    var showings: [Showing] {
+        get { Showing.decode(showingsJSON) }
+        set { showingsJSON = Showing.encode(newValue) }
+    }
 }
 
 // MARK: - Date-only helpers

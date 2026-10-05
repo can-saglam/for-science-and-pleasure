@@ -1,4 +1,32 @@
-import { cleanLink, isAnchored, isThisRun, jsonLdEvents, ldClosing, linkKey, mentionsDate } from "./extract.ts";
+import { cleanLink, cleanShowings, isAnchored, isThisRun, jsonLdEvents, ldClosing, linkKey, mentionsDate } from "./extract.ts";
+
+Deno.test("showings: real days from today, in order, one each", () => {
+  const today = "2026-10-05";
+  const lff = cleanShowings([
+    { date: "2026-10-14", time: "20:35", note: " Relaxed screening " },
+    { date: "2026-10-13", time: "18:15", note: null },
+    { date: "2026-10-13", time: "18:15", note: "again" },
+    { date: "2026-10-01", time: "19:00", note: null },
+    { date: "2026-02-31", time: "19:00", note: null },
+    { date: "2026-10-15", time: "9:05", note: "" },
+    { date: "2026-10-16", time: "25:00", note: null },
+  ], "event", today);
+  assert(
+    JSON.stringify(lff) === JSON.stringify([
+      { date: "2026-10-13", time: "18:15", note: null },
+      { date: "2026-10-14", time: "20:35", note: "Relaxed screening" },
+      { date: "2026-10-15", time: "09:05", note: null },
+      { date: "2026-10-16", time: null, note: null },
+    ]),
+    `cleaned: ${JSON.stringify(lff)}`,
+  );
+  assert(cleanShowings([{ date: "2026-10-13", time: null, note: null }], "event", today) === null, "a lone day adds nothing");
+  assert(cleanShowings([{ date: "2026-10-13", time: "19:30", note: null }], "event", today)?.length === 1, "a lone time does");
+  assert(cleanShowings([{ date: "2026-10-13", time: "19:30", note: null }], "place", today) === null, "places have none");
+  assert(cleanShowings(null, "event", today) === null, "none given");
+  const many = Array.from({ length: 40 }, (_, i) => ({ date: "2026-11-01", time: `${String(10 + (i % 12)).padStart(2, "0")}:${String(i).padStart(2, "0")}`, note: null }));
+  assert(cleanShowings(many, "event", today)?.length === 30, "capped");
+});
 
 const ld = (json: unknown) => `<script type="application/ld+json">${JSON.stringify(json)}</script>`;
 

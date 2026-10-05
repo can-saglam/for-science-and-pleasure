@@ -31,6 +31,7 @@ enum SharedInbox {
         var imageUrl: String?
         var source: String?
         var placeId: String?
+        var showings: [Showing]?
         var status: String?
         /// Share-sheet "Save anyway" after a duplicate warning.
         var allowDuplicate: Bool?
@@ -154,6 +155,7 @@ extension SharedInbox.PendingSave {
         imageUrl = card.image_url
         source = card.source
         placeId = card.place_id
+        showings = card.showings
         self.userId = userId.uuidString
         groupId = GroupStore.shared.card?.groupId.uuidString
     }
@@ -185,6 +187,7 @@ extension SharedInbox.PendingSave {
         imageUrl = item.imageUrl
         source = item.source
         placeId = item.placeId
+        showings = item.showingsJSON == nil ? nil : item.showings
         status = item.status
         self.userId = userId.uuidString
         groupId = GroupStore.shared.card?.groupId.uuidString
@@ -218,6 +221,7 @@ extension Item {
         imageUrl = pending.imageUrl
         source = pending.source
         placeId = pending.placeId
+        showingsJSON = Showing.encode(pending.showings)
         if let status = pending.status { self.status = status }
         createdAt = pending.savedAt
         updatedAt = pending.savedAt
