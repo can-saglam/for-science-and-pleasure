@@ -193,14 +193,12 @@ struct AddSaveByVoiceIntent {
     var urls: [URL]
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<SaveItemEntity> & ProvidesDialog {
-        let outcome = try await AddToLibraryIntent.add(title) { question in
-            try await requestConfirmation(actionName: .add, dialog: "\(question)")
-        }
+    func perform() async throws -> some ReturnsValue<SaveItemEntity> & ProvidesDialog & ShowsSnippetView {
+        let outcome = try await AddToLibraryIntent.add(title, asking: self)
         let entity = switch outcome {
         case .alreadySaved(let twin): SaveItemEntity(twin)
         case .added(let card, let id): SaveItemEntity(id: id, card: card)
         }
-        return .result(value: entity, dialog: "\(outcome.sentence)")
+        return .result(value: entity, dialog: outcome.dialog, view: await outcome.card())
     }
 }

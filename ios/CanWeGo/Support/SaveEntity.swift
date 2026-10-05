@@ -46,6 +46,22 @@ struct SaveEntity: IndexedEntity {
     @Property(title: "Link")
     var link: URL?
 
+    /// The day the group means to go, at its time when there is one.
+    @Property(title: "Planned for")
+    var plannedFor: Date?
+
+    @Property(title: "Been")
+    var been: Bool
+
+    @Property(title: "About")
+    var about: String?
+
+    @Property(title: "Address")
+    var address: String?
+
+    @Property(title: "Price")
+    var price: String?
+
     @MainActor
     init(_ item: Item) {
         id = item.id
@@ -60,6 +76,13 @@ struct SaveEntity: IndexedEntity {
         ends = item.endsOn.flatMap(DayString.date)
         savedBy = MembersStore.shared.saverName(for: item)
         link = item.url.flatMap(URL.init(string:))
+        plannedFor = item.upcomingPlan.flatMap { day in
+            item.planTime.flatMap { DayString.instant(day: day, time: $0) } ?? DayString.date(day)
+        }
+        been = item.isDone
+        about = item.summary
+        address = item.address
+        price = item.price
     }
 
     var displayRepresentation: DisplayRepresentation {

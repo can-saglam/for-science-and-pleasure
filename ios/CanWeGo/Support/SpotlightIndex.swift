@@ -1,8 +1,9 @@
 import CoreSpotlight
 import Foundation
 
-/// Mirrors the active library into iOS system search: swipe down on the home
-/// screen, type "Kapoor", land on the save. Rebuilt in full on every
+/// Mirrors the library into iOS system search: swipe down on the home
+/// screen, type "Kapoor", land on the save. Past saves are in too, so Siri
+/// can answer "where was that place we went?". Rebuilt in full on every
 /// foreground — the library is small, and a rebuild self-heals renames,
 /// deletions and done-markings without any bookkeeping.
 enum SpotlightIndex {
@@ -11,12 +12,12 @@ enum SpotlightIndex {
     @MainActor
     static func sync(items: [Item]) {
         let entries = items
-            .filter { !$0.isDeleted && !$0.isDone }
+            .filter { !$0.isDeleted }
             .map { item -> CSSearchableItem in
                 let attributes = CSSearchableItemAttributeSet(contentType: .content)
                 attributes.title = item.title
                 attributes.contentDescription = [
-                    item.venue, item.area, item.timeLabel,
+                    item.venue, item.area, item.isDone ? "Been" : item.timeLabel,
                 ]
                 .compactMap(\.self)
                 .joined(separator: " · ")

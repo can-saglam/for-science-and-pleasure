@@ -201,20 +201,18 @@ struct AddEventByVoiceIntent {
     var recurrence: Calendar.RecurrenceRule?
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<SaveEventEntity> & ProvidesDialog {
+    func perform() async throws -> some ReturnsValue<SaveEventEntity> & ProvidesDialog & ShowsSnippetView {
         let place: String? = switch location {
         case .text(let text): text
         case .place(let descriptor): descriptor.commonName
         case nil: nil
         }
-        let outcome = try await AddToLibraryIntent.add(Self.description(title: title, location: place)) { question in
-            try await requestConfirmation(actionName: .add, dialog: "\(question)")
-        }
+        let outcome = try await AddToLibraryIntent.add(Self.description(title: title, location: place), asking: self)
         let entity = switch outcome {
         case .alreadySaved(let twin): SaveEventEntity(twin)
         case .added(let card, let id): SaveEventEntity(id: id, card: card)
         }
-        return .result(value: entity, dialog: "\(outcome.sentence)")
+        return .result(value: entity, dialog: outcome.dialog, view: await outcome.card())
     }
 
     /// "Amar Kanwar, Serpentine North": the venue Siri heard goes with the

@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import SwiftUI
 
 /// Opens a save in the app: the same route a reminder tap takes, so a cold
 /// start and a running app both land on it.
@@ -39,9 +40,30 @@ struct WhatsOnIntent: AppIntent {
     init() {}
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<[SaveEntity]> & ProvidesDialog {
-        let items = SaveLibrary.whatsOn(period)
-        return .result(value: items.map(SaveEntity.init), dialog: "\(Self.sentence(items.map(\.title), period: period))")
+    func perform() async throws -> some ReturnsValue<[SaveEntity]> & ProvidesDialog & ShowsSnippetView {
+        await Self.answer(SaveLibrary.whatsOn(period), period: period)
+    }
+
+    /// The names out loud; on screen, the saves as cards under a short
+    /// line, since the card already names them.
+    @MainActor
+    static func answer(_ items: [Item], period: SavePeriod) async -> some ReturnsValue<[SaveEntity]> & ProvidesDialog & ShowsSnippetView {
+        let spoken = sentence(items.map(\.title), period: period)
+        guard !items.isEmpty else {
+            return .result(value: [], dialog: "\(spoken)", view: EmptyView())
+        }
+        let shown = switch period {
+        case .today: "Here\u{2019}s what\u{2019}s on today."
+        case .weekend: "Here\u{2019}s what\u{2019}s on this weekend."
+        case .week: "Here\u{2019}s what\u{2019}s on this week."
+        case .closing: "Here\u{2019}s what\u{2019}s closing soon."
+        }
+        let rows = await SiriCards.dressed(Array(items.prefix(SiriSavesCard.shown)))
+        return .result(
+            value: items.map(SaveEntity.init),
+            dialog: IntentDialog(full: "\(spoken)", supporting: "\(shown)"),
+            view: SiriSavesCard(rows: rows, total: items.count)
+        )
     }
 
     /// "This weekend: A, B and C." Five names at most, then a count.
@@ -78,9 +100,8 @@ struct ClosingSoonIntent: AppIntent {
     init() {}
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<[SaveEntity]> & ProvidesDialog {
-        let items = SaveLibrary.whatsOn(.closing)
-        return .result(value: items.map(SaveEntity.init), dialog: "\(WhatsOnIntent.sentence(items.map(\.title), period: .closing))")
+    func perform() async throws -> some ReturnsValue<[SaveEntity]> & ProvidesDialog & ShowsSnippetView {
+        await WhatsOnIntent.answer(SaveLibrary.whatsOn(.closing), period: .closing)
     }
 }
 
@@ -139,11 +160,9 @@ struct AddToLibraryIntent: AppIntent {
     init() {}
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let outcome = try await Self.add(what) { question in
-            try await requestConfirmation(actionName: .add, dialog: "\(question)")
-        }
-        return .result(dialog: "\(outcome.sentence)")
+    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
+        let outcome = try await Self.add(what, asking: self)
+        return .result(dialog: outcome.dialog, view: await outcome.card())
     }
 
     enum Outcome {
@@ -159,12 +178,61 @@ struct AddToLibraryIntent: AppIntent {
                 "Added \u{201c}\(card.title)\u{201d}."
             }
         }
+
+        @MainActor
+        var dialog: IntentDialog {
+            switch self {
+            case .alreadySaved:
+                IntentDialog("\(sentence)")
+            case .added(let card, _):
+                IntentDialog(full: "\(sentence)", supporting: "Added to \(AddToLibraryIntent.list(card.kind)).")
+            }
+        }
+
+        /// The save as it now stands. A new one's photo came in for the
+        /// question, so it's already to hand.
+        @MainActor
+        func card() async -> SiriSaveCard {
+            switch self {
+            case .alreadySaved(let twin):
+                SiriSaveCard(row: await SiriCards.dressed(SiriCardRow(twin), wait: true))
+            case .added(let card, let id):
+                SiriSaveCard(row: await SiriCards.dressed(SiriCardRow(card, id: id)))
+            }
+        }
+    }
+
+    /// The question before saving: all of it out loud; on screen a short
+    /// line over the card, which says the rest.
+    struct Ask {
+        let spoken: String
+        let shown: String
+        let card: ParseClient.Card
+    }
+
+    static func list(_ kind: String) -> String {
+        kind == Item.Kind.place ? "Places" : "Events"
+    }
+
+    /// Asks with the found save's card under the question, so a wrong
+    /// guess (last year's show, the other branch) shows as well as sounds.
+    @MainActor
+    static func add(_ what: String, asking intent: some AppIntent) async throws -> Outcome {
+        try await add(what) { ask in
+            let row = await SiriCards.dressed(SiriCardRow(ask.card), wait: true)
+            try await intent.requestConfirmation(
+                actionName: .add,
+                dialog: IntentDialog(full: "\(ask.spoken)", supporting: "\(ask.shown)")
+            ) {
+                SiriSaveCard(row: row)
+            }
+        }
     }
 
     /// Looks it up, answers an exact duplicate with who saved it, asks
     /// (naming any near-match), and on a yes parks it in the inbox.
     @MainActor
-    static func add(_ what: String, confirm: (String) async throws -> Void) async throws -> Outcome {
+    static func add(_ what: String, confirm: (Ask) async throws -> Void) async throws -> Outcome {
         guard SupabaseAuth.shared.signedIn, let userId = SupabaseAuth.shared.userId else {
             throw SaveIntentError.signedOut
         }
@@ -183,9 +251,17 @@ struct AddToLibraryIntent: AppIntent {
         let samePage = card.source == "link" ? nil
             : DuplicateFinder.match(url: card.url, title: nil, startsOn: nil, kind: nil, in: library)
         if let similar = samePage ?? lookalike(of: card, in: library) {
-            try await confirm("I found \(spoken(card)). You already have \u{201c}\(similar.title)\u{201d} saved. Add this one too?")
+            try await confirm(Ask(
+                spoken: "I found \(spoken(card)). You already have \u{201c}\(similar.title)\u{201d} saved. Add this one too?",
+                shown: "You already have \u{201c}\(similar.title)\u{201d}. Add this one too?",
+                card: card
+            ))
         } else {
-            try await confirm("I found \(spoken(card)). Add it?")
+            try await confirm(Ask(
+                spoken: "I found \(spoken(card)). Add it?",
+                shown: "Add this to \(list(card.kind))?",
+                card: card
+            ))
         }
         let id = UUID()
         try SaveInbox.park(card, url: card.url, userId: userId, id: id)
