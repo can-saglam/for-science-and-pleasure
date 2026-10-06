@@ -9,7 +9,24 @@ import {
   mentionsDate,
   pageFromHtml,
   pageLink,
+  scriptedTimes,
 } from "./extract.ts";
+
+Deno.test("screenings a page keeps in its scripts reach the model", () => {
+  const html = `<script>var searchResults = [
+    [ "AE90", "P", "Atlantic Rhapsody", "Friday 16 October 2026 20:50", "20:50" ],
+    [ "05ED", "P", "Atlantic Rhapsody", "Saturday 17 October 2026 20:15", "20:15" ],
+    [ "05ED", "P", "Atlantic Rhapsody", "Saturday 17 October 2026 20:15", "20:15" ] ];
+    var built = "2026-10-01T09:00:00Z";</script><p>Screening dates and booking</p>`;
+  assert(
+    scriptedTimes(html) === "Dates and times in the page's listing data:\nFriday 16 October 2026 20:50\nSaturday 17 October 2026 20:15",
+    scriptedTimes(html),
+  );
+  assert(scriptedTimes("<script>Sat 7 Nov, 19:30</script>").endsWith("Sat 7 Nov, 19:30"), "short forms");
+  assert(scriptedTimes("<p>Friday 16 October 2026 20:50</p>") === "", "visible text is already read");
+  assert(scriptedTimes(`<script>document.cookie = "a=; expires=Thu, 01 Jan 1970 00:00:00 GMT"</script>`) === "", "a cookie's expiry is no screening");
+  assert(pageFromHtml(html, "https://x.org/")?.text.includes("Saturday 17 October 2026 20:15"), "in the page text");
+});
 
 Deno.test("phone-read pages: plain links only, bot walls refused", () => {
   assert(pageLink("look https://whatson.bfi.org.uk/lff/Online/x.asp?a::b") === "https://whatson.bfi.org.uk/lff/Online/x.asp?a::b", "a page");

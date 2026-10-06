@@ -528,13 +528,28 @@ function pageOf(raw: string, pageUrl: string): Page {
     .trim();
   const events = jsonLdEvents(html);
   return {
-    text: [title, metas.join("\n"), ldEventLines(events), body].filter(Boolean).join("\n\n").slice(0, 30_000),
+    text: [title, metas.join("\n"), ldEventLines(events), scriptedTimes(html), body].filter(Boolean).join("\n\n").slice(0, 30_000),
     events,
     // og:image first, then JSON-LD and the page's largest picture — the
     // same ladder the model's suggested website gets. Gallery and
     // festival sites often skip social meta tags entirely.
     ogImage: heroImageFromHtml(html, pageUrl),
   };
+}
+
+const SCRIPTED_TIME_RE =
+  /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,? \d{1,2}(?:st|nd|rd|th)? (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?(?: \d{4},?)? (?:at )?\d{1,2}[:.]\d{2}\b(?![:.]\d)/g;
+
+/// Dates with times that a page keeps in its scripts. Ticketing sites (the
+/// BFI's festival among them) draw the screening list from a data array,
+/// and the tag-stripped body has the heading with nothing under it.
+export function scriptedTimes(html: string): string {
+  const seen = new Set<string>();
+  for (const block of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    for (const m of block[1].matchAll(SCRIPTED_TIME_RE)) seen.add(m[0]);
+  }
+  if (!seen.size) return "";
+  return `Dates and times in the page's listing data:\n${[...seen].slice(0, 40).join("\n")}`;
 }
 
 /// The plain web page a save links to, if it has one. Maps pins and
