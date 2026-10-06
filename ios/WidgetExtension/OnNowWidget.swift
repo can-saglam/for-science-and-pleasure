@@ -19,7 +19,7 @@ struct OnNowProvider: TimelineProvider {
     func placeholder(in context: Context) -> UpNextEntry {
         UpNextEntry(date: .now, pick: (
             LockItem(id: UUID(), title: "Nancy Holt", place: "Goodwood Art Foundation", oneDay: false),
-            "On now \u{00b7} until Sun"
+            "On now"
         ))
     }
 
@@ -65,15 +65,8 @@ enum OnNow {
         return (item, label(item, today: today))
     }
 
+    /// Kept short: the card's top line has no room for a closing date.
     private static func label(_ item: LockItem, today: String) -> String {
-        guard let end = item.endsOn, let last = UpNext.date(end), let now = UpNext.date(today),
-              let days = Calendar.current.dateComponents([.day], from: now, to: last).day
-        else { return "On now" }
-        switch days {
-        case 0: return "On now \u{00b7} last day"
-        case 1: return "On now \u{00b7} until tomorrow"
-        case 2...6: return "On now \u{00b7} until \(last.formatted(.dateTime.weekday(.abbreviated)))"
-        default: return "On now \u{00b7} until \(last.formatted(.dateTime.day().month(.abbreviated)))"
-        }
+        item.endsOn == today ? "Last day" : "On now"
     }
 }
