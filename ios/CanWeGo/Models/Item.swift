@@ -96,10 +96,12 @@ final class Item {
 
 /// One of an event's performances: a screening, a night of a run, a tour
 /// date. `date` is `yyyy-MM-dd`, `time` `HH:mm`, both on the home clock.
-struct Showing: Codable, Hashable, Sendable {
+struct Showing: Codable, Hashable, Identifiable, Sendable {
     let date: String
     let time: String?
     let note: String?
+
+    var id: Self { self }
 
     static func encode(_ showings: [Showing]?) -> String? {
         guard let showings, !showings.isEmpty, let data = try? JSONEncoder().encode(showings) else { return nil }

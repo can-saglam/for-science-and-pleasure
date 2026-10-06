@@ -192,7 +192,18 @@ struct CaptureDrawer<Actions: View>: View {
     private var lines: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let draft {
-                line("calendar", draft.dateLine)
+                let showings = PlanSheet.showings(of: draft)
+                if showings.isEmpty {
+                    line("calendar", draft.dateLine)
+                } else {
+                    Label {
+                        ShowingsLine(showings: showings, dateLine: draft.dateLine)
+                    } icon: {
+                        icon("calendar")
+                    }
+                    .font(.subheadline)
+                    .transition(settle)
+                }
                 line("building.2", draft.venue != draft.title ? draft.venue : nil)
                 line("map", draft.areaLine)
                 line("banknote", draft.price)

@@ -29,6 +29,8 @@ struct ItemDetailView: View {
     @State private var paywall: PlusReason?
     @State private var hours: OpeningHours?
     @State private var hoursLoading = false
+    /// A showing tapped in the details, opening the plan on it.
+    @State private var planShowing: Showing?
 
     private enum CalendarState {
         case idle, added, failed
@@ -187,6 +189,7 @@ struct ItemDetailView: View {
             ActivitySheet(items: [card.image])
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $planShowing) { PlanSheet(item: item, showing: $0) }
         .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }
         // The edit form needs the room, so entering edit expands the sheet.
         .onChange(of: editing) { _, isEditing in
@@ -443,7 +446,23 @@ struct ItemDetailView: View {
         }
 
         VStack(alignment: .leading, spacing: 10) {
-            metaRow("calendar", dateLine)
+            let showings = PlanSheet.showings(of: item)
+            if showings.isEmpty {
+                metaRow("calendar", dateLine)
+            } else {
+                Label {
+                    ShowingsLine(
+                        showings: showings,
+                        dateLine: dateLine,
+                        choose: item.canPlan || item.upcomingPlan != nil ? { planShowing = $0 } : nil
+                    )
+                } icon: {
+                    Image(systemName: "calendar")
+                        .foregroundStyle(AppBackground.ink.opacity(0.45))
+                        .frame(width: 20)
+                }
+                .font(.subheadline)
+            }
             HoursRow(hours: hours, loading: hoursLoading)
             metaRow("building.2", item.venue != item.title ? item.venue : nil)
             metaRow("map", areaLine)

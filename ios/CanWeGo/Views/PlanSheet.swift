@@ -108,6 +108,71 @@ struct PlanRow: View {
     }
 }
 
+/// A save's showings where its dates would go, in the capture preview and
+/// the details: a few as chips, more as a count. With `choose`, a chip
+/// opens the plan on that showing; without, they only say when it's on.
+struct ShowingsLine: View {
+    let showings: [Showing]
+    let dateLine: String?
+    var choose: ((Showing) -> Void)? = nil
+
+    private static let chipLimit = 6
+
+    var body: some View {
+        if showings.count > Self.chipLimit {
+            Text([dateLine, "\(showings.count) showings"].compactMap(\.self).joined(separator: " · "))
+                .foregroundStyle(.secondary)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(showings, id: \.self) { chip($0) }
+                }
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    @ViewBuilder
+    private func chip(_ showing: Showing) -> some View {
+        let label = HStack(spacing: 5) {
+            Text(DayString.text(showing.date, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? showing.date)
+                .foregroundStyle(.secondary)
+            if let time = showing.time {
+                Text(OpeningHours.time(time))
+                    .monospacedDigit()
+                    .foregroundStyle(AppBackground.ink)
+            }
+        }
+        .font(.footnote.weight(.medium))
+        .padding(.horizontal, 10)
+        .frame(minHeight: 30)
+        .background(AppBackground.wash(0.07), in: .capsule)
+        .contentShape(.capsule)
+
+        let spoken = [
+            DayString.text(showing.date, .dateTime.weekday(.wide).day().month(.wide)) ?? showing.date,
+            showing.time.map(OpeningHours.time),
+            showing.note,
+        ].compactMap(\.self).joined(separator: ", ")
+
+        if let choose {
+            Button {
+                Haptics.tap()
+                choose(showing)
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(spoken)
+            .accessibilityHint("Plan this showing")
+        } else {
+            label
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spoken)
+        }
+    }
+}
+
 /// Picks the day, and maybe the time, the group means to go: the next two
 /// weeks as a grid (days outside the event's run can't be picked; days the
 /// venue is usually closed are marked but can), a calendar for later, and
@@ -134,23 +199,24 @@ struct PlanSheet: View {
     private static let gridDays = 14
     private static let defaultTime = "14:00"
 
-    init(item: Item, onFinish: (() -> Void)? = nil) {
+    /// `showing`: the one they tapped in the details, picked from the start.
+    init(item: Item, showing chosen: Showing? = nil, onFinish: (() -> Void)? = nil) {
         self.item = item
         self.onFinish = onFinish
         let today = DayString.today()
         let planned = item.upcomingPlan
         // Without a plan, the first showing still ahead is put forward.
-        let showing = planned == nil ? Self.showings(of: item).first : nil
+        let showing = chosen ?? (planned == nil ? Self.showings(of: item).first : nil)
         let first = showing?.date ?? item.plannableDays?.lowerBound ?? today
         let grid = DayString.addingDays(Self.gridDays - 1, to: today) ?? today
-        let day = planned ?? (showing != nil || first <= grid ? first : nil)
+        let day = showing?.date ?? planned ?? (first <= grid ? first : nil)
         _day = State(initialValue: day)
-        _timed = State(initialValue: planned != nil ? item.planTime != nil : showing?.time != nil)
-        let own = planned != nil ? item.planTime : showing?.time
+        let own = showing != nil ? showing?.time : planned != nil ? item.planTime : nil
+        _timed = State(initialValue: own != nil)
         let clock = own ?? Self.suggestedTime(day: day, ranges: nil)
         _time = State(initialValue: DayString.instant(day: today, time: clock) ?? .now)
         _suggested = State(initialValue: own == nil ? clock : nil)
-        let later = planned.map { $0 > grid } ?? (first > grid)
+        let later = (day ?? first) > grid
         _later = State(initialValue: later)
         _detent = State(initialValue: later ? .large : .medium)
     }
