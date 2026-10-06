@@ -667,9 +667,18 @@ struct HeroPhoto: View {
                                 ? .white.opacity(0.35) : .black.opacity(0.35),
                             location: 0
                         ),
-                        .init(color: .clear, location: 0.32),
-                        .init(color: AppBackground.sheet.opacity(0.7), location: 0.78),
-                        .init(color: AppBackground.sheet, location: 1),
+                        .init(color: .clear, location: 0.3),
+                        // An eased (smoothstep) ramp, solid a little before
+                        // the edge: a straight ramp that stops dead reads as
+                        // a line across pale photos, however faint the photo.
+                        .init(color: AppBackground.sheet.opacity(0.06), location: 0.4),
+                        .init(color: AppBackground.sheet.opacity(0.22), location: 0.5),
+                        .init(color: AppBackground.sheet.opacity(0.43), location: 0.6),
+                        .init(color: AppBackground.sheet.opacity(0.66), location: 0.7),
+                        .init(color: AppBackground.sheet.opacity(0.82), location: 0.78),
+                        .init(color: AppBackground.sheet.opacity(0.94), location: 0.86),
+                        .init(color: AppBackground.sheet.opacity(0.99), location: 0.92),
+                        .init(color: AppBackground.sheet, location: 0.96),
                     ],
                     startPoint: .top,
                     endPoint: .bottom
