@@ -1,4 +1,31 @@
-import { cleanLink, cleanShowings, isAnchored, isThisRun, jsonLdEvents, ldClosing, linkKey, mentionsDate } from "./extract.ts";
+import {
+  cleanLink,
+  cleanShowings,
+  isAnchored,
+  isThisRun,
+  jsonLdEvents,
+  ldClosing,
+  linkKey,
+  mentionsDate,
+  pageFromHtml,
+  pageLink,
+} from "./extract.ts";
+
+Deno.test("phone-read pages: plain links only, bot walls refused", () => {
+  assert(pageLink("look https://whatson.bfi.org.uk/lff/Online/x.asp?a::b") === "https://whatson.bfi.org.uk/lff/Online/x.asp?a::b", "a page");
+  assert(pageLink("https://maps.app.goo.gl/abc") === null, "maps pins read their own way");
+  assert(pageLink("https://goo.gl/xyz") === null && pageLink("https://g.co/kgs/abc") === null, "short links may be pins");
+  assert(pageLink("https://www.instagram.com/p/abc/") === null, "so do social posts");
+  assert(pageLink("Frida Kahlo at Tate Modern") === null, "no link");
+
+  const film = pageFromHtml(
+    `<html><head><title>The History of Concrete</title><meta property="og:image" content="/films/concrete.jpeg" /></head><body>Tue 13 Oct 18:15</body></html>`,
+    "https://whatson.bfi.org.uk/lff/Online/default.asp",
+  );
+  assert(film?.ogImage === "https://whatson.bfi.org.uk/films/concrete.jpeg", `image: ${film?.ogImage}`);
+  assert(film?.text.includes("18:15"), "the page's text");
+  assert(pageFromHtml("<title>Just a moment...</title><body>Enable JavaScript and cookies to continue</body>", "https://x.org/") === null, "a wall is no page");
+});
 
 Deno.test("showings: real days from today, in order, one each", () => {
   const today = "2026-10-05";

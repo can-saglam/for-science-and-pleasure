@@ -485,9 +485,15 @@ export async function ownPage(
   }
 }
 
-async function fetchPage(
-  url: string,
-): Promise<{ text: string; ogImage: string | null; events: LdEvent[] } | null> {
+/// A link's page as the model reads it, with what the thumbnail and
+/// closing date come from.
+export interface Page {
+  text: string;
+  ogImage: string | null;
+  events: LdEvent[];
+}
+
+async function fetchPage(url: string): Promise<Page | null> {
   try {
     const res = await publicFetch(url, {
       redirect: "follow",
@@ -499,32 +505,57 @@ async function fetchPage(
       },
     });
     if (!res.ok) return null;
-    // Cap the HTML before running regexes over it — pathological pages
-    // (Google Maps is ~20MB of JS) would blow the worker's CPU budget.
-    const html = (await res.text()).slice(0, 600_000);
-    // Keep <title> and meta descriptions, then strip tags from the body.
-    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
-    const metas = [...html.matchAll(/<meta[^>]+(?:name|property)=["'][^"']*(?:description|title|og:)[^"']*["'][^>]*content=["']([^"']*)["']/gi)]
-      .map((m) => m[1]);
-    const body = html
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;|&amp;|&quot;|&#\d+;|&[a-z]+;/gi, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    const events = jsonLdEvents(html);
-    return {
-      text: [title, metas.join("\n"), ldEventLines(events), body].filter(Boolean).join("\n\n").slice(0, 30_000),
-      events,
-      // og:image first, then JSON-LD and the page's largest picture — the
-      // same ladder the model's suggested website gets. Gallery and
-      // festival sites often skip social meta tags entirely.
-      ogImage: heroImageFromHtml(html, res.url || url),
-    };
+    return pageOf(await res.text(), res.url || url);
   } catch {
     return null;
   }
+}
+
+function pageOf(raw: string, pageUrl: string): Page {
+  // Cap the HTML before running regexes over it — pathological pages
+  // (Google Maps is ~20MB of JS) would blow the worker's CPU budget.
+  const html = raw.slice(0, 600_000);
+  // Keep <title> and meta descriptions, then strip tags from the body.
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
+  const metas = [...html.matchAll(/<meta[^>]+(?:name|property)=["'][^"']*(?:description|title|og:)[^"']*["'][^>]*content=["']([^"']*)["']/gi)]
+    .map((m) => m[1]);
+  const body = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&amp;|&quot;|&#\d+;|&[a-z]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const events = jsonLdEvents(html);
+  return {
+    text: [title, metas.join("\n"), ldEventLines(events), body].filter(Boolean).join("\n\n").slice(0, 30_000),
+    events,
+    // og:image first, then JSON-LD and the page's largest picture — the
+    // same ladder the model's suggested website gets. Gallery and
+    // festival sites often skip social meta tags entirely.
+    ogImage: heroImageFromHtml(html, pageUrl),
+  };
+}
+
+/// The plain web page a save links to, if it has one. Maps pins and
+/// social posts are read their own ways; short links may be pins.
+export function pageLink(text: string): string | null {
+  const url = firstUrl(text);
+  if (!url || !isFetchable(url) || isMapsUrl(url)) return null;
+  return /^(maps\.app\.goo\.gl|goo\.gl|g\.co)$/i.test(new URL(url).hostname) ? null : url;
+}
+
+/// The page as this server reads it; null behind an error or a bot wall.
+export async function readPage(url: string): Promise<Page | null> {
+  const page = await fetchPage(url);
+  return page && !looksBlocked(page.text) ? page : null;
+}
+
+/// The page as the phone read it. Some sites (Cloudflare's checks) wall
+/// off this server's IP but not a phone's.
+export function pageFromHtml(html: string, url: string): Page | null {
+  const page = pageOf(html, url);
+  return looksBlocked(page.text) ? null : page;
 }
 
 /// Does this card point at somewhere real? A source link, an official site,
@@ -549,6 +580,8 @@ export interface ExtractInput {
 export async function extractCard(
   input: ExtractInput,
   home: Home = LONDON,
+  /** The link's page, already read (or found unreadable) by the caller. */
+  read?: { page: Page | null },
 ): Promise<
   ParsedCard & {
     url: string | null;
@@ -568,9 +601,9 @@ export async function extractCard(
   // Google Maps links: never fetch the page (it's huge, JS-only junk); the
   // URL itself names the place and pins its coordinates.
   const mapsLink = url ? await resolveMapsLink(url) : null;
-  let page: { text: string; ogImage: string | null; events: LdEvent[] } | null = null;
+  let page: Page | null = null;
   if (url && !mapsLink && isFetchable(url)) {
-    page = await fetchPage(url);
+    page = read ? read.page : await fetchPage(url);
     if (page && looksBlocked(page.text)) page = null;
   }
   const pageText = page?.text ?? null;

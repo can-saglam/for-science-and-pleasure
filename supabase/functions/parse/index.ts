@@ -7,6 +7,10 @@ import {
   extractCard,
   firstUrl,
   looksLikeSearch,
+  type Page,
+  pageFromHtml,
+  pageLink,
+  readPage,
   SocialUnreadableError,
   VagueInputError,
 } from "../_shared/extract.ts";
@@ -61,6 +65,19 @@ Deno.serve(async (req) => {
       return await vague(caller.userId, new VagueInputError().message);
     }
 
+    // Some sites wall off this server but not the phone. A build that can
+    // read the page itself says so and hears back before anything is
+    // counted or spent, then sends the HTML: one save, read from its page
+    // rather than searched for.
+    const link = text ? pageLink(text) : null;
+    let read: { page: Page | null } | undefined;
+    if (link && typeof body.page_html === "string") {
+      read = { page: pageFromHtml(body.page_html, link) };
+    } else if (link && body.page_fallback === "true") {
+      read = { page: await readPage(link) };
+      if (!read.page) return json({ error: "page blocked", code: "page_blocked", url: link }, 409);
+    }
+
     if (!await consumeQuota(admin(), caller.userId, "parse")) {
       return new Response(quotaResponse().body, {
         status: 429,
@@ -75,7 +92,7 @@ Deno.serve(async (req) => {
       return json({ error: String(limitErr) }, 413);
     }
 
-    const card = await extractCard(body, home);
+    const card = await extractCard(body, home, read);
     return json({ card });
   } catch (e) {
     // A social post nothing could read: a question for the user, not a

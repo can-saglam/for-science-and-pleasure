@@ -77,11 +77,38 @@ enum ParseClient {
         // the phone can read what the server's IP is often walled from.
         let input = await SocialPrefetch.enrich(text: text, imageJPEG: imageJPEG)
         do {
-            return try await parseOnce(text: input.text, imageJPEG: input.imageJPEG)
+            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG)
         } catch let error where isTransient(error) {
             try? await Task.sleep(for: .seconds(1.5))
-            return try await parseOnce(text: input.text, imageJPEG: input.imageJPEG)
+            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG)
         }
+    }
+
+    /// Some sites (Cloudflare's checks) wall off the server but not this
+    /// phone. The server says so before reading anything else; the phone
+    /// reads the page and sends it back, so the save comes from the page
+    /// (its photo, its dates, its showings) rather than a web search.
+    private static func parseReadingPage(text: String?, imageJPEG: Data?) async throws -> Card {
+        do {
+            return try await parseOnce(text: text, imageJPEG: imageJPEG, extra: ["page_fallback": "true"])
+        } catch let blocked as PageBlocked {
+            let html = await pageHTML(blocked.url)
+            return try await parseOnce(text: text, imageJPEG: imageJPEG, extra: html.map { ["page_html": $0] } ?? [:])
+        }
+    }
+
+    private struct PageBlocked: Error { let url: URL }
+
+    private static func pageHTML(_ url: URL) async -> String? {
+        var request = URLRequest(url: url, timeoutInterval: 8)
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false
+        else { return nil }
+        return String(decoding: data.prefix(600_000), as: UTF8.self)
     }
 
     private static func isTransient(_ error: Error) -> Bool {
@@ -120,10 +147,10 @@ enum ParseClient {
         }
     }
 
-    private static func parseOnce(text: String?, imageJPEG: Data?) async throws -> Card {
+    private static func parseOnce(text: String?, imageJPEG: Data?, extra: [String: String]) async throws -> Card {
         guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
 
-        var body: [String: String] = [:]
+        var body = extra
         if let text, !text.isEmpty { body["text"] = text }
         if let imageJPEG {
             body["image_base64"] = imageJPEG.base64EncodedString()
@@ -142,6 +169,10 @@ enum ParseClient {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             let body = try? JSONDecoder().decode([String: String].self, from: data)
+            if status == 409, body?["code"] == "page_blocked",
+               let url = body?["url"].flatMap(URL.init(string:)) {
+                throw PageBlocked(url: url)
+            }
             let message = friendly(status: status, serverMessage: body?["error"])
             if status == 422, body?["code"] == "too_vague" {
                 throw ParseError.tooVague(message, firm: body?["firm"] == "true")
