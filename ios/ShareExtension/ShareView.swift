@@ -118,7 +118,7 @@ struct ShareView: View {
                     .font(.subheadline.weight(.semibold))
                 Text("The share sheet uses the same sign-in as the app. Nothing is sent anywhere until you are signed in.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                 Button {
                     Haptics.tap()
                     if let url = URL(string: "canwego://") {
@@ -180,7 +180,7 @@ struct ShareView: View {
                     systemImage: "checkmark.seal"
                 )
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
 
                 Button {
                     draft.status = Item.Status.done
@@ -230,6 +230,7 @@ struct ShareView: View {
                 } label: {
                     Label("Discard", systemImage: "trash")
                         .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppBackground.destructive)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glass)
@@ -255,7 +256,7 @@ struct ShareView: View {
                         .font(.footnote.weight(.semibold))
                     Text("One of you saved this link before.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
             } icon: {
                 Image(systemName: "books.vertical")

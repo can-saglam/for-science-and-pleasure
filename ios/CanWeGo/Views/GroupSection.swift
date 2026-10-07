@@ -32,7 +32,7 @@ struct SettingsRow: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
             }
         } icon: {
@@ -174,7 +174,7 @@ struct GroupSection: View {
                     SettingsRow(title: "City", icon: "building.2.fill")
                     Spacer()
                     Text(home)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .lineLimit(1)
                 } else {
                     SettingsRow(title: "Set a home city", icon: "building.2.fill")
@@ -210,7 +210,7 @@ struct GroupSection: View {
                     } else if card.needsPlusToGrow {
                         Text("Plus")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                     }
                 }
             }
@@ -329,7 +329,7 @@ struct GroupSection: View {
             if isMe {
                 Text("you")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
             }
             Spacer()
             if member.isPlus {
@@ -360,7 +360,7 @@ struct GroupSection: View {
             }
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(AppBackground.secondaryInk)
     }
 }
 
@@ -441,7 +441,7 @@ struct InviteSheet: View {
                         .accessibilityLabel("Invite code \(invite.code.map(String.init).joined(separator: " "))")
                     Text("Valid until \(invite.expiresAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 VStack(spacing: 12) {
                     ShareLink(item: message) {
@@ -464,7 +464,7 @@ struct InviteSheet: View {
                 }
                 Text("Anyone with this code can join until it expires or you cancel it. Their saves come with them.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .multilineTextAlignment(.center)
                     // Never squeezed to one line by the spacers around it.
                     .fixedSize(horizontal: false, vertical: true)

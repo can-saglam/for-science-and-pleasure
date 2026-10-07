@@ -484,7 +484,7 @@ struct LibraryView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
             TextField("", text: $query, prompt: AppBackground.fieldPrompt("Search your saves"))
                 .foregroundStyle(AppBackground.ink)
                 .focused($searchFocused)
@@ -499,10 +499,13 @@ struct LibraryView: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close search")
+            .padding(.trailing, -11)
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -573,7 +576,7 @@ struct LibraryView: View {
             ZStack(alignment: .leading) {
                 Group {
                     if syncStatus.syncing {
-                        Text("\(Text("Syncing…").fontWeight(.semibold))\(Text(" · \(lastSyncedPhrase(lower: true))").foregroundStyle(.secondary))")
+                        Text("\(Text("Syncing…").fontWeight(.semibold))\(Text(" · \(lastSyncedPhrase(lower: true))").foregroundStyle(AppBackground.secondaryInk))")
                     } else {
                         Text(lastSyncedPhrase(lower: false)).fontWeight(.semibold)
                     }
@@ -901,7 +904,7 @@ struct LibraryView: View {
                         .foregroundStyle(AppBackground.ink)
                     Text(message)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -938,7 +941,7 @@ struct LibraryView: View {
                 VStack(spacing: 10) {
                     Text(kind == Item.Kind.place ? "A few places in \(home.locality)" : "A few things on in \(home.locality)")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                     SuggestionChips(picks: picks)
                 }
                 .padding(.top, 12)
@@ -1048,7 +1051,7 @@ struct LibraryView: View {
                 eventArchive
             }
         } else if !been.isEmpty {
-            SectionHeader(title: "Been", count: been.count)
+            SectionHeader(title: Voice.didGoSection, count: been.count)
                 .frame(minHeight: 44)
                 .cardListRow()
             ForEach(been) { item in

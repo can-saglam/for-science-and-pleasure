@@ -251,7 +251,7 @@ struct MapPinsView: View {
                         if locations.denied {
                             Text("Location is off")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AppBackground.secondaryInk)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
                                 .glassEffect(.regular, in: .capsule)

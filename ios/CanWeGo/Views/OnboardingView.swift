@@ -806,7 +806,7 @@ struct OnboardingView: View {
     private var legalLine: some View {
         Text("By continuing you agree to the [Terms](cwg://terms) and [Privacy Policy](cwg://privacy).")
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.secondaryInk)
             .tint(AppBackground.ink.opacity(0.8))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -837,7 +837,7 @@ struct OnboardingView: View {
                     ProgressView().tint(AppBackground.ink)
                     Text("Opening your library…")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .frame(height: 50)
             } else if auth.signedIn, !preview {
@@ -1170,7 +1170,7 @@ struct OnboardingView: View {
                 HStack(alignment: .center) {
                     Text(joined ? "You're in with" : "You'll be joining")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                     Spacer(minLength: 8)
                     if let home = p.homeLocality, !home.isEmpty {
                         homeBadge(home)
@@ -1194,7 +1194,7 @@ struct OnboardingView: View {
                 } else if !p.canJoin {
                     Text(p.message())
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -1217,7 +1217,7 @@ struct OnboardingView: View {
             if invitedYou {
                 Text("Invited you")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
                     .background(AppBackground.wash(0.08), in: .capsule)
@@ -1417,7 +1417,7 @@ struct OnboardingView: View {
                 if groupCards.count > 3 {
                     Text("…and \(groupCards.count - 3) more in the library.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -1496,7 +1496,7 @@ struct OnboardingView: View {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(m.locality).font(.body.weight(.medium))
-                                            Text(m.country).font(.caption).foregroundStyle(.secondary)
+                                            Text(m.country).font(.caption).foregroundStyle(AppBackground.secondaryInk)
                                         }
                                         Spacer()
                                         if picked == m {
@@ -1841,7 +1841,7 @@ struct OnboardingView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Or try one of these in \(city)")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AppBackground.secondaryInk)
                                 ScrollView(.horizontal) {
                                     HStack(spacing: 8) {
                                         ForEach(starterChips) { s in
@@ -1867,7 +1867,7 @@ struct OnboardingView: View {
                                 ProgressView().controlSize(.small)
                                 Text("Looking up a few things in \(city)…")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AppBackground.secondaryInk)
                             }
                             .transition(.opacity)
                         }
@@ -1904,7 +1904,7 @@ struct OnboardingView: View {
                 SmallRing()
                 ParsingPhrases(text: linkDraft, hasImage: linkImage != nil)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
             }
             .padding(.top, 6)
         }

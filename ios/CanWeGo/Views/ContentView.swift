@@ -390,7 +390,7 @@ struct ContentView: View {
                         .tint(AppBackground.ink)
                     Text("Pulling your shared library…")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background { ThemeFill(color: AppBackground.base) }
@@ -399,12 +399,12 @@ struct ContentView: View {
                 VStack(spacing: 14) {
                     Image(systemName: problem.status == 0 ? "wifi.slash" : "exclamationmark.icloud")
                         .font(.title2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                     Text("Couldn't load your library")
                         .font(.headline)
                     Text(problem.message)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
                     Button {
@@ -707,10 +707,13 @@ private struct UndoButton: View {
                             // ring starts at the top and drains from there.
                             .rotationEffect(.degrees(-90))
                     )
+                    // A 44pt target around the 32pt ring, taking no room.
+                    .frame(width: 44, height: 44)
                     .contentShape(.circle)
             }
         }
         .buttonStyle(.plain)
+        .padding(-6)
         .accessibilityLabel("Undo")
         .onAppear { shownAt = .now }
     }

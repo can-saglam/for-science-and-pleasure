@@ -190,6 +190,7 @@ struct PlanSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var day: String?
     @State private var timed: Bool
     @State private var time: Date
@@ -372,7 +373,7 @@ struct PlanSheet: View {
                                 .fontWeight(.semibold)
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glass)
+                        .destructiveGlass()
                         .controlSize(.large)
                     }
                 }
@@ -380,25 +381,40 @@ struct PlanSheet: View {
                 .padding(.top, 14)
                 .padding(.bottom, 24)
             }
-            .background { ThemeFill(color: AppBackground.sheet) }
-            .navigationTitle("Plan a day")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+            // Pinned, so saving is in reach at half height and at big text
+            // sizes alike.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button {
+                    guard let day else { return }
+                    Haptics.success()
+                    finish((day, timed ? clock : nil))
+                } label: {
+                    Text("Save plan")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        guard let day else { return }
-                        Haptics.success()
-                        finish((day, timed ? clock : nil))
-                    }
-                    .disabled(!canSave)
+                .prominentGlass()
+                .controlSize(.large)
+                .disabled(!canSave)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 8)
+                .background {
+                    LinearGradient(
+                        stops: [.init(color: AppBackground.sheet.opacity(0), location: 0),
+                                .init(color: AppBackground.sheet, location: 0.35)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
                 }
             }
+            .background { ThemeFill(color: AppBackground.sheet) }
+            .sheetTitle("Plan a day") { dismiss() }
         }
         .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
+        .onAppear { if typeSize.isAccessibilitySize { detent = .large } }
         .onChange(of: later) { _, later in
             if later { detent = .large }
         }
@@ -706,6 +722,10 @@ struct PlanSheet: View {
                     .fill(dot)
                     .frame(width: 4, height: 4)
             }
+            // Seven to a row: past this size the date breaks over two lines
+            // and the weekday clips.
+            .lineLimit(1)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .frame(maxWidth: .infinity, minHeight: 56)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)

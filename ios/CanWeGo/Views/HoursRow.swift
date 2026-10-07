@@ -15,11 +15,11 @@ struct HoursRow: View {
                 // label a shade brighter than the plain meta rows around it.
                 Label {
                     HStack(spacing: 5) {
-                        Text(summary).foregroundStyle(.secondary)
+                        Text(summary).foregroundStyle(AppBackground.secondaryInk)
                         if !hours.isClosed {
                             Image(systemName: "chevron.down")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                                 .rotationEffect(.degrees(expanded ? 180 : 0))
                         }
                     }
@@ -27,12 +27,16 @@ struct HoursRow: View {
                     icon
                 }
                 .font(.subheadline)
+                // A 44pt-tall target around a one-line row, without moving
+                // the rows around it.
+                .padding(.vertical, 12)
                 .contentShape(.rect)
                 .onTapGesture {
                     guard !hours.isClosed else { return }
                     Haptics.tap()
                     withAnimation(.snappy) { expanded.toggle() }
                 }
+                .padding(.vertical, -12)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Opening hours: \(summary)")
                 .accessibilityAddTraits(hours.isClosed ? [] : .isButton)
@@ -43,7 +47,7 @@ struct HoursRow: View {
                         week(hours)
                         Text("From Google Maps")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                             .padding(.leading, 28)
                     }
                     .transition(.opacity)
@@ -52,7 +56,7 @@ struct HoursRow: View {
         } else if loading {
             Label {
                 Text("Open until 18:00")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .redacted(reason: .placeholder)
             } icon: {
                 icon
@@ -75,7 +79,7 @@ struct HoursRow: View {
                     Text(OpeningHours.dayName(day, index: index))
                         .fontWeight(index == 0 ? .semibold : .regular)
                     Text(OpeningHours.rangesText(day.ranges))
-                        .foregroundStyle(day.ranges.isEmpty ? .tertiary : .secondary)
+                        .foregroundStyle(AppBackground.secondaryInk.opacity(day.ranges.isEmpty ? 0.6 : 1))
                 }
             }
         }

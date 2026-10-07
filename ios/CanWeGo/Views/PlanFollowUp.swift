@@ -132,7 +132,7 @@ struct PlanFollowUpSheet: View {
             if let detail {
                 Text(detail)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
             }
         }
         .accessibilityElement(children: .combine)

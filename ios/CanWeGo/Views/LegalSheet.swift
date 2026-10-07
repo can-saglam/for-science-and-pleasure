@@ -46,6 +46,12 @@ struct LegalSheet: View {
         }
     }
 
+    /// The document's own `#` line heads the sheet, so it isn't repeated
+    /// in the body.
+    private var heading: String {
+        blocks.lazy.compactMap { if case .title(let s) = $0 { s } else { nil } }.first ?? page.title
+    }
+
     private func inline(_ s: String) -> AttributedString {
         (try? AttributedString(markdown: s)) ?? AttributedString(s)
     }
@@ -59,7 +65,7 @@ struct LegalSheet: View {
             Text(inline(s)).font(.headline).padding(.top, 8)
         case .bullet(let s):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("•").foregroundStyle(.secondary)
+                Text("•").foregroundStyle(AppBackground.secondaryInk)
                 Text(inline(s))
             }
         case .paragraph(let s):
@@ -72,7 +78,7 @@ struct LegalSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                        view(for: block)
+                        if case .title = block {} else { view(for: block) }
                     }
                 }
                 .font(.body)
@@ -80,19 +86,11 @@ struct LegalSheet: View {
                 .padding(20)
             }
             .appBackground(AppBackground.sheet)
-            .navigationTitle(page.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
-            }
+            .sheetTitle(heading) { dismiss() }
         }
+        .foregroundStyle(AppBackground.ink)
+        .appColorScheme()
         .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }

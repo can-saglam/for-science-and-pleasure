@@ -271,7 +271,7 @@ struct ItemCard: View {
         } else {
             Text(label)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(Color.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
                 .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
         }
     }
@@ -279,7 +279,7 @@ struct ItemCard: View {
     private var subtitleText: some View {
         Text(subtitle)
             .font(compact ? .caption : .subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.secondaryInk)
             .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
     }
 

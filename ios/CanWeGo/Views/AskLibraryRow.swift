@@ -39,7 +39,7 @@ struct AskLibraryRow: View {
                     .font(.subheadline.weight(.semibold))
                 Text("“\(question)”")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .lineLimit(2)
             }
             Spacer(minLength: 0)
@@ -86,13 +86,13 @@ private struct AskLibraryAnswer: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Ask your saves", systemImage: "sparkles")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                 switch phase {
                 case .thinking:
                     HStack(spacing: 8) {
                         ProgressView()
                         Text("Looking through your saves…")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                     }
                     .font(.subheadline)
                 case .answered(let text, _):
@@ -102,7 +102,7 @@ private struct AskLibraryAnswer: View {
                 case .failed(let text):
                     Text(text)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .padding([.horizontal, .top], 16)

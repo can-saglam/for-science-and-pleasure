@@ -16,8 +16,9 @@ enum Voice {
     static var didGo: String { plural ? "We did go" : "I did go" }
     /// The action label: "We did go!" / "I did go!".
     static var didGoBang: String { didGo + "!" }
-    /// The section and archive name, in title case.
-    static var didGoSection: String { plural ? "We Did Go" : "I Did Go" }
+    /// The section and archive name, on both tabs, in the same sentence
+    /// case as the other section headers.
+    static var didGoSection: String { didGo }
     /// The morning-after answer: "We went" / "I went".
     static var went: String { plural ? "We went" : "I went" }
     /// For a card that was marked missed first.

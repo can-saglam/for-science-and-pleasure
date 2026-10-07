@@ -17,7 +17,7 @@ struct SuggestionChips: View {
                             .lineLimit(1)
                         if let when = Suggestions.when(s) {
                             Text(when)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AppBackground.secondaryInk)
                                 .fixedSize()
                         }
                     }

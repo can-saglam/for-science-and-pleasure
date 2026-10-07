@@ -20,7 +20,7 @@ struct AuthView: View {
                          ? "Your session expired. Sign in again to keep syncing. Everything you saved is still here."
                          : "Sign in with Apple to start a library, or open the one you already have.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .multilineTextAlignment(.center)
                 }
                 .padding(.bottom, 36)

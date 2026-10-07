@@ -81,12 +81,12 @@ struct RemindRow: View {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             Link("Notifications are off, so reminders won\u{2019}t arrive. Open Settings.", destination: url)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
         }
         #else
         Text("Notifications are off, so reminders won\u{2019}t arrive until they\u{2019}re allowed.")
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.secondaryInk)
         #endif
     }
 

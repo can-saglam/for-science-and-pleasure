@@ -147,10 +147,11 @@ struct CaptureView: View {
             }
             .background { ThemeFill(color: AppBackground.sheet) }
         }
+        .foregroundStyle(AppBackground.ink)
+        .appColorScheme()
         .presentationDetents([inputDetent, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
-        .sensoryFeedback(.success, trigger: saved) { _, new in new }
         .onChange(of: expanded) { _, isExpanded in
             withAnimation(.snappy) { detent = isExpanded ? .large : inputDetent }
         }
@@ -251,7 +252,7 @@ struct CaptureView: View {
                 systemImage: saved ? "checkmark" : "wifi.slash"
             )
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.secondaryInk)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4)
             .contentTransition(.opacity)
@@ -391,7 +392,7 @@ struct CaptureView: View {
                     systemImage: "checkmark.seal"
                 )
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
 
                 Button {
                     draft.status = Item.Status.done
@@ -454,6 +455,7 @@ struct CaptureView: View {
                     } label: {
                         Label("Discard", systemImage: "trash")
                             .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppBackground.destructive)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.glass)
@@ -764,7 +766,7 @@ private struct NudgeNote: View {
                     .foregroundStyle(AppBackground.ink)
                 Text(detail)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
             }
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

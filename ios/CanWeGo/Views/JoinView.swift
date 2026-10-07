@@ -154,7 +154,7 @@ struct JoinSheet: View {
                     if let home = preview.homeLocality, !home.isEmpty {
                         Text(home)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                     }
                 }
             }
@@ -175,7 +175,7 @@ struct JoinSheet: View {
 
             Text(preview.message())
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 

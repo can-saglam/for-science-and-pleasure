@@ -148,13 +148,13 @@ struct CaptureDrawer<Actions: View>: View {
             layout {
                 if let label = draft.timeLabel {
                     Text(label)
-                        .foregroundStyle(draft.timeLabelIsUrgent ? AppBackground.destructive : Color.secondary)
+                        .foregroundStyle(draft.timeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
                 }
                 if !stacked && draft.timeLabel != nil && draft.category != nil {
-                    Text("·").foregroundStyle(.tertiary)
+                    Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
                 if let category = draft.category {
-                    Text(category.capitalized).foregroundStyle(.secondary)
+                    Text(category.capitalized).foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .font(.subheadline.weight(.medium))
@@ -230,7 +230,7 @@ struct CaptureDrawer<Actions: View>: View {
         if let text {
             Label {
                 Text(text)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .id(text)
                     .transition(.opacity)
             } icon: {
@@ -297,7 +297,7 @@ struct CaptureStatus: View {
             .clipped()
         }
         .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(AppBackground.secondaryInk)
         .animation(.snappy, value: step)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(phrases[0])

@@ -78,12 +78,12 @@ struct SettingsView: View {
                         LogoTitle(height: 44, writes: .settings)
                         Text("The shows, gigs and places you keep meaning to go to, in one list you share.")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 12)
                         Text("for science and pleasure · v\(version)")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
                     }
                     .frame(maxWidth: .infinity)
                     // Pulls the hero up against the grouped list's default
@@ -146,7 +146,7 @@ struct SettingsView: View {
                     // passes agree and nothing moves.
                     Text("On the day of a reminder, or of a plan, the save stays on your Lock Screen instead of sending a notification.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .listRowBackground(Self.rowBackground)
                 #endif
@@ -163,7 +163,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Download your saves as a spreadsheet, a calendar file and a readable list.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -229,11 +229,11 @@ struct SettingsView: View {
                                     .foregroundStyle(AppBackground.warning)
                                 Text(problem.message)
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AppBackground.secondaryInk)
                                 if let detail = problem.detail {
                                     Text(detail)
                                         .font(.caption2.monospaced())
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
                                         .textSelection(.enabled)
                                         .lineLimit(4)
                                 }
@@ -314,7 +314,7 @@ struct SettingsView: View {
                     if !auth.signedIn {
                         Text("Sign in to sync your shared library across phones.")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                     }
                 }
                 .listRowBackground(Self.rowBackground)
@@ -428,6 +428,7 @@ struct SettingsView: View {
             }
         }
         .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .onDisappear(perform: syncAppIcon)
     }
 
@@ -456,7 +457,7 @@ struct SettingsView: View {
         // so the row still measures the same ~51pt as its neighbours. Keep
         // `listRowInsets` the outermost modifier on the row — anything
         // wrapped around it hides the insets from the List.
-        .frame(height: 34)
+        .frame(minHeight: 34)
         .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
     }
 
@@ -499,7 +500,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Choose a calendar. iOS will ask to let Can We Go see your calendars.")
-                .frame(height: 34)
+                .frame(minHeight: 34)
                 .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
             }
         } header: {

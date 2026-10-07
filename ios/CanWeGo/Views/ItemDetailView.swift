@@ -299,12 +299,12 @@ struct ItemDetailView: View {
             if let fetchNote {
                 Text(fetchNote)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Looks the original link up again and fills the fields above. Your notes stay put, and nothing saves until Done.")
                     .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -372,13 +372,25 @@ struct ItemDetailView: View {
 
     /// Full-bleed photo melting into the sheet through a theme-colored
     /// scrim, with the title and meta sitting on top of it.
+    /// At accessibility sizes the title can outgrow the melt and climb
+    /// under the buttons on the photo, so it moves below the picture.
+    @ViewBuilder
     private func heroHeader(_ url: URL) -> some View {
-        HeroPhoto(url: url, placeholder: item.accentColor)
-            .overlay(alignment: .bottomLeading) {
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                HeroPhoto(url: url, placeholder: item.accentColor)
                 header
                     .padding(.horizontal, 20)
                     .padding(.bottom, 6)
             }
+        } else {
+            HeroPhoto(url: url, placeholder: item.accentColor)
+                .overlay(alignment: .bottomLeading) {
+                    header
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 6)
+                }
+        }
     }
 
     private var photoCredit: String? { showsHero ? item.photoCredit : nil }
@@ -399,14 +411,14 @@ struct ItemDetailView: View {
             layout {
                 if let label = item.timeLabel {
                     Text(label)
-                        .foregroundStyle(item.timeLabelIsUrgent ? AppBackground.destructive : Color.secondary)
+                        .foregroundStyle(item.timeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
                 }
                 if !stacked && item.timeLabel != nil && item.category != nil {
-                    Text("·").foregroundStyle(.tertiary)
+                    Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
                 if let category = item.category {
                     // Title case, matching the filter chips.
-                    Text(category.capitalized).foregroundStyle(.secondary)
+                    Text(category.capitalized).foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .font(.subheadline.weight(.medium))
@@ -592,7 +604,7 @@ struct ItemDetailView: View {
     private func metaRow(_ symbol: String, _ text: String?) -> some View {
         if let text {
             Label {
-                Text(text).foregroundStyle(.secondary)
+                Text(text).foregroundStyle(AppBackground.secondaryInk)
             } icon: {
                 Image(systemName: symbol)
                     .foregroundStyle(AppBackground.ink.opacity(0.45))

@@ -730,6 +730,7 @@ struct BusyDaySheet: View {
     var onLater: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
     @State private var dealt = false
 
@@ -765,6 +766,7 @@ struct BusyDaySheet: View {
             } label: {
                 Text("Save for tomorrow")
                     .font(.headline)
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
             }
             .prominentGlass()
@@ -793,7 +795,7 @@ struct BusyDaySheet: View {
         }
         .foregroundStyle(AppBackground.ink)
         .background { ThemeFill(color: AppBackground.sheet) }
-        .presentationDetents([.height(560)])
+        .presentationDetents([typeSize.isAccessibilitySize ? .large : .height(560)])
         .presentationDragIndicator(.visible)
         .appColorScheme()
         .onAppear { dealt = true }

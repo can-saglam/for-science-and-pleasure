@@ -155,10 +155,20 @@ struct ItemForm: View {
 /// Dimmed leading symbol, fixed-width so every field's text starts on the
 /// same vertical line.
 private func fieldIcon(_ name: String) -> some View {
-    Image(systemName: name)
-        .font(.subheadline)
-        .foregroundStyle(AppBackground.ink.opacity(0.35))
-        .frame(width: 22)
+    FieldIcon(name: name)
+}
+
+private struct FieldIcon: View {
+    let name: String
+    /// Grows with the symbol, or big type pushes it into the label.
+    @ScaledMetric(relativeTo: .subheadline) private var width = 22.0
+
+    var body: some View {
+        Image(systemName: name)
+            .font(.subheadline)
+            .foregroundStyle(AppBackground.ink.opacity(0.35))
+            .frame(width: width)
+    }
 }
 
 /// "Add date" → date picker + clear, for the optional yyyy-MM-dd fields.
@@ -189,7 +199,7 @@ private struct OptionalDateRow: View {
                     self.value = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear date")
@@ -202,7 +212,7 @@ private struct OptionalDateRow: View {
                         .font(.subheadline.weight(.medium))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
             }
         }
         // Same filled row as the text fields, so nothing floats loose.
@@ -264,7 +274,7 @@ private struct ThumbnailField: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title3)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppBackground.secondaryInk)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Remove photo")
@@ -312,7 +322,7 @@ private struct ThumbnailField: View {
                 .overlay {
                     Image(systemName: "plus")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
         }
     }

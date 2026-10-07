@@ -265,10 +265,13 @@ struct Composer: View {
                         .foregroundStyle(.white)
                         .frame(width: 20, height: 20)
                         .background(.black.opacity(0.55), in: .circle)
+                        // A 44pt target around the small ×, same spot.
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Remove photo")
-                .offset(x: 6, y: -6)
+                .offset(x: 18, y: -18)
             }
             // Keep the × tappable where it pokes past the picture's corner.
             .padding(.top, 6)

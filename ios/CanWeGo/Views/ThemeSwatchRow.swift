@@ -17,11 +17,11 @@ struct ThemeSwatchRow: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                 Spacer()
                 Text(themes.current.name)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .contentTransition(.numericText())
                     .animation(.snappy, value: themes.current)
             }
