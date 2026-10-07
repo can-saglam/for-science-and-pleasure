@@ -31,8 +31,6 @@ struct ItemDetailView: View {
     @State private var hoursLoading = false
     /// A showing tapped in the details, opening the plan on it.
     @State private var planShowing: Showing?
-    @State private var scrolled = false
-
     private enum CalendarState {
         case idle, added, failed
     }
@@ -95,19 +93,12 @@ struct ItemDetailView: View {
                     DetailActionCluster(
                         item: item,
                         done: done,
-                        collapsed: scrolled,
                         calendarAdded: calendarState == .added,
                         addToCalendar: addToCalendar,
                         went: confirmWent,
                         putBack: putBack
                     )
                 }
-            }
-            // Past the top, the main action folds down to its glyph.
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top > 40
-            } action: { _, past in
-                scrolled = past
             }
             // Without a photo, the item's color breathes at the top instead.
             .background(alignment: .top) {

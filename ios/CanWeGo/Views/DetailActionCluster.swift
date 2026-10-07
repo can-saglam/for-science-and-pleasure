@@ -2,14 +2,11 @@ import SwiftUI
 
 /// The detail drawer's actions, floating bottom right: plain glass circles
 /// for the side actions, and the main one in solid white — "We did go!"
-/// (or "Put back") spelled out until the drawer is scrolled, then just
-/// its glyph. A soft fade in the corner keeps text from running under it.
+/// (or "Put back") spelled out. A soft fade in the corner keeps text from running under it.
 struct DetailActionCluster: View {
     let item: Item
     /// "We did go!" was tapped and the drawer is on its way out.
     let done: Bool
-    /// Scrolled past the top: the main action folds to a circle.
-    let collapsed: Bool
     let calendarAdded: Bool
     let addToCalendar: () -> Void
     let went: () -> Void
@@ -62,7 +59,6 @@ struct DetailActionCluster: View {
                     }
                 }
             }
-            .animation(reduceMotion ? nil : .snappy, value: collapsed)
             .animation(reduceMotion ? nil : .snappy, value: calendarAdded)
         }
         .padding(.horizontal, 20)
@@ -92,15 +88,12 @@ struct DetailActionCluster: View {
             HStack(spacing: 7) {
                 Image(systemName: symbol)
                     .contentTransition(.symbolEffect(.replace))
-                if !collapsed {
-                    Text(label)
-                        .lineLimit(1)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .leading)))
-                }
+                Text(label)
+                    .lineLimit(1)
             }
             .font(.subheadline.weight(.semibold))
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .padding(.horizontal, collapsed ? 0 : 20)
+            .padding(.horizontal, 20)
             .frame(minWidth: 54, minHeight: 54)
             .contentShape(.capsule)
         }
