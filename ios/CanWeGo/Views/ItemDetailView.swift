@@ -31,7 +31,6 @@ struct ItemDetailView: View {
     @State private var hoursLoading = false
     /// A showing tapped in the details, opening the plan on it.
     @State private var planShowing: Showing?
-    @State private var choosingPhoto = false
 
     private enum CalendarState {
         case idle, added, failed
@@ -76,9 +75,6 @@ struct ItemDetailView: View {
                         if editing, let scratch {
                             VStack(alignment: .leading, spacing: 22) {
                                 ItemForm(item: scratch)
-                                if let page = pageURL {
-                                    photoRow(page, scratch: scratch)
-                                }
                                 refetchRow
                             }
                             .transition(.opacity)
@@ -273,36 +269,6 @@ struct ItemDetailView: View {
         item.stampAuthor()
         try? context.save()
         self.scratch = nil
-    }
-
-    private var pageURL: URL? {
-        guard let url = item.url.flatMap(URL.init(string:)), url.scheme?.hasPrefix("http") == true
-        else { return nil }
-        return url
-    }
-
-    /// Choose the photo by hand from the page's own pictures; lands on
-    /// the scratch copy like any other edit.
-    private func photoRow(_ page: URL, scratch: Item) -> some View {
-        Button {
-            Haptics.tap()
-            choosingPhoto = true
-        } label: {
-            HStack {
-                Label(scratch.imageUrl == nil ? "Pick a photo from the page" : "Change photo", systemImage: "photo.on.rectangle")
-                    .foregroundStyle(AppBackground.ink)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.glass)
-        .controlSize(.large)
-        .sheet(isPresented: $choosingPhoto) {
-            PagePhotoPicker(page: page, current: scratch.imageUrl) { url, colour in
-                scratch.imageUrl = url.absoluteString
-                if let colour { scratch.colorHex = colour }
-            }
-        }
     }
 
     /// Looks the save up again and writes whatever came back onto the

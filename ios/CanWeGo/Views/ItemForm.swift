@@ -229,6 +229,7 @@ private struct ThumbnailField: View {
     @Bindable var item: Item
     @State private var pick: PhotosPickerItem?
     @State private var cameraOpen = false
+    @State private var choosingFromPage = false
     @State private var uploading = false
     @State private var note: String?
 
@@ -253,6 +254,26 @@ private struct ThumbnailField: View {
                 .buttonStyle(.plain)
                 .disabled(uploading)
                 .accessibilityLabel(item.imageUrl == nil ? "Add a photo" : "Change photo")
+
+                if let page = pageURL, !uploading {
+                    Button {
+                        Haptics.tap()
+                        choosingFromPage = true
+                    } label: {
+                        Image(systemName: "photo.on.rectangle")
+                            .font(.body)
+                            .foregroundStyle(AppBackground.ink.opacity(0.45))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Pick a photo from the page")
+                    .sheet(isPresented: $choosingFromPage) {
+                        PagePhotoPicker(page: page, current: item.imageUrl) { url, colour in
+                            note = nil
+                            item.imageUrl = url.absoluteString
+                            if let colour { item.colorHex = colour }
+                        }
+                    }
+                }
 
                 if UIImagePickerController.isSourceTypeAvailable(.camera), item.imageUrl == nil, !uploading {
                     Button {
@@ -300,6 +321,13 @@ private struct ThumbnailField: View {
             }
             .ignoresSafeArea()
         }
+    }
+
+    /// The save's own web page, whose pictures can be picked from.
+    private var pageURL: URL? {
+        guard let url = item.url.flatMap(URL.init(string:)), url.scheme?.hasPrefix("http") == true
+        else { return nil }
+        return url
     }
 
     @ViewBuilder
