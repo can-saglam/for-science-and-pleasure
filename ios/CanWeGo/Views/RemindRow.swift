@@ -103,7 +103,7 @@ struct RemindRow: View {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2.weight(.semibold))
             }
-            .foregroundStyle(AppBackground.ink.opacity(0.55))
+            .foregroundStyle(AppBackground.theme.isLight ? AppBackground.secondaryInk : AppBackground.ink.opacity(0.55))
         }
         .font(.subheadline)
         .padding(.horizontal, 12)

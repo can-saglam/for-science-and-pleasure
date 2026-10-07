@@ -415,6 +415,11 @@ enum AppBackground {
     /// Logo and primary marks — cream on midnight and forest, dark on the papers, white elsewhere.
     static var ink: Color { theme.ink }
 
+    /// Quiet type: dates, notes, legends. The system grey sits under 3:1 on
+    /// the papers, so they fade their own ink only as far as small type
+    /// still reads (4.5:1, washed rows included). Dark themes keep the grey.
+    static var secondaryInk: Color { theme.isLight ? ink.opacity(0.78) : .secondary }
+
     /// Placeholder ink. The system grey disappears into the paper themes.
     static func fieldPrompt(_ title: String) -> Text {
         Text(title).foregroundStyle(ink.opacity(0.72))

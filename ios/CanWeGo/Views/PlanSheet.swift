@@ -52,7 +52,7 @@ struct PlanOrRemind: View {
     private func footnote(_ text: String) -> some View {
         Text(text)
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.secondaryInk)
             .padding(.leading, 4)
     }
 }
@@ -97,7 +97,7 @@ struct PlanRow: View {
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.semibold))
             }
-            .foregroundStyle(AppBackground.ink.opacity(0.55))
+            .foregroundStyle(AppBackground.theme.isLight ? AppBackground.secondaryInk : AppBackground.ink.opacity(0.55))
         }
         .font(.subheadline)
         .padding(.horizontal, 12)
@@ -123,7 +123,7 @@ struct ShowingsLine: View {
     var body: some View {
         if showings.count > Self.chipLimit {
             Text([dateLine, "\(showings.count) showings"].compactMap(\.self).joined(separator: " · "))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -138,7 +138,7 @@ struct ShowingsLine: View {
     private func chip(_ showing: Showing) -> some View {
         let label = HStack(spacing: 5) {
             Text(DayString.text(showing.date, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? showing.date)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppBackground.secondaryInk)
             if let time = showing.time {
                 Text(OpeningHours.time(time))
                     .monospacedDigit()
@@ -423,7 +423,7 @@ struct PlanSheet: View {
     private func header(_ title: String) -> some View {
         Text(title)
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppBackground.secondaryInk)
             .padding(.leading, 4)
             .accessibilityAddTraits(.isHeader)
     }
@@ -461,7 +461,7 @@ struct PlanSheet: View {
             HStack(spacing: 12) {
                 Text(DayString.text(showing.date, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? showing.date)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
+                    .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : AppBackground.secondaryInk)
                     .frame(minWidth: 88, alignment: .leading)
                 Text(showing.time.map(OpeningHours.time) ?? "Any time")
                     .font(.body.weight(chosen ? .semibold : .regular))
@@ -471,7 +471,7 @@ struct PlanSheet: View {
                 if let note = showing.note {
                     Text(note)
                         .font(.footnote)
-                        .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
+                        .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : AppBackground.secondaryInk)
                         .lineLimit(1)
                 }
             }
@@ -595,7 +595,7 @@ struct PlanSheet: View {
                 if let note = showing.note {
                     Text(note)
                         .font(.caption2)
-                        .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
+                        .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : AppBackground.secondaryInk)
                         .lineLimit(1)
                 }
             }
@@ -647,7 +647,7 @@ struct PlanSheet: View {
             if showsClosedLegend { legendDot(AppBackground.warning, "Usually closed") }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(AppBackground.secondaryInk)
         .accessibilityHidden(true)
 
         return ViewThatFits(in: .horizontal) {
@@ -696,12 +696,12 @@ struct PlanSheet: View {
             VStack(spacing: 2) {
                 Text(DayString.text(d, .dateTime.weekday(.abbreviated)) ?? "")
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(selected ? AppBackground.base.opacity(0.8) : .secondary)
+                    .foregroundStyle(selected ? AppBackground.base.opacity(0.8) : AppBackground.secondaryInk)
                 Text(DayString.text(d, .dateTime.day()) ?? "")
                     .font(.body.weight(selected ? .semibold : .regular))
                     .monospacedDigit()
                     .strikethrough(!open)
-                    .foregroundStyle(selected ? AppBackground.base : open ? AppBackground.ink : Color.secondary.opacity(0.5))
+                    .foregroundStyle(selected ? AppBackground.base : open ? AppBackground.ink : AppBackground.secondaryInk.opacity(0.5))
                 Circle()
                     .fill(dot)
                     .frame(width: 4, height: 4)
@@ -768,7 +768,7 @@ struct PlanSheet: View {
             open = r.isEmpty ? (exact ? "Closed" : "Usually closed") : OpeningHours.rangesText(r)
         }
         let title = Text(name).font(.body.weight(.semibold)).foregroundStyle(AppBackground.ink)
-        let detail = Text(open.isEmpty ? "" : "  ·  \(open)").font(.subheadline).foregroundStyle(.secondary)
+        let detail = Text(open.isEmpty ? "" : "  ·  \(open)").font(.subheadline).foregroundStyle(AppBackground.secondaryInk)
         return Text("\(title)\(detail)")
             .contentTransition(.opacity)
     }
@@ -790,7 +790,7 @@ struct PlanSheet: View {
             }
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(AppBackground.secondaryInk)
         .fixedSize(horizontal: false, vertical: true)
     }
 
