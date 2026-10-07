@@ -472,15 +472,15 @@ struct PlanSheet: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(date)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(chosen ? AppBackground.onProminent.opacity(0.8) : .secondary)
+                    .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
                 Text(showing.time.map(OpeningHours.time) ?? "Any time")
                     .font(.body.weight(chosen ? .semibold : .regular))
                     .monospacedDigit()
-                    .foregroundStyle(chosen ? AppBackground.onProminent : AppBackground.ink)
+                    .foregroundStyle(chosen ? AppBackground.base : AppBackground.ink)
                 if let note = showing.note {
                     Text(note)
                         .font(.caption2)
-                        .foregroundStyle(chosen ? AppBackground.onProminent.opacity(0.8) : .secondary)
+                        .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
                         .lineLimit(1)
                 }
             }
@@ -525,12 +525,12 @@ struct PlanSheet: View {
             VStack(spacing: 2) {
                 Text(DayString.text(d, .dateTime.weekday(.abbreviated)) ?? "")
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(selected ? AppBackground.onProminent.opacity(0.8) : .secondary)
+                    .foregroundStyle(selected ? AppBackground.base.opacity(0.8) : .secondary)
                 Text(DayString.text(d, .dateTime.day()) ?? "")
                     .font(.body.weight(selected ? .semibold : .regular))
                     .monospacedDigit()
                     .strikethrough(!open)
-                    .foregroundStyle(selected ? AppBackground.onProminent : open ? AppBackground.ink : Color.secondary.opacity(0.5))
+                    .foregroundStyle(selected ? AppBackground.base : open ? AppBackground.ink : Color.secondary.opacity(0.5))
                 Circle()
                     .fill(closed && open ? AppBackground.warning : .clear)
                     .frame(width: 4, height: 4)
