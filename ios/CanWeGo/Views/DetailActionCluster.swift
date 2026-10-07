@@ -75,8 +75,12 @@ struct DetailActionCluster: View {
                 colors: [AppBackground.sheet.opacity(0.92), AppBackground.sheet.opacity(0)],
                 center: .bottomTrailing,
                 startRadius: 40,
-                endRadius: 260
+                endRadius: 220
             )
+            // Taller than the row, so it fades out fully above the
+            // buttons rather than stopping at a hard edge.
+            .frame(width: 220, height: 220)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .ignoresSafeArea()
             .allowsHitTesting(false)
         }
