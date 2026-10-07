@@ -38,7 +38,6 @@
 	<string>Lists your calendars so you can choose which one your events go into. Can We Go never reads your events.</string>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Post-TRIAL-Medium.otf</string>
 		<string>PPNeueGstaad-Bold.otf</string>
 		<string>PPNeueGstaad-CondensedRegular.otf</string>
 		<string>PPNeueGstaad-CondensedBold.otf</string>

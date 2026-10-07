@@ -90,7 +90,7 @@ struct ShareCard: View {
                         .foregroundStyle(item.accentColor.mix(with: typeColor, by: 0.55))
                 }
                 Text(item.title)
-                    .font(.post(40, relativeTo: .largeTitle))
+                    .font(.displaySmallBold(50, relativeTo: .largeTitle))
                     .foregroundStyle(typeColor)
                     .lineLimit(3)
                     .minimumScaleFactor(0.7)

@@ -13,6 +13,6 @@ ios/**/*.xcuserstate
 ios/build/
 
 # Trial-licensed font: not redistributable, so it stays local.
-ios/CanWeGo/Resources/Post-TRIAL-Medium.otf
+ios/UnbundledFonts/
 
 ios/CanWeGo/Resources/Secrets.plist
