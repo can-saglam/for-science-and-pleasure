@@ -99,7 +99,7 @@ extension Item {
     }
 
     private static let trackers: Set<String> = [
-        "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "igsh", "igshid", "si", "ref_src",
+        "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "igsh", "igshid", "stkn", "si", "ref_src",
     ]
 
     static func untracked(_ url: URL) -> URL {

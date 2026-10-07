@@ -35,9 +35,13 @@ enum ThumbnailBackfill {
         defer { running = false }
         guard let all = try? context.fetch(FetchDescriptor<Item>()) else { return }
         // A Google Maps photo is only ever the last resort: the saved
-        // page's own picture replaces it whenever one turns up.
+        // page's own picture replaces it whenever one turns up. Anything
+        // that isn't a web address (a lazy loader's `data:` placeholder)
+        // is no picture at all.
         let missing = all.filter { item in
-            item.url != nil && (item.imageUrl.map { ImageStore.isDead($0) || isGooglePhoto($0) } ?? true)
+            item.url != nil && (item.imageUrl.map {
+                !$0.lowercased().hasPrefix("http") || ImageStore.isDead($0) || isGooglePhoto($0)
+            } ?? true)
         }
         guard !missing.isEmpty else { return }
 
