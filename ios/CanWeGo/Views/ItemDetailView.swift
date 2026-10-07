@@ -7,8 +7,8 @@ import SwiftUI
 import UIKit
 
 /// Detail sheet — a soft wash of the item's color at the top, quiet
-/// metadata, the map, and a pair of equal actions. A pencil in the toolbar
-/// flips the whole sheet into an edit form.
+/// metadata, the map, and its actions floating in glass, bottom right.
+/// A pencil in the toolbar flips the whole sheet into an edit form.
 struct ItemDetailView: View {
     @Bindable var item: Item
     @Environment(\.dismiss) private var dismiss
@@ -31,6 +31,7 @@ struct ItemDetailView: View {
     @State private var hoursLoading = false
     /// A showing tapped in the details, opening the plan on it.
     @State private var planShowing: Showing?
+    @State private var scrolled = false
 
     private enum CalendarState {
         case idle, added, failed
@@ -83,13 +84,30 @@ struct ItemDetailView: View {
                         }
                     }
                     .padding(20)
+                    .task(id: item.showsHours ? item.placeId : nil) { await loadHours() }
                 }
             }
             // With a hero, the photo runs edge-to-edge under the controls.
             .ignoresSafeArea(edges: showsHero ? .top : [])
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !editing && hasPrimaryActions { primaryActions }
+                if !editing && DetailActionCluster.hasActions(item, done: done) {
+                    DetailActionCluster(
+                        item: item,
+                        done: done,
+                        collapsed: scrolled,
+                        calendarAdded: calendarState == .added,
+                        addToCalendar: addToCalendar,
+                        went: confirmWent,
+                        putBack: putBack
+                    )
+                }
+            }
+            // Past the top, the main action folds down to its glyph.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > 40
+            } action: { _, past in
+                scrolled = past
             }
             // Without a photo, the item's color breathes at the top instead.
             .background(alignment: .top) {
@@ -144,6 +162,17 @@ struct ItemDetailView: View {
                         Menu {
                             ShareMenuItems(item: item) {
                                 Task { shareCard = await ShareCard.render(item) }
+                            }
+                            if item.isDone {
+                                Divider()
+                                Button(role: .destructive) {
+                                    Haptics.tap()
+                                    UndoBin.shared.stash(item.snapshot)
+                                    item.softDelete()
+                                    dismiss()
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         } label: {
                             Image(systemName: "square.and.arrow.up")
@@ -477,130 +506,41 @@ struct ItemDetailView: View {
                 .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 14, style: .continuous))
         }
 
-        // The calendar as a quiet extra; the main pair is pinned below.
-        VStack(spacing: 10) {
-            if (item.startsOn != nil || item.upcomingPlan != nil) && (!item.isDone || done) {
-                Button {
-                    Haptics.tap()
-                    Task {
-                        do {
-                            try await item.addToCalendar()
-                            Haptics.success()
-                            withAnimation(.snappy) { calendarState = .added }
-                            // The label confirms, then comes back. Deleting
-                            // the event in Calendar has to be able to add
-                            // it again, so this never stays disabled.
-                            try? await Task.sleep(for: .seconds(1.6))
-                            if calendarState == .added {
-                                withAnimation(.snappy) { calendarState = .idle }
-                            }
-                        } catch {
-                            withAnimation(.snappy) { calendarState = .failed }
-                        }
-                    }
-                } label: {
-                    Label(
-                        calendarState == .added ? "In calendar" : "Add to calendar",
-                        systemImage: calendarState == .added ? "checkmark" : "calendar.badge.plus"
-                    )
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(AppBackground.ink)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-            }
-
-            if calendarState == .failed {
-                if let settings = URL(string: UIApplication.openSettingsURLString) {
-                    Link("Couldn't add. Allow calendar access in Settings.", destination: settings)
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.destructive)
-                } else {
-                    Text("Couldn't add. Allow calendar access in Settings.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.destructive)
-                }
+        if calendarState == .failed {
+            if let settings = URL(string: UIApplication.openSettingsURLString) {
+                Link("Couldn't add. Allow calendar access in Settings.", destination: settings)
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.destructive)
+            } else {
+                Text("Couldn't add. Allow calendar access in Settings.")
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.destructive)
             }
         }
-        .controlSize(.large)
-        .padding(.top, 4)
-        .task(id: item.showsHours ? item.placeId : nil) { await loadHours() }
     }
 
-    /// The pair the drawer is for — open it, or say you went — pinned
-    /// under the sheet so the medium detent always shows it.
-    private var hasPrimaryActions: Bool {
-        item.url.flatMap(URL.init(string:)) != nil || item.isDone || item.canMarkDone || done
-    }
-
-    private var primaryActions: some View {
-        HStack(spacing: 10) {
-            if let url = item.url.flatMap(URL.init(string:)) {
-                Link(destination: url) {
-                    Label("Open link", systemImage: "safari")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppBackground.onProminent)
-                        .frame(maxWidth: .infinity)
-                }
-                .prominentGlass()
-            }
-
-            if item.isDone && !done {
-                Button {
-                    Haptics.tap()
-                    if let full = CategoryCap.overflow(item, context: context) {
-                        paywall = .category(full)
-                    } else {
-                        item.putBack()
-                    }
-                } label: {
-                    Label("Put back", systemImage: "arrow.uturn.backward")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppBackground.onProminent)
-                        .frame(maxWidth: .infinity)
-                }
-                .prominentGlass()
-
-                Button(role: .destructive) {
-                    Haptics.tap()
-                    UndoBin.shared.stash(item.snapshot)
-                    item.softDelete()
-                    dismiss()
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                }
-                .destructiveGlass()
-            } else if (!item.isDone && item.canMarkDone) || done {
-                Button(action: confirmWent) {
-                    // For something that's already over, the plain label
-                    // reads odd — soften it to an after-the-fact note.
-                    Label(
-                        done ? "Done" : (item.isMissed ? Voice.didGoAfterAll : Voice.didGoBang),
-                        systemImage: "checkmark"
-                    )
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppBackground.onProminent)
-                    .frame(maxWidth: .infinity)
-                    .contentTransition(.opacity)
-                }
-                .prominentGlass()
-                .allowsHitTesting(!done)
+    /// The icon confirms with a check, then comes back. Deleting the event
+    /// in Calendar has to be able to add it again, so it never stays done.
+    private func addToCalendar() {
+        Task {
+            do {
+                try await item.addToCalendar()
+                Haptics.success()
+                calendarState = .added
+                try? await Task.sleep(for: .seconds(1.6))
+                if calendarState == .added { calendarState = .idle }
+            } catch {
+                withAnimation(.snappy) { calendarState = .failed }
             }
         }
-        .controlSize(.large)
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-        .padding(.bottom, 8)
-        .background {
-            LinearGradient(
-                stops: [.init(color: AppBackground.sheet.opacity(0), location: 0),
-                        .init(color: AppBackground.sheet, location: 0.35)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
+    }
+
+    private func putBack() {
+        Haptics.tap()
+        if let full = CategoryCap.overflow(item, context: context) {
+            paywall = .category(full)
+        } else {
+            item.putBack()
         }
     }
 
