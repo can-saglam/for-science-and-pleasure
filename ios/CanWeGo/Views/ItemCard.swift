@@ -446,17 +446,64 @@ struct MeltLayers: View {
     }
 }
 
-/// The "just saved" halo. Absent entirely when off, so a long list
-/// doesn't carry a shadow pass on every card.
+/// The "just saved" moment, played once per `trigger`: a beat for the list
+/// to bring the card into view, then a soft halo and a lit rim rise, the
+/// card lifts a touch and settles, and it all fades out. The card itself
+/// is never swapped for another view (that made the glow pop instead of
+/// fade), and at rest the halo and rim aren't drawn at all, so a long list
+/// doesn't carry a blur pass on every card.
 private struct LandingGlow: ViewModifier {
-    var active: Bool
+    var trigger: Int
     var color: Color
+    var cornerRadius: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct Frame {
+        var glow = 0.0
+        var scale = 1.0
+    }
 
     func body(content: Content) -> some View {
-        if active {
-            content.shadow(color: color.opacity(0.45), radius: 14)
-        } else {
-            content
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content.keyframeAnimator(initialValue: Frame(), trigger: trigger) { card, frame in
+            card
+                .background {
+                    if frame.glow > 0 {
+                        shape
+                            .fill(color)
+                            .padding(-2)
+                            .blur(radius: 18)
+                            .opacity(0.7 * frame.glow)
+                    }
+                }
+                .overlay {
+                    if frame.glow > 0 {
+                        shape
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [color, color.opacity(0.5)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                            .opacity(frame.glow)
+                    }
+                }
+                .scaleEffect(frame.scale)
+        } keyframes: { _ in
+            KeyframeTrack(\.glow) {
+                LinearKeyframe(0, duration: 0.25)
+                CubicKeyframe(1, duration: 0.35)
+                LinearKeyframe(1, duration: 1.1)
+                CubicKeyframe(0, duration: 1.1)
+            }
+            KeyframeTrack(\.scale) {
+                LinearKeyframe(1, duration: 0.25)
+                SpringKeyframe(reduceMotion ? 1 : 1.02, duration: 0.3, spring: .snappy)
+                SpringKeyframe(1, duration: 0.6, spring: .smooth)
+            }
         }
     }
 }
@@ -484,9 +531,11 @@ struct ItemCardRow: View {
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
     @State private var undoBin = UndoBin.shared
+    /// Bumped each time this card lands; plays its glow once.
+    @State private var landings = 0
 
-    /// Just arrived (saved, shared in, or brought back): the border glows
-    /// in the card's own colour for a couple of seconds.
+    /// Just arrived (saved, shared in, or brought back): the card glows in
+    /// its own colour for a couple of seconds.
     private var landed: Bool { undoBin.landed == item.id }
 
     var body: some View {
@@ -497,17 +546,12 @@ struct ItemCardRow: View {
             onOpen()
         } label: {
             ItemCard(item: item, compact: compact)
-                .overlay(
-                    RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous)
-                        .strokeBorder(landingColor, lineWidth: 2)
-                        .opacity(landed ? 1 : 0)
-                )
-                // A shadow on every row, even a fully transparent one, is a
-                // GPU pass per card per frame — a slow drag hitches. Only
-                // the card that just landed pays for it.
-                .modifier(LandingGlow(active: landed, color: landingColor))
-                .animation(landed ? .easeOut(duration: 0.35) : .easeInOut(duration: 1.4), value: landed)
+                .modifier(LandingGlow(trigger: landings, color: landingColor, cornerRadius: compact ? 14 : 18))
         }
+        // A new save's row usually appears with the landing already set,
+        // so appearing counts as well as the change.
+        .onAppear { if landed && landings == 0 { landings += 1 } }
+        .onChange(of: landed) { _, now in if now { landings += 1 } }
         // `.borderless` lets the list own the drag. A custom press style
         // claims the touch, springs the card, then gives up once the
         // gesture is a scroll — that fight is the jitter on a casual drag.
