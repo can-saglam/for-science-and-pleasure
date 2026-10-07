@@ -1173,9 +1173,13 @@ private struct ChipRow: View {
             .padding(.vertical, 2)
             .padding(.horizontal, 20)
         }
-        // Clipped. An unclipped horizontal scroller inside the list makes
-        // the row's draw rect spill into the cards above and below, and
-        // the list remeasures that on every drag.
+        // Clipped, but not at its own bounds: those crop the glass's soft
+        // shadow into a hard-edged band behind the row (strongest on iOS
+        // 26). A fixed margin holds the shadow and keeps the draw rect
+        // bounded. Fully unclipped, the row spills into the cards above
+        // and below and the list remeasures that on every drag.
+        .scrollClipDisabled()
+        .clipShape(.rect.inset(by: -64))
     }
 
     private func chip(_ label: String, isOn: Bool, cap: Int? = nil, toggle: @escaping () -> Void) -> some View {
