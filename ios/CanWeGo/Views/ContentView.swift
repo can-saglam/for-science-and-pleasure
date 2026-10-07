@@ -313,7 +313,7 @@ struct ContentView: View {
         .onChange(of: undoBin.saved?.id) { _, id in
             if id != nil { announceUndo("Saved. Undo available.") }
         }
-        // A card landing on the other tab: go there, so the glow is seen.
+        // A card landing on the other tab: go there, so the lift is seen.
         .onChange(of: undoBin.landed) { _, id in followLanding(id) }
         .onChange(of: undoBin.deleted?.id) { _, id in
             if id != nil { announceUndo("Deleted. Undo available.") }
@@ -544,7 +544,7 @@ struct ContentView: View {
         return claimedURLs
     }
 
-    /// A card landing on the other tab: go there, so the glow is seen.
+    /// A card landing on the other tab: go there, so the lift is seen.
     private func followLanding(_ id: UUID?) {
         guard let id, let item = items.first(where: { $0.id == id }), !item.isDone else { return }
         let target = item.isEvent ? 0 : 1

@@ -652,7 +652,7 @@ struct LibraryView: View {
         ScrollViewReader { proxy in
             listBody
                 // A card just landed in this tab: bring it into view, then
-                // its own glow (ItemCardRow) says "here". A beat's delay lets
+                // its own lift (ItemCardRow) says "here". A beat's delay lets
                 // the row exist before the scroll asks for it.
                 .onChange(of: undoBin.landed) { _, id in
                     guard let id, !mode.showMap,

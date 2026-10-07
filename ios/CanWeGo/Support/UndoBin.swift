@@ -110,7 +110,7 @@ final class UndoBin {
 
     /// The card that just arrived in the library — a save from the sheet
     /// or the share extension, a delete taken back, a done put back. The
-    /// list scrolls to it and its border glows for a moment, so the eye
+    /// list scrolls to it and it lifts for a moment, so the eye
     /// finds where it went instead of reading a toast about it.
     private(set) var landed: UUID?
     private var landedExpiry: Task<Void, Never>?

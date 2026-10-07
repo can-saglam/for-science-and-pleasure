@@ -447,64 +447,31 @@ struct MeltLayers: View {
 }
 
 /// The "just saved" moment, played once per `trigger`: a beat for the list
-/// to bring the card into view, then a soft halo and a lit rim rise, the
-/// card lifts a touch and settles, and it all fades out. The card itself
-/// is never swapped for another view (that made the glow pop instead of
-/// fade), and at rest the halo and rim aren't drawn at all, so a long list
-/// doesn't carry a blur pass on every card.
-private struct LandingGlow: ViewModifier {
+/// to bring the card into view, then the card lifts and settles back, with
+/// a soft knock as it comes down. Under Reduce Motion, only the knock.
+private struct LandingLift: ViewModifier {
     var trigger: Int
-    var color: Color
-    var cornerRadius: CGFloat
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private struct Frame {
-        var glow = 0.0
-        var scale = 1.0
-    }
+    private static let wait = 0.25
+    private static let rise = 0.3
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        content.keyframeAnimator(initialValue: Frame(), trigger: trigger) { card, frame in
-            card
-                .background {
-                    if frame.glow > 0 {
-                        shape
-                            .fill(color)
-                            .padding(-2)
-                            .blur(radius: 18)
-                            .opacity(0.7 * frame.glow)
-                    }
-                }
-                .overlay {
-                    if frame.glow > 0 {
-                        shape
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [color, color.opacity(0.5)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1.5
-                            )
-                            .opacity(frame.glow)
-                    }
-                }
-                .scaleEffect(frame.scale)
-        } keyframes: { _ in
-            KeyframeTrack(\.glow) {
-                LinearKeyframe(0, duration: 0.25)
-                CubicKeyframe(1, duration: 0.35)
-                LinearKeyframe(1, duration: 1.1)
-                CubicKeyframe(0, duration: 1.1)
-            }
-            KeyframeTrack(\.scale) {
-                LinearKeyframe(1, duration: 0.25)
-                SpringKeyframe(reduceMotion ? 1 : 1.02, duration: 0.3, spring: .snappy)
+        content
+            .keyframeAnimator(initialValue: 1.0, trigger: trigger) { card, scale in
+                card.scaleEffect(scale)
+            } keyframes: { _ in
+                LinearKeyframe(1, duration: Self.wait)
+                SpringKeyframe(reduceMotion ? 1 : 1.03, duration: Self.rise, spring: .snappy)
                 SpringKeyframe(1, duration: 0.6, spring: .smooth)
             }
-        }
+            .task(id: trigger) {
+                guard trigger > 0 else { return }
+                try? await Task.sleep(for: .seconds(Self.wait + Self.rise))
+                guard !Task.isCancelled else { return }
+                Haptics.settle(0.6)
+            }
     }
 }
 
@@ -531,11 +498,11 @@ struct ItemCardRow: View {
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
     @State private var undoBin = UndoBin.shared
-    /// Bumped each time this card lands; plays its glow once.
+    /// Bumped each time this card lands; plays its lift once.
     @State private var landings = 0
 
-    /// Just arrived (saved, shared in, or brought back): the card glows in
-    /// its own colour for a couple of seconds.
+    /// Just arrived (saved, shared in, or brought back): the card lifts and
+    /// settles, so the eye finds it.
     private var landed: Bool { undoBin.landed == item.id }
 
     var body: some View {
@@ -546,7 +513,7 @@ struct ItemCardRow: View {
             onOpen()
         } label: {
             ItemCard(item: item, compact: compact)
-                .modifier(LandingGlow(trigger: landings, color: landingColor, cornerRadius: compact ? 14 : 18))
+                .modifier(LandingLift(trigger: landings))
         }
         // A new save's row usually appears with the landing already set,
         // so appearing counts as well as the change.
@@ -649,12 +616,6 @@ struct ItemCardRow: View {
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }
-    }
-
-    /// The glow: the card's accent pulled toward the ink so it reads on
-    /// every theme, including ones whose base is near the accent.
-    private var landingColor: Color {
-        item.accentColor.mix(with: AppBackground.ink, by: 0.45)
     }
 
     /// Back from the journal counts as a new save against a full category.
