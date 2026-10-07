@@ -95,6 +95,28 @@ Deno.test("lazy-loaded images count through data-src / data-srcset", () => {
   assertEquals(largestImageCandidate(tag), { src: "/uploads/hero-1400x900.jpg", width: 1400 });
 });
 
+Deno.test("a lazy loader's inline placeholder never wins over its real picture (Judy's Vintage Fair)", () => {
+  const placeholder = `data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20992%20661'%3E%3C/svg%3E`;
+  const html = `
+    <img src="${placeholder}" alt="" data-lazy-src="https://judysvintagefair.com/wp-content/uploads/2026/07/Hyde-Park-october.jpg" />
+    <img width="992" height="661" src="${placeholder}" data-lazy-src="https://judysvintagefair.com/wp-content/uploads/2026/02/The-Vintage-Furniture-Flea-Gallery-12-1.jpeg" />`;
+  assertEquals(
+    heroImageFromHtml(html, "https://judysvintagefair.com/vintage-furniture-flea/"),
+    "https://judysvintagefair.com/wp-content/uploads/2026/02/The-Vintage-Furniture-Flea-Gallery-12-1.jpeg",
+  );
+});
+
+Deno.test("only web addresses are photos: data: and blob: are refused everywhere", () => {
+  assertEquals(heroImageFromHtml(`<meta property="og:image" content="data:image/png;base64,iVBORw0KGgo">`, PAGE), null);
+  assertEquals(heroImageFromHtml(`<img width="1200" src="data:image/gif;base64,R0lGOD">`, PAGE), null);
+  assertEquals(heroImageFromHtml(`<img width="1200" src="blob:https://example.org/1234">`, PAGE), null);
+  // A bigger placeholder doesn't crowd out a real, smaller photo.
+  assertEquals(
+    heroImageFromHtml(`<img width="2000" src="data:image/gif;base64,R0lGOD"><img width="900" src="/photo.jpg">`, PAGE),
+    "https://example.org/photo.jpg",
+  );
+});
+
 Deno.test("<picture><source> entries are candidates too", () => {
   const html = `
     <picture>

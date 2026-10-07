@@ -180,6 +180,9 @@ function imageUrl(raw: string, pageUrl: string): string | null {
     let url = new URL(decodeEntities(raw.trim()), pageUrl);
     const inner = url.pathname.endsWith("/_next/image") ? url.searchParams.get("url") : null;
     if (inner) url = new URL(inner, url);
+    // Only a web address is a photo: a `data:` placeholder or a `blob:`
+    // can't be fetched, cached or shown on another phone.
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
     // A site's bare address is never a picture: the Wallace Collection's
     // og:image is "https://www.wallacecollection.org".
     if (url.pathname.replace(/\/+$/, "") === "" && !url.search) return null;
@@ -268,7 +271,11 @@ export function largestImageCandidate(
   const attr = (name: string) =>
     tagAttrs.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1];
 
-  let src = attr("src") ?? attr("data-src") ?? attr("data-lazy-src") ?? null;
+  // Lazy loaders park an inline placeholder in src (WP Rocket's empty
+  // `data:image/svg+xml`) and the real picture in a data- attribute.
+  const lazy = attr("data-src") ?? attr("data-lazy-src");
+  const plain = attr("src");
+  let src = (plain && !/^data:/i.test(plain) ? plain : lazy ?? plain) ?? null;
   let width = Number(
     tagAttrs.match(/\bwidth\s*=\s*["']?(\d+)/i)?.[1] ??
       tagAttrs.match(/\bstyle\s*=\s*["'][^"']*\bwidth\s*:\s*(\d+)px/i)?.[1] ??
@@ -316,7 +323,7 @@ export function largestImageCandidate(
       src = densest.url;
     }
   }
-  if (!src || CHROME_RE.test(src)) return null;
+  if (!src || CHROME_RE.test(src) || /^(?:data|blob):/i.test(src)) return null;
 
   if (!width) width = widthFromUrl(src);
   return width >= 500 ? { src, width } : null;
