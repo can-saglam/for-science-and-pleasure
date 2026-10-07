@@ -597,13 +597,11 @@ struct ItemCardRow: View {
                     Label("Open link", systemImage: "arrow.up.right")
                 }
             }
-            Button {
-                Haptics.tap()
-                Task { shareCard = await ShareCard.render(item) }
-            } label: {
-                Label("Share as image", systemImage: "square.and.arrow.up")
+            Section {
+                ShareMenuItems(item: item) {
+                    Task { shareCard = await ShareCard.render(item) }
+                }
             }
-            Divider()
             Button(role: .destructive) {
                 delete()
             } label: {
@@ -612,7 +610,7 @@ struct ItemCardRow: View {
         }
         .sensoryFeedback(.success, trigger: celebrate)
         .sheet(item: $shareCard) { card in
-            ActivitySheet(items: [card.image])
+            ActivitySheet(items: card.items)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }

@@ -59,15 +59,6 @@ struct ItemDetailView: View {
         item.imageUrl.flatMap(URL.init(string:))
     }
 
-    /// Text accompanying a shared link — enough to make sense in a chat.
-    private var shareMessage: String {
-        var lines = [item.title]
-        let place = [item.venue, item.area].compactMap(\.self).joined(separator: ", ")
-        if !place.isEmpty { lines.append(place) }
-        if let dateLine { lines.append(dateLine) }
-        return lines.joined(separator: "\n")
-    }
-
     private var showsHero: Bool { heroURL != nil && !editing }
 
     var body: some View {
@@ -146,23 +137,10 @@ struct ItemDetailView: View {
                         }
                         .accessibilityLabel("Cancel editing")
                     } else {
-                        // The link for a chat, or the card as a postcard —
-                        // the same pair the long-press menu offers.
+                        // The same actions the long-press menu offers.
                         Menu {
-                            if let url = item.url.flatMap(URL.init(string:)) {
-                                ShareLink(item: url, message: Text(shareMessage)) {
-                                    Label("Share link", systemImage: "link")
-                                }
-                            } else {
-                                ShareLink(item: shareMessage) {
-                                    Label("Share details", systemImage: "text.alignleft")
-                                }
-                            }
-                            Button {
-                                Haptics.tap()
+                            ShareMenuItems(item: item) {
                                 Task { shareCard = await ShareCard.render(item) }
-                            } label: {
-                                Label("Share as image", systemImage: "photo")
                             }
                         } label: {
                             Image(systemName: "square.and.arrow.up")
@@ -186,7 +164,7 @@ struct ItemDetailView: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
         .sheet(item: $shareCard) { card in
-            ActivitySheet(items: [card.image])
+            ActivitySheet(items: card.items)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $planShowing) { PlanSheet(item: item, showing: $0) }

@@ -1,13 +1,49 @@
+import CoreImage.CIFilterBuiltins
 import SwiftUI
 import UIKit
 
+/// The share actions, the same in the details' menu and a card's
+/// long-press: the link to send (the page, or a map without one), the link
+/// copied, and the postcard.
+struct ShareMenuItems: View {
+    let item: Item
+    let postcard: () -> Void
+
+    var body: some View {
+        if let url = item.shareURL {
+            let page = item.sharesPage
+            ShareLink(item: url, message: Text(item.shareMessage)) {
+                Label(page ? "Share link" : "Share map link", systemImage: page ? "link" : "map")
+            }
+            Button {
+                Haptics.success()
+                UIPasteboard.general.url = url
+            } label: {
+                Label(page ? "Copy link" : "Copy map link", systemImage: "doc.on.doc")
+            }
+        } else {
+            ShareLink(item: item.shareMessage) {
+                Label("Share details", systemImage: "text.alignleft")
+            }
+        }
+        Button {
+            Haptics.tap()
+            postcard()
+        } label: {
+            Label("Share as image", systemImage: "photo")
+        }
+    }
+}
+
 /// A postcard of one save for the share sheet — the photo, the title in the
-/// app's own hand, where and when, and the wordmark. Rendered off-screen at
-/// 4:5 so it drops into a story or a chat looking like the app, not like a
-/// screenshot of a list.
+/// app's own hand, where and when, a code that opens the link, and the
+/// wordmark. Rendered off-screen at 4:5 so it drops into a story or a chat
+/// looking like the app, not like a screenshot of a list.
 struct ShareCard: View {
     let item: Item
     let image: UIImage?
+    /// For places a link can't be tapped (a story): scanning opens it.
+    var code: UIImage? = nil
 
     private static let size = CGSize(width: 540, height: 675)
 
@@ -70,7 +106,16 @@ struct ShareCard: View {
                         .font(.headline)
                         .foregroundStyle(typeColor.opacity(0.6))
                 }
-                HStack {
+                HStack(alignment: .bottom) {
+                    if let code {
+                        // Dark on white whatever the theme: what scanners read best.
+                        Image(uiImage: code)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 76, height: 76)
+                            .padding(7)
+                            .background(.white, in: .rect(cornerRadius: 12, style: .continuous))
+                    }
                     Spacer()
                     LogoTitle(height: 22)
                         .opacity(0.9)
@@ -106,10 +151,14 @@ struct ShareCard: View {
             .joined(separator: " · ")
     }
 
-    /// The finished picture, wrapped so a sheet can be driven by it.
+    /// The finished picture and what travels with it, wrapped so a sheet
+    /// can be driven by it.
     struct Rendered: Identifiable {
         let id = UUID()
         let image: UIImage
+        /// The picture, then the words and the link, so a chat gets
+        /// something to tap; apps that only take a picture keep the picture.
+        let items: [Any]
     }
 
     /// Fetches the full-size photo (never the card thumbnail — it would
@@ -122,10 +171,23 @@ struct ShareCard: View {
         if item.photoCredit == nil, let url = item.imageUrl.flatMap(URL.init(string:)) {
             photo = await ImageStore.fetch(url, variant: .hero)
         }
-        let renderer = ImageRenderer(content: ShareCard(item: item, image: photo))
+        let link = item.shareURL
+        let renderer = ImageRenderer(content: ShareCard(item: item, image: photo, code: link.flatMap(qrCode)))
         renderer.scale = 2
         renderer.isOpaque = false
-        return renderer.uiImage.map(Rendered.init)
+        guard let image = renderer.uiImage else { return nil }
+        return Rendered(image: image, items: [image, item.shareMessage] + (link.map { [$0] } ?? []))
+    }
+
+    /// One pixel per module; drawn without smoothing, it stays crisp at any size.
+    static func qrCode(_ url: URL) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url.absoluteString.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage,
+              let cg = CIContext().createCGImage(output, from: output.extent)
+        else { return nil }
+        return UIImage(cgImage: cg)
     }
 }
 

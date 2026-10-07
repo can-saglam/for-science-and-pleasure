@@ -77,6 +77,44 @@ extension Item {
         return components.url
     }
 
+    /// What a share sends: the page it came from, or a map anyone can open
+    /// (never the sender's own directions app). The trackers links carry,
+    /// some of which name whoever first shared them, are left behind.
+    var shareURL: URL? {
+        sharesPage ? url.flatMap(URL.init(string:)).map(Self.untracked) : googleMapsURL
+    }
+
+    /// The share link is the save's own page, not a map put in its place.
+    var sharesPage: Bool {
+        url.flatMap(URL.init(string:)).map { $0.scheme == "https" || $0.scheme == "http" } ?? false
+    }
+
+    /// Text alongside a shared link, enough to make sense in a chat.
+    var shareMessage: String {
+        var lines = [title]
+        let place = [venue, area].compactMap(\.self).joined(separator: ", ")
+        if !place.isEmpty { lines.append(place) }
+        if let dateLine { lines.append(dateLine) }
+        return lines.joined(separator: "\n")
+    }
+
+    private static let trackers: Set<String> = [
+        "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "igsh", "igshid", "si", "ref_src",
+    ]
+
+    static func untracked(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let items = parts.queryItems, !items.isEmpty
+        else { return url }
+        let kept = items.filter { item in
+            let name = item.name.lowercased()
+            return !name.hasPrefix("utm_") && !trackers.contains(name)
+        }
+        guard kept.count != items.count else { return url }
+        parts.queryItems = kept.isEmpty ? nil : kept
+        return parts.url ?? url
+    }
+
     /// The plan, when there is one: its time for a couple of hours, or its
     /// day. Otherwise an all-day event spanning the item's window.
     func addToCalendar() async throws {
