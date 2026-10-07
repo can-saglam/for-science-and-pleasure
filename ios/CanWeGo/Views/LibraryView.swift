@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftData
 import SwiftUI
 import TipKit
@@ -30,6 +31,10 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var category: String?
     @State private var area: String?
+    /// Places only: nearest first, and only what's open right now.
+    @State private var nearMe = false
+    @State private var openNow = false
+    @State private var checkingHours = false
     @State private var selected: Item?
     /// Shared across the Events and Places tabs: flipping to the map on one
     /// keeps the other on the map too, so browsing both by geography flows.
@@ -93,6 +98,9 @@ struct LibraryView: View {
            item.area?.trimmingCharacters(in: .whitespaces).lowercased() != area.lowercased() {
             return false
         }
+        if openNow, item.isPlace, !item.isOpenNow {
+            return false
+        }
         if !query.isEmpty {
             return [item.title, item.venue, item.area, item.notes, item.summary]
                 .compactMap(\.self)
@@ -152,7 +160,42 @@ struct LibraryView: View {
             .map(\.label)
     }
 
-    private var visible: [Item] { Self.ordered(base.filter(matches), kind: kind) }
+    private var visible: [Item] {
+        let list = Self.ordered(base.filter(matches), kind: kind)
+        guard nearMe, kind == Item.Kind.place else { return list }
+        return Self.nearestFirst(list)
+    }
+
+    /// Closest to the phone first; anything without a pin (or no fix yet)
+    /// keeps its place in the list's own order, after the rest.
+    private static func nearestFirst(_ list: [Item]) -> [Item] {
+        guard let here = LocationStore.shared.location else { return list }
+        func away(_ item: Item) -> Double {
+            item.coordinate.map { here.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) } ?? .infinity
+        }
+        return list.enumerated()
+            .sorted { away($0.element) != away($1.element) ? away($0.element) < away($1.element) : $0.offset < $1.offset }
+            .map(\.element)
+    }
+
+    /// How many places "Open now" asks about: each is a billed lookup,
+    /// so only the nearest, and only ones this launch hasn't seen.
+    private static let openNowLookups = 10
+
+    private func checkOpenNow() async {
+        let unknown = Self.nearestFirst(Self.ordered(base, kind: kind))
+            .filter(\.showsHours)
+            .prefix(Self.openNowLookups)
+            .filter { HoursClient.cached($0) == nil }
+        guard !unknown.isEmpty else { return }
+        checkingHours = true
+        await withDiscardingTaskGroup { group in
+            for item in unknown {
+                group.addTask { @MainActor in _ = await HoursClient.load(item) }
+            }
+        }
+        checkingHours = false
+    }
 
     /// The active list's order. Static so launch can warm photos in the
     /// same order the list will ask for them.
@@ -266,7 +309,7 @@ struct LibraryView: View {
     private var been: [Item] {
         items
             .filter { $0.kind == kind && !$0.isDeleted && $0.isDone && matches($0) }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { $0.wentDate != $1.wentDate ? $0.wentDate > $1.wentDate : newerFirst($0, $1) }
     }
 
     private var missed: [Item] {
@@ -280,7 +323,7 @@ struct LibraryView: View {
     }
 
     /// Been and Missed woven together, most recent first — done things by
-    /// when you marked them, missed things by when they ended.
+    /// when you went, missed things by when they ended.
     private var archiveAll: [Item] {
         (been + missed).sorted {
             archiveDate($0) != archiveDate($1)
@@ -290,7 +333,7 @@ struct LibraryView: View {
     }
 
     private func archiveDate(_ item: Item) -> Date {
-        item.isDone ? item.updatedAt : (DayString.date(item.endsOn ?? "") ?? item.updatedAt)
+        item.isDone ? item.wentDate : (DayString.date(item.endsOn ?? "") ?? item.updatedAt)
     }
 
     // MARK: - Map
@@ -313,8 +356,11 @@ struct LibraryView: View {
 
     /// Reordering only makes sense on the full, unfiltered Places list —
     /// with a chip or search active the row indices wouldn't map cleanly.
+    /// "Open now" is the only filter on.
+    private var openNowOnly: Bool { openNow && category == nil && area == nil && query.isEmpty }
+
     private var canReorder: Bool {
-        kind == Item.Kind.place && category == nil && area == nil && query.isEmpty
+        kind == Item.Kind.place && category == nil && area == nil && query.isEmpty && !nearMe && !openNow
     }
 
     private func move(from source: IndexSet, to destination: Int) {
@@ -748,7 +794,7 @@ struct LibraryView: View {
                 .padding(.top, 40)
                 .cardListRow()
             } else if visible.isEmpty && been.isEmpty && missed.isEmpty {
-                let filtered = category != nil || area != nil || !query.isEmpty
+                let filtered = category != nil || area != nil || openNow || !query.isEmpty
                 if base.isEmpty && !filtered {
                     // Nothing in this tab: the first-time version when the
                     // whole library is new, with things to start from.
@@ -765,8 +811,8 @@ struct LibraryView: View {
                     .cardListRow()
                 } else if askQuestion == nil {
                     EmptyState(
-                        title: base.isEmpty ? emptyTitle : "Nothing matches",
-                        message: base.isEmpty ? emptyPrompt : "Try a different word, or clear the filters.",
+                        title: base.isEmpty ? emptyTitle : (openNowOnly ? (checkingHours ? "Checking hours…" : "Nothing open right now") : "Nothing matches"),
+                        message: base.isEmpty ? emptyPrompt : (openNowOnly ? "Out of the \(Self.openNowLookups) places nearest you." : "Try a different word, or clear the filters."),
                         glyph: category != nil ? emptyGlyph : nil
                     ) {
                         if filtered {
@@ -775,6 +821,7 @@ struct LibraryView: View {
                                 withAnimation(.snappy) {
                                     category = nil
                                     area = nil
+                                    openNow = false
                                     query = ""
                                 }
                             }
@@ -823,6 +870,7 @@ struct LibraryView: View {
         }
         // Tapping the tab you're already on brings the list home.
         .scrollPosition($scrollPosition)
+        .task(id: openNow) { if openNow { await checkOpenNow() } }
         .onReceive(NotificationCenter.default.publisher(for: .cwgScrollToTop)) { _ in
             guard !mode.showMap else { return }
             if searchOpen { closeSearch() }
@@ -1054,6 +1102,10 @@ struct LibraryView: View {
             SectionHeader(title: Voice.didGoSection, count: been.count)
                 .frame(minHeight: 44)
                 .cardListRow()
+            if query.isEmpty {
+                JournalTally(items: been)
+                    .cardListRow()
+            }
             ForEach(been) { item in
                 ItemCardRow(item: item, compact: true) {
                     selected = item
@@ -1110,6 +1162,10 @@ struct LibraryView: View {
                 .frame(minHeight: 44)
                 .cardListRow()
 
+                if archiveSide == .been {
+                    JournalTally(items: been)
+                        .cardListRow()
+                }
                 let rows = archiveSide == .all ? archiveAll : been
                 ForEach(rows) { item in
                     ItemCardRow(item: item, compact: true) {
@@ -1126,7 +1182,12 @@ struct LibraryView: View {
             capCounts: CategoryCap.applies ? CategoryCap.tally(items) : [:],
             areas: areas,
             category: $category,
-            area: $area
+            area: $area,
+            showsNearMe: kind == Item.Kind.place && LocationStore.shared.location != nil,
+            showsOpenNow: kind == Item.Kind.place,
+            nearMe: $nearMe,
+            openNow: $openNow,
+            checkingHours: checkingHours
         )
     }
 }
@@ -1144,6 +1205,11 @@ private struct ChipRow: View {
     let areas: [String]
     @Binding var category: String?
     @Binding var area: String?
+    var showsNearMe = false
+    var showsOpenNow = false
+    @Binding var nearMe: Bool
+    @Binding var openNow: Bool
+    var checkingHours = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -1153,6 +1219,17 @@ private struct ChipRow: View {
             // costing a full re-composite every frame. Independent chips
             // never need to merge; each carries its own glass.
             HStack(spacing: 8) {
+                if showsNearMe {
+                    chip("Near me", symbol: "location.fill", isOn: nearMe) { nearMe.toggle() }
+                }
+                if showsOpenNow {
+                    chip("Open now", symbol: "clock", isOn: openNow, busy: checkingHours) { openNow.toggle() }
+                }
+                if (showsNearMe || showsOpenNow) && (categories.count > 1 || areas.count > 1) {
+                    Rectangle()
+                        .fill(AppBackground.ink.opacity(0.25))
+                        .frame(width: 1, height: 16)
+                }
                 if categories.count > 1 {
                     ForEach(categories, id: \.self) { c in
                         chip(Item.categoryLabel(c), isOn: category == c, cap: capCounts[CategoryCap.key(c)]) {
@@ -1185,13 +1262,18 @@ private struct ChipRow: View {
         .clipShape(.rect.inset(by: -64))
     }
 
-    private func chip(_ label: String, isOn: Bool, cap: Int? = nil, toggle: @escaping () -> Void) -> some View {
+    private func chip(_ label: String, symbol: String? = nil, isOn: Bool, busy: Bool = false, cap: Int? = nil, toggle: @escaping () -> Void) -> some View {
         let shown = cap.flatMap { $0 >= CategoryCap.limit - 1 ? min($0, CategoryCap.limit) : nil }
         return Button {
             Haptics.selection()
             withAnimation(.snappy) { toggle() }
         } label: {
             HStack(spacing: 5) {
+                if busy {
+                    ProgressView().controlSize(.mini).tint(isOn ? AppBackground.base : AppBackground.ink)
+                } else if let symbol {
+                    Image(systemName: symbol).imageScale(.small)
+                }
                 Text(label)
                 if let shown {
                     Text("\(shown)/\(CategoryCap.limit)")

@@ -22,6 +22,7 @@ struct ItemSnapshot {
     var planOn: String?
     var planTime: String?
     var plannedBy: UUID?
+    var wentOn: String?
     var price: String?
     var category: String?
     var notes: String?
@@ -44,7 +45,7 @@ extension Item {
             startsOn: startsOn, endsOn: endsOn,
             reminderOffsetDays: reminderOffsetDays, reminderAnchor: reminderAnchor,
             remindAt: remindAt, remindTime: remindTime,
-            planOn: planOn, planTime: planTime, plannedBy: plannedBy, price: price,
+            planOn: planOn, planTime: planTime, plannedBy: plannedBy, wentOn: wentOn, price: price,
             category: category, notes: notes, status: status,
             colorHex: colorHex, lat: lat, lng: lng, placeId: placeId, showingsJSON: showingsJSON,
             addedByEmail: addedByEmail, createdAt: createdAt, updatedAt: updatedAt
@@ -71,6 +72,7 @@ extension Item {
         planOn = s.planOn
         planTime = s.planTime
         plannedBy = s.plannedBy
+        wentOn = s.wentOn
         price = s.price
         category = s.category
         notes = s.notes

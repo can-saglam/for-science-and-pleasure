@@ -301,7 +301,12 @@ struct RandomSaveView: View {
                     .padding(.bottom, 4)
             }
             Text(item.title)
-                .font(family == .systemSmall ? .subheadline.bold() : .title3.bold())
+                // The cards' face, so the widget reads as the same library.
+                .font(.custom(
+                    "PPNeueGstaad-CondensedRegular",
+                    size: family == .systemSmall ? 19 : 24,
+                    relativeTo: family == .systemSmall ? .subheadline : .title3
+                ))
                 .foregroundStyle(typeColor)
                 .lineLimit(family == .systemLarge ? 3 : 2)
                 .minimumScaleFactor(0.9)

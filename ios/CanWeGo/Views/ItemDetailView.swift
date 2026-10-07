@@ -31,6 +31,7 @@ struct ItemDetailView: View {
     @State private var hoursLoading = false
     /// A showing tapped in the details, opening the plan on it.
     @State private var planShowing: Showing?
+    @State private var choosingPhoto = false
 
     private enum CalendarState {
         case idle, added, failed
@@ -75,6 +76,9 @@ struct ItemDetailView: View {
                         if editing, let scratch {
                             VStack(alignment: .leading, spacing: 22) {
                                 ItemForm(item: scratch)
+                                if let page = pageURL {
+                                    photoRow(page, scratch: scratch)
+                                }
                                 refetchRow
                             }
                             .transition(.opacity)
@@ -88,6 +92,9 @@ struct ItemDetailView: View {
             // With a hero, the photo runs edge-to-edge under the controls.
             .ignoresSafeArea(edges: showsHero ? .top : [])
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !editing && hasPrimaryActions { primaryActions }
+            }
             // Without a photo, the item's color breathes at the top instead.
             .background(alignment: .top) {
                 if !showsHero {
@@ -266,6 +273,36 @@ struct ItemDetailView: View {
         item.stampAuthor()
         try? context.save()
         self.scratch = nil
+    }
+
+    private var pageURL: URL? {
+        guard let url = item.url.flatMap(URL.init(string:)), url.scheme?.hasPrefix("http") == true
+        else { return nil }
+        return url
+    }
+
+    /// Choose the photo by hand from the page's own pictures; lands on
+    /// the scratch copy like any other edit.
+    private func photoRow(_ page: URL, scratch: Item) -> some View {
+        Button {
+            Haptics.tap()
+            choosingPhoto = true
+        } label: {
+            HStack {
+                Label(scratch.imageUrl == nil ? "Pick a photo from the page" : "Change photo", systemImage: "photo.on.rectangle")
+                    .foregroundStyle(AppBackground.ink)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.glass)
+        .controlSize(.large)
+        .sheet(isPresented: $choosingPhoto) {
+            PagePhotoPicker(page: page, current: scratch.imageUrl) { url, colour in
+                scratch.imageUrl = url.absoluteString
+                if let colour { scratch.colorHex = colour }
+            }
+        }
     }
 
     /// Looks the save up again and writes whatever came back onto the
@@ -474,66 +511,8 @@ struct ItemDetailView: View {
                 .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 14, style: .continuous))
         }
 
-        // Actions: an equal pair up top, the calendar as a quiet
-        // third. No accent — the content above carries the color.
+        // The calendar as a quiet extra; the main pair is pinned below.
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                if let url = item.url.flatMap(URL.init(string:)) {
-                    Link(destination: url) {
-                        Label("Open link", systemImage: "safari")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AppBackground.onProminent)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .prominentGlass()
-                }
-
-                if item.isDone && !done {
-                    Button {
-                        Haptics.tap()
-                        if let full = CategoryCap.overflow(item, context: context) {
-                            paywall = .category(full)
-                        } else {
-                            item.putBack()
-                        }
-                    } label: {
-                        Label("Put back", systemImage: "arrow.uturn.backward")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(AppBackground.onProminent)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .prominentGlass()
-
-                    Button(role: .destructive) {
-                        Haptics.tap()
-                        UndoBin.shared.stash(item.snapshot)
-                        item.softDelete()
-                        dismiss()
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .destructiveGlass()
-                } else if (!item.isDone && item.canMarkDone) || done {
-                    Button(action: confirmWent) {
-                        // For something that's already over, the plain label
-                        // reads odd — soften it to an after-the-fact note.
-                        Label(
-                            done ? "Done" : (item.isMissed ? Voice.didGoAfterAll : Voice.didGoBang),
-                            systemImage: "checkmark"
-                        )
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppBackground.onProminent)
-                        .frame(maxWidth: .infinity)
-                        .contentTransition(.opacity)
-                    }
-                    .prominentGlass()
-                    .allowsHitTesting(!done)
-                }
-            }
-
             if (item.startsOn != nil || item.upcomingPlan != nil) && (!item.isDone || done) {
                 Button {
                     Haptics.tap()
@@ -580,6 +559,83 @@ struct ItemDetailView: View {
         .controlSize(.large)
         .padding(.top, 4)
         .task(id: item.showsHours ? item.placeId : nil) { await loadHours() }
+    }
+
+    /// The pair the drawer is for — open it, or say you went — pinned
+    /// under the sheet so the medium detent always shows it.
+    private var hasPrimaryActions: Bool {
+        item.url.flatMap(URL.init(string:)) != nil || item.isDone || item.canMarkDone || done
+    }
+
+    private var primaryActions: some View {
+        HStack(spacing: 10) {
+            if let url = item.url.flatMap(URL.init(string:)) {
+                Link(destination: url) {
+                    Label("Open link", systemImage: "safari")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.onProminent)
+                        .frame(maxWidth: .infinity)
+                }
+                .prominentGlass()
+            }
+
+            if item.isDone && !done {
+                Button {
+                    Haptics.tap()
+                    if let full = CategoryCap.overflow(item, context: context) {
+                        paywall = .category(full)
+                    } else {
+                        item.putBack()
+                    }
+                } label: {
+                    Label("Put back", systemImage: "arrow.uturn.backward")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.onProminent)
+                        .frame(maxWidth: .infinity)
+                }
+                .prominentGlass()
+
+                Button(role: .destructive) {
+                    Haptics.tap()
+                    UndoBin.shared.stash(item.snapshot)
+                    item.softDelete()
+                    dismiss()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                }
+                .destructiveGlass()
+            } else if (!item.isDone && item.canMarkDone) || done {
+                Button(action: confirmWent) {
+                    // For something that's already over, the plain label
+                    // reads odd — soften it to an after-the-fact note.
+                    Label(
+                        done ? "Done" : (item.isMissed ? Voice.didGoAfterAll : Voice.didGoBang),
+                        systemImage: "checkmark"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppBackground.onProminent)
+                    .frame(maxWidth: .infinity)
+                    .contentTransition(.opacity)
+                }
+                .prominentGlass()
+                .allowsHitTesting(!done)
+            }
+        }
+        .controlSize(.large)
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 8)
+        .background {
+            LinearGradient(
+                stops: [.init(color: AppBackground.sheet.opacity(0), location: 0),
+                        .init(color: AppBackground.sheet, location: 0.35)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
     }
 
     private func loadHours() async {

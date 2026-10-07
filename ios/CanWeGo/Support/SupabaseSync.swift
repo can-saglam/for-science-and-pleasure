@@ -395,6 +395,7 @@ enum SupabaseSync {
         var plan_on: String?
         var plan_time: String?
         var planned_by: UUID?
+        var went_on: String?
         var notes: String?
         var color: String?
         var source: String?
@@ -440,6 +441,7 @@ enum SupabaseSync {
             try c.encode(plan_time, forKey: .plan_time)
             // The server stamps who planned it from the login (0042).
             try c.encode(planned_by, forKey: .planned_by)
+            try c.encode(went_on, forKey: .went_on)
             try c.encode(notes, forKey: .notes)
             try c.encode(color, forKey: .color)
             // `source` is NOT NULL on the server; rows from before the
@@ -674,6 +676,7 @@ enum SupabaseSync {
             plan_on: item.planOn,
             plan_time: item.planOn == nil ? nil : item.planTime,
             planned_by: item.plannedBy,
+            went_on: item.wentOn,
             notes: item.notes,
             color: item.colorHex,
             source: item.source,
@@ -825,6 +828,7 @@ enum SupabaseSync {
         item.planOn = row.plan_on
         item.planTime = row.plan_time.map { String($0.prefix(5)) }
         item.plannedBy = row.planned_by
+        item.wentOn = row.went_on
         item.notes = row.notes
         item.colorHex = row.color
         item.source = row.source

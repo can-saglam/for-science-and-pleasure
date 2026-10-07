@@ -62,7 +62,8 @@ struct ShareView: View {
                         draft: draft,
                         peek: peek,
                         input: payloadImage != nil ? .image : (extractedURL != nil || payloadText == nil ? .link : .text),
-                        showsMap: false
+                        showsMap: false,
+                        editFirst: { withAnimation(.snappy) { editing = true } }
                     ) {
                         if let draft {
                             VStack(alignment: .leading, spacing: 16) {
@@ -184,6 +185,7 @@ struct ShareView: View {
 
                 Button {
                     draft.status = Item.Status.done
+                    draft.wentOn = DayString.today()
                     save(draft)
                 } label: {
                     Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")

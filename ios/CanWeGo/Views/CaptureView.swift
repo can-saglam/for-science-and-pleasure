@@ -89,7 +89,10 @@ struct CaptureView: View {
         NavigationStack {
             ScrollView {
                 if showsDrawer {
-                    CaptureDrawer(draft: draft, look: firstLook, peek: peek, input: reading ?? .text) {
+                    CaptureDrawer(
+                        draft: draft, look: firstLook, peek: peek, input: reading ?? .text,
+                        editFirst: { withAnimation(.snappy) { editing = true } }
+                    ) {
                         if let draft {
                             VStack(alignment: .leading, spacing: 18) {
                                 previewStage(draft)
@@ -396,6 +399,7 @@ struct CaptureView: View {
 
                 Button {
                     draft.status = Item.Status.done
+                    draft.wentOn = DayString.today()
                     save(draft)
                 } label: {
                     Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")

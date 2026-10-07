@@ -68,6 +68,9 @@ final class Item {
     var planTime: String?
     /// Who set the plan — stamped server-side from the login.
     var plannedBy: UUID?
+    /// The day it was marked done (`yyyy-MM-dd`, home calendar);
+    /// nil before it was, and for saves done before the column (0045).
+    var wentOn: String?
     /// The event's separate performances as its page listed them, as the
     /// JSON array the server keeps (`items.showings`). Read through
     /// `showings`; written only from a parse.

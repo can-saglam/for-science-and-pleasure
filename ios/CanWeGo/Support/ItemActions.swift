@@ -25,6 +25,7 @@ extension Item {
 
     func markDone() {
         status = Item.Status.done
+        wentOn = DayString.today()
         clearReminder()
         updatedAt = .now
         stampAuthor()
@@ -35,6 +36,7 @@ extension Item {
     /// history now, not a question for tomorrow morning.
     func putBack() {
         status = Item.Status.saved
+        wentOn = nil
         if let planOn, planOn < DayString.today() { clearPlan() }
         updatedAt = .now
         stampAuthor()

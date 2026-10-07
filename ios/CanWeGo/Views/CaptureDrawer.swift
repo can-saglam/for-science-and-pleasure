@@ -30,7 +30,11 @@ struct CaptureDrawer<Actions: View>: View {
     let input: CaptureInput
     /// Off in the share extension, where a live map is too much memory.
     var showsMap = true
+    /// Opens the form, for a gap the parser left ("No date on the page").
+    var editFirst: (() -> Void)? = nil
     @ViewBuilder var actions: () -> Actions
+
+    @State private var choosingPhoto = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -98,6 +102,21 @@ struct CaptureDrawer<Actions: View>: View {
         .onChange(of: draft != nil) { _, ready in
             if ready { AccessibilityNotification.Announcement("Ready").post() }
         }
+        .sheet(isPresented: $choosingPhoto) {
+            if let draft, let page = pageURL(draft) {
+                PagePhotoPicker(page: page, current: draft.imageUrl) { url, colour in
+                    draft.imageUrl = url.absoluteString
+                    if let colour { draft.colorHex = colour }
+                }
+            }
+        }
+    }
+
+    private func pageURL(_ draft: Item) -> URL? {
+        guard let url = draft.url.flatMap(URL.init(string:)),
+              url.scheme?.hasPrefix("http") == true
+        else { return nil }
+        return url
     }
 
     // MARK: - Header
@@ -193,7 +212,9 @@ struct CaptureDrawer<Actions: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             if let draft {
                 let showings = PlanSheet.showings(of: draft)
-                if showings.isEmpty {
+                if draft.isEvent, draft.startsOn == nil, draft.endsOn == nil, showings.isEmpty {
+                    gap("calendar", "No date on the page", fix: "Add one", action: editFirst)
+                } else if showings.isEmpty {
                     line("calendar", draft.dateLine)
                 } else {
                     Label {
@@ -208,6 +229,9 @@ struct CaptureDrawer<Actions: View>: View {
                 line("map", draft.areaLine)
                 line("banknote", draft.price)
                 line("camera", draft.photoCredit)
+                if photoURL == nil, pageURL(draft) != nil {
+                    gap("photo", "No photo found", fix: "Pick one") { choosingPhoto = true }
+                }
             } else {
                 line("calendar", lookDate, placeholder: 150)
                 line("building.2", look?.venue, placeholder: 190)
@@ -248,6 +272,32 @@ struct CaptureDrawer<Actions: View>: View {
             .accessibilityHidden(true)
             .transition(.opacity)
         }
+    }
+
+    /// Something the parser couldn't find, said plainly, with the way to
+    /// fill it in beside it.
+    private func gap(_ symbol: String, _ text: String, fix: String, action: (() -> Void)?) -> some View {
+        Label {
+            HStack(spacing: 6) {
+                Text(text).foregroundStyle(AppBackground.secondaryInk)
+                if let action {
+                    Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
+                    Button(fix) {
+                        Haptics.tap()
+                        action()
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(AppBackground.ink)
+                    .padding(.vertical, 12)
+                    .contentShape(.rect)
+                    .padding(.vertical, -12)
+                }
+            }
+        } icon: {
+            icon(symbol)
+        }
+        .font(.subheadline)
+        .transition(settle)
     }
 
     private func icon(_ symbol: String) -> some View {

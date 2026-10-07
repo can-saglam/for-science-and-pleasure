@@ -82,6 +82,7 @@ struct ItemCard: View {
     /// The badge slot: an event's time label, or "Nearby" for a place.
     private var slotLabel: String? {
         if meta != nil { return nil }
+        if compact, item.isDone, let went = item.wentLabel { return went }
         if isNearby { return "Nearby" }
         return item.timeLabel
     }
@@ -92,7 +93,7 @@ struct ItemCard: View {
     private var hints: [String] {
         guard !item.isDone, !compact, meta == nil else { return [] }
         if item.isEvent && item.startsOn == nil && item.endsOn == nil {
-            return ["needs a date"]
+            return ["no date found"]
         }
         if let away = awayFromHome { return [away] }
         return []

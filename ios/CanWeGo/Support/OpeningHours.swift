@@ -43,6 +43,12 @@ extension Item {
         return days >= Self.hoursMinRunDays
     }
 
+    /// Open right now, by hours already loaded this launch.
+    @MainActor var isOpenNow: Bool {
+        guard let hours = HoursClient.cached(self) ?? nil else { return false }
+        return hours.isOpen()
+    }
+
     /// Whether the details should ask for hours today: their own, and for
     /// an event, only while it's on. Mirrors the server's `hoursShown`.
     var showsHours: Bool {

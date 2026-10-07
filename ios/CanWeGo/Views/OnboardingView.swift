@@ -287,6 +287,7 @@ struct OnboardingView: View {
             .frame(width: geo.size.width, height: mapHeight)
             .position(x: geo.size.width / 2, y: centreY)
         }
+        .task { await frameCountry() }
         .opacity(0.55)
         .mask(
             LinearGradient(stops: [
@@ -1564,6 +1565,22 @@ struct OnboardingView: View {
         // Start the city search now, not on "Set as home" — a cold miss
         // is a model call and the name page is the wait.
         fetchStarters(for: home)
+    }
+
+    /// Before a city is picked, the map opens on the phone's own country
+    /// rather than the whole world, so the zoom into home is a short one.
+    /// Any miss (offline, no region set) leaves the world view.
+    private func frameCountry() async {
+        guard picked == nil, let code = Locale.current.region?.identifier,
+              let country = Locale.current.localizedString(forRegionCode: code)
+        else { return }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = country
+        request.resultTypes = .address
+        guard let region = try? await MKLocalSearch(request: request).start().boundingRegion,
+              picked == nil
+        else { return }
+        camera = .region(region)
     }
 
     private func frame(_ home: HomeStore.Home) {
