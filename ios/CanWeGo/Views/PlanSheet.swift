@@ -116,7 +116,9 @@ struct ShowingsLine: View {
     let dateLine: String?
     var choose: ((Showing) -> Void)? = nil
 
-    private static let chipLimit = 6
+    /// Past this many, a list of showings is too long to scan: the details
+    /// give a count and the plan sheet opens on its grid.
+    static let chipLimit = 6
 
     var body: some View {
         if showings.count > Self.chipLimit {
@@ -176,9 +178,11 @@ struct ShowingsLine: View {
 /// Picks the day, and maybe the time, the group means to go: the next two
 /// weeks as a grid (days outside the event's run can't be picked; days the
 /// venue is usually closed are marked but can), a calendar for later, and
-/// an optional time. Says when it'll be on the Lock Screen, and warns when
-/// the time falls outside the venue's hours. Everything is on the home
-/// clock, like reminders.
+/// an optional time. A save with a few showings opens on those instead,
+/// the grid one tap away; in the grid, showing days are marked and picking
+/// one offers its times. Says when it'll be on the Lock Screen, and warns
+/// when the time falls outside the venue's hours. Everything is on the
+/// home clock, like reminders.
 struct PlanSheet: View {
     @Bindable var item: Item
     /// Called after a save or a removal, before the sheet goes.
@@ -195,6 +199,12 @@ struct PlanSheet: View {
     @State private var suggested: String?
     /// Half height for the grid; the calendar for a later date needs the rest.
     @State private var detent: PresentationDetent
+    /// The showings list in place of the grid.
+    @State private var listing: Bool
+    /// They want a time of their own on a showing day, not one of its times.
+    @State private var ownTime: Bool
+
+    private let showings: [Showing]
 
     private static let gridDays = 14
     private static let defaultTime = "14:00"
@@ -205,8 +215,16 @@ struct PlanSheet: View {
         self.onFinish = onFinish
         let today = DayString.today()
         let planned = item.upcomingPlan
+        let list = Self.showings(of: item)
+        showings = list
         // Without a plan, the first showing still ahead is put forward.
-        let showing = chosen ?? (planned == nil ? Self.showings(of: item).first : nil)
+        let showing = chosen ?? (planned == nil ? list.first : nil)
+        let plannedShowings = list.filter { $0.date == planned }
+        let plannedIsShowing = plannedShowings.contains { $0.time == item.planTime }
+        let listing = !list.isEmpty && list.count <= ShowingsLine.chipLimit
+            && (chosen != nil || planned == nil || plannedIsShowing)
+        _listing = State(initialValue: listing)
+        _ownTime = State(initialValue: chosen == nil && !plannedShowings.isEmpty && !plannedIsShowing)
         let first = showing?.date ?? item.plannableDays?.lowerBound ?? today
         let grid = DayString.addingDays(Self.gridDays - 1, to: today) ?? today
         let day = showing?.date ?? planned ?? (first <= grid ? first : nil)
@@ -218,7 +236,7 @@ struct PlanSheet: View {
         _suggested = State(initialValue: own == nil ? clock : nil)
         let later = (day ?? first) > grid
         _later = State(initialValue: later)
-        _detent = State(initialValue: later ? .large : .medium)
+        _detent = State(initialValue: later && !listing ? .large : .medium)
     }
 
     /// The listed showings that can still be planned: in the run, and not
@@ -290,8 +308,12 @@ struct PlanSheet: View {
     }
 
     private var showsClosedLegend: Bool {
-        gridDays.contains { pickable($0) && ranges($0)?.isEmpty == true }
+        gridDays.contains { pickable($0) && !showingDays.contains($0) && ranges($0)?.isEmpty == true }
     }
+
+    private var showingDays: Set<String> { Set(showings.map(\.date)) }
+
+    private var showsShowingLegend: Bool { gridDays.contains(where: showingDays.contains) }
 
     private var clock: String { DayString.time(time) }
 
@@ -320,53 +342,24 @@ struct PlanSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if !showings.isEmpty {
-                        showingsRow
-                    }
-                    if later {
-                        laterPicker
+                    if listing {
+                        showingsList
                     } else {
-                        grid
-                        if offersLater || showsClosedLegend {
-                            HStack {
-                                if offersLater {
-                                    Button {
-                                        Haptics.tap()
-                                        withAnimation(.snappy) { later = true }
-                                    } label: {
-                                        Label("A later date", systemImage: "calendar")
-                                            .font(.subheadline)
-                                    }
-                                    .tint(AppBackground.ink)
-                                }
-                                Spacer()
-                                if showsClosedLegend {
-                                    HStack(spacing: 5) {
-                                        Circle().fill(AppBackground.warning).frame(width: 4, height: 4)
-                                        Text("Usually closed")
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityHidden(true)
-                                }
+                        if later {
+                            laterPicker
+                        } else {
+                            grid
+                            if offersLater || canList || showsClosedLegend || showsShowingLegend {
+                                gridFooter
                             }
                         }
-                    }
 
-                    if let day {
-                        dayLine(day)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Add a time", isOn: $timed.animation(.snappy))
-                        if timed {
-                            DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
-                                .environment(\.timeZone, DayString.timeZone)
+                        if let day {
+                            dayLine(day)
                         }
+
+                        timeSection
                     }
-                    .tint(AppBackground.accent)
-                    .padding(12)
-                    .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
 
                     notes
 
@@ -409,7 +402,10 @@ struct PlanSheet: View {
         .onChange(of: later) { _, later in
             if later { detent = .large }
         }
-        .onChange(of: day) { _, _ in resuggest() }
+        .onChange(of: day) { _, day in
+            resuggest()
+            settle(on: day)
+        }
         .onChange(of: hours) { _, _ in resuggest() }
         .onChange(of: timed) { _, on in
             if on { resuggest() }
@@ -419,26 +415,96 @@ struct PlanSheet: View {
 
     // MARK: - Showings
 
-    private var showings: [Showing] { Self.showings(of: item) }
+    /// Few enough to list instead of the grid.
+    private var canList: Bool { !showings.isEmpty && showings.count <= ShowingsLine.chipLimit }
 
-    /// One tap picks a showing's day and time; any day can still be picked
-    /// below.
-    private var showingsRow: some View {
+    private func showings(on day: String) -> [Showing] { showings.filter { $0.date == day } }
+
+    private func header(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One tap picks a showing's day and time; another day is a tap away.
+    private var showingsList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Showings")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 4)
-                .accessibilityAddTraits(.isHeader)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(showings, id: \.self) { showingChip($0) }
-                }
-                // Every chip as tall as the tallest, noted or not.
-                .fixedSize(horizontal: false, vertical: true)
+            header("Showings")
+            VStack(spacing: 6) {
+                ForEach(showings, id: \.self) { showingRow($0) }
             }
-            .scrollClipDisabled()
+            Button {
+                Haptics.tap()
+                withAnimation(.snappy) {
+                    listing = false
+                    later = day.map { !gridDays.contains($0) } ?? false
+                }
+                if later { detent = .large }
+            } label: {
+                Label("Another day", systemImage: "calendar")
+                    .font(.subheadline)
+            }
+            .tint(AppBackground.ink)
+            .padding(.top, 6)
         }
+    }
+
+    /// "Sat 10 Oct   10:30   Paintworks, Bristol".
+    private func showingRow(_ showing: Showing) -> some View {
+        let chosen = isChosen(showing)
+        return Button {
+            Haptics.selection()
+            choose(showing)
+        } label: {
+            HStack(spacing: 12) {
+                Text(DayString.text(showing.date, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? showing.date)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
+                    .frame(minWidth: 88, alignment: .leading)
+                Text(showing.time.map(OpeningHours.time) ?? "Any time")
+                    .font(.body.weight(chosen ? .semibold : .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(chosen ? AppBackground.base : AppBackground.ink)
+                Spacer(minLength: 8)
+                if let note = showing.note {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
+                        .lineLimit(1)
+                }
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(chosen ? AppBackground.ink : AppBackground.wash(0.06))
+            }
+            .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spoken(showing))
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    private func spoken(_ showing: Showing) -> String {
+        [
+            DayString.text(showing.date, .dateTime.weekday(.wide).day().month(.wide)) ?? showing.date,
+            showing.time.map(OpeningHours.time),
+            showing.note,
+        ].compactMap(\.self).joined(separator: ", ")
+    }
+
+    /// A day picked in the grid that has showings starts on its first one,
+    /// so what's highlighted is what gets saved.
+    private func settle(on day: String?) {
+        ownTime = false
+        guard let day, !showings.contains(where: isChosen),
+              let first = showings(on: day).first
+        else { return }
+        choose(first)
     }
 
     private func isChosen(_ showing: Showing) -> Bool {
@@ -448,7 +514,6 @@ struct PlanSheet: View {
     }
 
     private func choose(_ showing: Showing) {
-        Haptics.selection()
         withAnimation(.snappy) {
             day = showing.date
             if let clock = showing.time, let at = DayString.instant(day: today, time: clock) {
@@ -458,21 +523,71 @@ struct PlanSheet: View {
             } else {
                 timed = false
             }
-            if !gridDays.contains(showing.date) { later = true }
+            if !listing, !gridDays.contains(showing.date) { later = true }
         }
     }
 
-    /// "Tue 13 Oct", "18:15", and the note the page printed with it.
-    private func showingChip(_ showing: Showing) -> some View {
+    /// The day's own times where the time row would go, and a way out to
+    /// one of their own.
+    @ViewBuilder
+    private var timeSection: some View {
+        if let day, !ownTime, case let times = showings(on: day), !times.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                header(times.count == 1 ? "Showing" : "Showings that day")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(times, id: \.self) { timeChip($0) }
+                        otherTimeChip
+                    }
+                    // Every chip as tall as the tallest, noted or not.
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .scrollClipDisabled()
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Add a time", isOn: $timed.animation(.snappy))
+                if timed {
+                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                        .environment(\.timeZone, DayString.timeZone)
+                }
+            }
+            .tint(AppBackground.accent)
+            .padding(12)
+            .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var otherTimeChip: some View {
+        Button {
+            Haptics.tap()
+            withAnimation(.snappy) {
+                ownTime = true
+                timed = true
+            }
+        } label: {
+            Text("Other time")
+                .font(.subheadline)
+                .foregroundStyle(AppBackground.ink)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44, maxHeight: .infinity)
+                .background {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(AppBackground.ink.opacity(0.2), lineWidth: 1)
+                }
+                .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "18:15" and the note the page printed with it.
+    private func timeChip(_ showing: Showing) -> some View {
         let chosen = isChosen(showing)
-        let date = DayString.text(showing.date, .dateTime.weekday(.abbreviated).day().month(.abbreviated)) ?? showing.date
         return Button {
+            Haptics.selection()
             choose(showing)
         } label: {
             VStack(alignment: .leading, spacing: 1) {
-                Text(date)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(chosen ? AppBackground.base.opacity(0.8) : .secondary)
                 Text(showing.time.map(OpeningHours.time) ?? "Any time")
                     .font(.body.weight(chosen ? .semibold : .regular))
                     .monospacedDigit()
@@ -486,7 +601,7 @@ struct PlanSheet: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .frame(minWidth: 84, minHeight: 56, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minWidth: 72, minHeight: 44, maxHeight: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(chosen ? AppBackground.ink : AppBackground.wash(0.06))
@@ -494,14 +609,65 @@ struct PlanSheet: View {
             .contentShape(.rect(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(
-            [
-                DayString.text(showing.date, .dateTime.weekday(.wide).day().month(.wide)) ?? showing.date,
-                showing.time.map(OpeningHours.time),
-                showing.note,
-            ].compactMap(\.self).joined(separator: ", ")
-        )
+        .accessibilityLabel(spoken(showing))
         .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    /// The links out of the grid, and what its dots mean.
+    private var gridFooter: some View {
+        let links = HStack(spacing: 18) {
+            if canList {
+                Button {
+                    Haptics.tap()
+                    withAnimation(.snappy) {
+                        listing = true
+                        if !showings.contains(where: isChosen),
+                           let back = showings.first(where: { $0.date == day }) ?? showings.first {
+                            choose(back)
+                        }
+                    }
+                } label: {
+                    Label("Showings", systemImage: "list.bullet")
+                }
+            }
+            if offersLater {
+                Button {
+                    Haptics.tap()
+                    withAnimation(.snappy) { later = true }
+                } label: {
+                    Label("A later date", systemImage: "calendar")
+                }
+            }
+        }
+        .font(.subheadline)
+        .tint(AppBackground.ink)
+
+        let legend = HStack(spacing: 12) {
+            if showsShowingLegend { legendDot(AppBackground.ink, "Showing") }
+            if showsClosedLegend { legendDot(AppBackground.warning, "Usually closed") }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+
+        return ViewThatFits(in: .horizontal) {
+            HStack {
+                links
+                Spacer(minLength: 12)
+                legend
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                links
+                legend
+            }
+        }
+    }
+
+    private func legendDot(_ color: Color, _ text: String) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 4, height: 4)
+            Text(text)
+        }
     }
 
     // MARK: - Days
@@ -517,7 +683,12 @@ struct PlanSheet: View {
     private func dayCell(_ d: String) -> some View {
         let open = pickable(d)
         let selected = d == day
-        let closed = ranges(d)?.isEmpty == true
+        let shows = open && showingDays.contains(d)
+        // A showing that day says it's on, whatever the usual hours.
+        let closed = !shows && ranges(d)?.isEmpty == true
+        let dot: Color = shows
+            ? (selected ? AppBackground.base : AppBackground.ink)
+            : closed && open ? AppBackground.warning : .clear
         return Button {
             Haptics.selection()
             withAnimation(.snappy) { day = d }
@@ -532,7 +703,7 @@ struct PlanSheet: View {
                     .strikethrough(!open)
                     .foregroundStyle(selected ? AppBackground.base : open ? AppBackground.ink : Color.secondary.opacity(0.5))
                 Circle()
-                    .fill(closed && open ? AppBackground.warning : .clear)
+                    .fill(dot)
                     .frame(width: 4, height: 4)
             }
             .frame(maxWidth: .infinity, minHeight: 56)
@@ -553,7 +724,7 @@ struct PlanSheet: View {
         .accessibilityLabel(
             (d == today ? "Today, " : "") + (DayString.text(d, .dateTime.weekday(.wide).day().month(.wide)) ?? d)
         )
-        .accessibilityValue(closed && open ? "Usually closed" : open ? "" : "Not on")
+        .accessibilityValue(shows ? "Showing" : closed && open ? "Usually closed" : open ? "" : "Not on")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
