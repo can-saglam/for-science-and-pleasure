@@ -1,46 +1,24 @@
 import SwiftData
 import SwiftUI
 
-/// One row, modern-settings style: a small icon squircle, then the title.
-/// Monochrome — every badge wears the current theme's accent, with the
-/// glyph in the theme base for contrast — except destructive rows, which
-/// say so with a red badge while the title stays in the ink.
+/// One Settings row: just the words. Destructive rows say so in the
+/// theme's legible red rather than the system's, which melts into some
+/// pages.
 struct SettingsRow: View {
     let title: String
-    let icon: String
-    /// A second, quieter line under the title. The icon stays centred on
-    /// the pair, so a two-line row lines up with its one-line neighbours.
+    /// A second, quieter line under the title.
     var subtitle: String? = nil
     var destructive = false
 
-    private var badge: Color { destructive ? AppBackground.destructive : AppBackground.badge }
-    private var glyph: Color {
-        guard destructive else { return AppBackground.badgeGlyph }
-        return AppBackground.theme.isLight ? .white : AppBackground.base
-    }
-
     var body: some View {
-        Label {
-            VStack(alignment: .leading, spacing: 2) {
-                // Pinned only for destructive rows, which the button role
-                // would otherwise paint red.
-                if destructive {
-                    Text(title).foregroundStyle(AppBackground.ink)
-                } else {
-                    Text(title)
-                }
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .foregroundStyle(destructive ? AppBackground.destructive : AppBackground.ink)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.secondaryInk)
             }
-        } icon: {
-            Image(systemName: icon)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(glyph)
-                .frame(width: 28, height: 28)
-                .background(badge.gradient, in: .rect(cornerRadius: 7, style: .continuous))
         }
     }
 }
@@ -76,6 +54,20 @@ final class GroupUI {
             Haptics.success()
         } catch {
             note = (error as? MembershipError)?.message ?? SyncProblem(error).message
+        }
+    }
+
+    /// The one invite action, from the seat on the card or the row on the
+    /// group page. With room: a live code is reused (codes are multi-use
+    /// and last a week) or a fresh one minted; the code itself lives in the
+    /// sheet. Full for the free tier: the way to Plus.
+    func startInvite(for card: GroupCard) {
+        if card.needsPlusToGrow {
+            showPlus = true
+        } else if let pending = card.invites.first {
+            invite = .init(code: pending.formatted, expiresAt: pending.expiresAt, message: nil)
+        } else {
+            Task { await makeInvite() }
         }
     }
 
@@ -119,10 +111,10 @@ final class GroupUI {
     }
 }
 
-/// "My group" at the top of Settings: who shares this library, room for
-/// more, and the way out. The group has no name of its own — it's called
-/// after its members, everywhere it's mentioned — so the rows *are* the
-/// group. Every action goes through `GroupStore`, which asks the
+/// The group page in Settings: who shares this library, room for more,
+/// and the way out. The group has no name of its own — it's called after
+/// its members, everywhere it's mentioned — so the rows *are* the group.
+/// Every action goes through `GroupStore`, which asks the
 /// `group-membership` function and shows whatever it answers.
 struct GroupSection: View {
     @Bindable var ui: GroupUI
@@ -133,26 +125,27 @@ struct GroupSection: View {
 
     var body: some View {
         if SupabaseAuth.shared.signedIn {
-            Section {
+            Group {
                 if let card = group.card {
-                    rows(card)
+                    sections(card)
                 } else if group.loaded {
-                    Button {
-                        Task { await group.refresh() }
-                    } label: {
-                        SettingsRow(title: "Couldn\u{2019}t load your group. Tap to retry", icon: "arrow.clockwise")
+                    Section {
+                        Button {
+                            Task { await group.refresh() }
+                        } label: {
+                            SettingsRow(title: "Couldn\u{2019}t load your group. Tap to retry")
+                        }
                     }
+                    .listRowBackground(SettingsView.rowBackground)
                 } else {
-                    LabeledContent { ProgressView() } label: {
-                        SettingsRow(title: "Loading…", icon: "person.2.fill")
+                    Section {
+                        LabeledContent { ProgressView() } label: {
+                            SettingsRow(title: "Loading…")
+                        }
                     }
+                    .listRowBackground(SettingsView.rowBackground)
                 }
-            } header: {
-                Text("My group")
-            } footer: {
-                footer
             }
-            .listRowBackground(SettingsView.rowBackground)
             .disabled(ui.leaving)
         }
     }
@@ -160,115 +153,127 @@ struct GroupSection: View {
     // MARK: - Rows
 
     @ViewBuilder
-    private func rows(_ card: GroupCard) -> some View {
-        ForEach(card.members) { member in
-            memberRow(member)
+    private func sections(_ card: GroupCard) -> some View {
+        Section {
+            ForEach(card.members) { member in
+                memberRow(member)
+            }
+            cityRow(card)
         }
+        .listRowBackground(SettingsView.rowBackground)
 
+        Section {
+            if !card.isFull || card.needsPlusToGrow {
+                inviteRow(card)
+            }
+            Button {
+                Haptics.tap()
+                ui.showJoin = true
+            } label: {
+                SettingsRow(title: "Join another group")
+            }
+            .accessibilityHint("Enter an invite code")
+        } footer: {
+            footer
+        }
+        .listRowBackground(SettingsView.rowBackground)
+
+        if card.members.count > 1 {
+            Section {
+                leaveRow(card)
+            }
+            .listRowBackground(SettingsView.rowBackground)
+        }
+    }
+
+    private func cityRow(_ card: GroupCard) -> some View {
         Button {
             Haptics.tap()
             ui.editingHome = true
         } label: {
             HStack {
                 if let home = card.homeLocality, !home.isEmpty {
-                    SettingsRow(title: "City", icon: "building.2.fill")
+                    SettingsRow(title: "City")
                     Spacer()
                     Text(home)
                         .foregroundStyle(AppBackground.secondaryInk)
                         .lineLimit(1)
                 } else {
-                    SettingsRow(title: "Set a home city", icon: "building.2.fill")
+                    SettingsRow(title: "Set a home city")
                     Spacer()
                 }
                 chevron
             }
         }
         .accessibilityHint("Changes the city your cards and map use")
+    }
 
-        // One call to action, always present until the group is at four.
-        // With room: a live code is reused (codes are multi-use and last a
-        // week) or a fresh one minted; the code itself lives in the sheet.
-        // Full for the free tier: the same row is the way to Plus.
-        if !card.isFull || card.needsPlusToGrow {
-            let pending = card.invites.first
-            Button {
-                Haptics.tap()
-                if card.needsPlusToGrow {
-                    ui.showPlus = true
-                } else if let pending {
-                    ui.invite = .init(code: pending.formatted, expiresAt: pending.expiresAt, message: nil)
-                } else {
-                    Task { await ui.makeInvite() }
-                }
-            } label: {
-                HStack {
-                    SettingsRow(title: "Invite people", icon: "person.badge.plus")
-                        .fontWeight(.semibold)
-                    Spacer()
-                    if ui.inviting {
-                        ProgressView()
-                    } else if card.needsPlusToGrow {
-                        Text("Plus")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppBackground.secondaryInk)
-                    }
-                }
-            }
-            .disabled(ui.inviting)
-            .accessibilityHint(card.needsPlusToGrow ? "Opens Plus, which adds two more seats"
-                : pending == nil ? "Creates an invite code to share" : "Shows your invite code")
-            .swipeActions(edge: .trailing) {
-                if let pending, !card.needsPlusToGrow {
-                    Button("Cancel invite", role: .destructive) {
-                        Task { await ui.run { try await group.revoke(pending.code) } }
-                    }
-                }
-            }
-            .contextMenu {
-                if let pending, !card.needsPlusToGrow {
-                    Button("Cancel invite", systemImage: "xmark.circle", role: .destructive) {
-                        Task { await ui.run { try await group.revoke(pending.code) } }
-                    }
-                }
-            }
-        }
-
-        Button {
+    /// Present until the group is at four.
+    private func inviteRow(_ card: GroupCard) -> some View {
+        let pending = card.invites.first
+        return Button {
             Haptics.tap()
-            ui.showJoin = true
+            ui.startInvite(for: card)
         } label: {
-            SettingsRow(title: "Join a group", icon: "number")
+            HStack {
+                SettingsRow(title: "Invite people")
+                    .fontWeight(.semibold)
+                Spacer()
+                if ui.inviting {
+                    ProgressView()
+                } else if card.needsPlusToGrow {
+                    Text("Plus")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppBackground.secondaryInk)
+                }
+            }
         }
-        .accessibilityHint("Enter an invite code")
+        .disabled(ui.inviting)
+        .accessibilityHint(card.needsPlusToGrow ? "Opens Plus, which adds two more seats"
+            : pending == nil ? "Creates an invite code to share" : "Shows your invite code")
+        .swipeActions(edge: .trailing) {
+            if let pending, !card.needsPlusToGrow {
+                Button("Cancel invite", role: .destructive) {
+                    Task { await ui.run { try await group.revoke(pending.code) } }
+                }
+            }
+        }
+        .contextMenu {
+            if let pending, !card.needsPlusToGrow {
+                Button("Cancel invite", systemImage: "xmark.circle", role: .destructive) {
+                    Task { await ui.run { try await group.revoke(pending.code) } }
+                }
+            }
+        }
+    }
 
-        if card.members.count > 1 {
-            Button(role: .destructive) {
-                Haptics.tap()
-                ui.confirmLeave = true
-            } label: {
-                HStack {
-                    SettingsRow(title: "Leave group", icon: "person.2.slash.fill", destructive: true)
-                    Spacer()
-                    if ui.leaving { ProgressView() }
-                }
+    private func leaveRow(_ card: GroupCard) -> some View {
+        Button(role: .destructive) {
+            Haptics.tap()
+            ui.confirmLeave = true
+        } label: {
+            HStack {
+                SettingsRow(title: "Leave group", destructive: true)
+                Spacer()
+                if ui.leaving { ProgressView() }
             }
-            // On the button, not the list — iOS 26 parks a list-level
-            // confirmation dialog at the top of the section.
-            .confirmationDialog(
-                "Keep a copy of the group\u{2019}s saves?",
-                isPresented: $ui.confirmLeave,
-                titleVisibility: .visible
-            ) {
-                Button("Leave and keep a copy", role: .destructive) {
-                    Task { await ui.leave(keepCopy: true, context: context) }
-                }
-                Button("Leave with an empty library", role: .destructive) {
-                    Task { await ui.leave(keepCopy: false, context: context) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(leaveMessage(for: card))
+        }
+        // On the button, not the list — iOS 26 parks a list-level
+        // confirmation dialog at the top of the section.
+        .confirmationDialog(
+            "Keep a copy of the group\u{2019}s saves?",
+            isPresented: $ui.confirmLeave,
+            titleVisibility: .visible
+        ) {
+            Button("Leave and keep a copy", role: .destructive) {
+                Task { await ui.leave(keepCopy: true, context: context) }
             }
+            Button("Leave with an empty library", role: .destructive) {
+                Task { await ui.leave(keepCopy: false, context: context) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(leaveMessage(for: card))
         }
     }
 
@@ -361,6 +366,115 @@ struct GroupSection: View {
         }
         .font(.footnote)
         .foregroundStyle(AppBackground.secondaryInk)
+    }
+}
+
+/// The top of Settings: everyone who shares this library, a seat to
+/// invite into while there's room, and the way to the rest of the group.
+struct GroupHeroCard: View {
+    let card: GroupCard
+    @Bindable var ui: GroupUI
+    let manage: () -> Void
+
+    private var me: UUID? { SupabaseAuth.shared.userId }
+
+    private var summary: String {
+        var parts: [String] = []
+        if let home = card.homeLocality, !home.isEmpty { parts.append(home) }
+        parts.append(card.members.count == 1 ? "Just you" : "\(card.members.count) people")
+        if card.isPlus { parts.append("Plus") }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(card.members) { member in
+                    seat(member)
+                }
+                if !card.isFull || card.needsPlusToGrow {
+                    inviteSeat
+                }
+            }
+            VStack(spacing: 4) {
+                Text(card.name)
+                    .font(.displaySmallBold(30, relativeTo: .title2))
+                    .foregroundStyle(AppBackground.ink)
+                    .multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(AppBackground.secondaryInk)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                Haptics.tap()
+                manage()
+            } label: {
+                Text("Manage group")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+    }
+
+    private func seat(_ member: GroupCard.Member) -> some View {
+        let isMe = member.userId == me
+        return VStack(spacing: 6) {
+            Text(member.initial)
+                .font(.title3.weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                // Per-swatch ink, the same as Join: white on the deep
+                // swatches, black on the light ones.
+                .foregroundStyle(AvatarColour.initial(member.avatarColour))
+                .frame(width: 56, height: 56)
+                .background(AvatarColour.color(member.avatarColour), in: .circle)
+            Text(isMe ? "You" : member.name)
+                .font(.footnote)
+                .foregroundStyle(AppBackground.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(width: 66)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(member.name)\(isMe ? ", you" : "")\(member.isPlus ? ", has Plus" : "")")
+    }
+
+    private var inviteSeat: some View {
+        Button {
+            Haptics.tap()
+            ui.startInvite(for: card)
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(AppBackground.ink.opacity(0.4), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                    if ui.inviting {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "plus")
+                            .font(.title3.weight(.semibold))
+                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    }
+                }
+                .frame(width: 56, height: 56)
+                Text("Invite")
+                    .font(.footnote)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundStyle(AppBackground.ink)
+            .frame(width: 66)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(ui.inviting)
+        .accessibilityLabel("Invite people")
+        .accessibilityHint(card.needsPlusToGrow ? "Opens Plus, which adds two more seats" : "Shares an invite code")
     }
 }
 

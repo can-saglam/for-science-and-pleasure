@@ -4,6 +4,13 @@ import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
+    /// The pages one tap in from the first.
+    enum Page: String, Hashable {
+        case group, preferences, account
+    }
+
+    @State private var path: [Page] = []
+    @State private var group = GroupStore.shared
     @State private var groupUI = GroupUI()
     @State private var showPlus = false
     @State private var manageSubscription = false
@@ -68,284 +75,70 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { scroller in
+        NavigationStack(path: $path) {
             List {
-                // The wordmark as the hero — settings opens on the brand,
-                // with the version tucked quietly beneath it.
-                Section {
-                    VStack(spacing: 10) {
-                        LogoTitle(height: 44, writes: .settings)
-                        Text("The shows, gigs and places you keep meaning to go to, in one list you share.")
-                            .font(.footnote)
-                            .foregroundStyle(AppBackground.secondaryInk)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 12)
-                        Text("for science and pleasure · v\(version)")
-                            .font(.caption)
-                            .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
-                    }
-                    .frame(maxWidth: .infinity)
-                    // Pulls the hero up against the grouped list's default
-                    // top margin, so the brand sits closer to the close button.
-                    .padding(.top, -16)
-                    .padding(.bottom, 6)
+                if auth.signedIn {
+                    groupCard
+                } else {
+                    signInCard
                 }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
 
-                GroupSection(ui: groupUI)
-
-                PlusSection(showPaywall: $showPlus, manage: $manageSubscription)
-
-                Section("Appearance") {
+                Section {
                     // The same one-tap swatch row as the first run: the
                     // whole sheet repaints under the finger, no sub-screen.
                     ThemeSwatchRow(title: "Theme") { option in
                         theme.wrappedValue = option
                     }
                     .padding(.vertical, 6)
-                    .id("appearance")
                 }
                 .listRowBackground(Self.rowBackground)
 
                 Section {
-                    menuRow("Directions in", icon: "map.fill") {
-                        Picker(selection: $transportApp) {
-                            ForEach(TransportApp.allCases) { app in
-                                Text(app.name).tag(app.rawValue)
-                            }
-                        } label: { EmptyView() }
+                    door("Preferences", icon: "slider.horizontal.3", subtitle: "Directions, calendar, Lock Screen") {
+                        path.append(.preferences)
                     }
-                    .sensoryFeedback(.selection, trigger: transportApp)
-                } header: {
-                    Text("Directions")
-                }
-                .listRowBackground(Self.rowBackground)
-
-                #if !APP_EXTENSION
-                calendarSection
-
-                Section {
-                    Toggle(isOn: $liveActivities) {
-                        row("Live Activity on the day", icon: "platter.filled.top.iphone")
-                    }
-                    .tint(themes.current.ink.opacity(0.85))
-                    .sensoryFeedback(.selection, trigger: liveActivities)
-                    .onChange(of: liveActivities) { _, on in
-                        Task { await LiveDay.set(on) }
-                    }
-                } header: {
-                    Text("Reminders").id("reminders")
-                } footer: {
-                    // Footers here (and in GroupSection) spell out `.footnote`:
-                    // when a menu picker opens or closes, the List re-measures
-                    // the visible footers without its own footer styling —
-                    // body-sized text, an extra line, and everything below
-                    // jumps ~33pt for one frame. With the font explicit both
-                    // passes agree and nothing moves.
-                    Text("On the day of a reminder, or of a plan, the save stays on your Lock Screen instead of sending a notification.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                }
-                .listRowBackground(Self.rowBackground)
-                #endif
-
-                Section {
-                    Button {
-                        Haptics.tap()
-                        showExport = true
-                    } label: {
-                        row("Export your library", icon: "square.and.arrow.up")
-                    }
-                } header: {
-                    Text("Your library")
-                } footer: {
-                    Text("Download your saves as a spreadsheet, a calendar file and a readable list.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                }
-                .listRowBackground(Self.rowBackground)
-
-                Section("Legal") {
-                    Button {
-                        Haptics.tap()
-                        legal = .privacy
-                    } label: {
-                        row("Privacy", icon: "hand.raised.fill")
-                    }
-                    Button {
-                        Haptics.tap()
-                        legal = .terms
-                    } label: {
-                        row("Terms", icon: "doc.text.fill")
-                    }
-                }
-                .listRowBackground(Self.rowBackground)
-
-                Section {
-                    if let email = auth.email {
-                        LabeledContent {
-                            Text(email)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        } label: {
-                            row(auth.usesApple ? "Signed in with Apple" : "Signed in",
-                                icon: auth.usesApple ? "apple.logo" : "person.fill")
+                    if auth.signedIn {
+                        door("Plus", icon: "star", subtitle: PlusSection.status(for: group.card)) {
+                            showPlus = true
                         }
-                        // Sync, honestly: when it last worked, what's still
-                        // waiting on this phone, whether there's a route out,
-                        // and a way to try now.
-                        Button {
-                            Haptics.tap()
-                            Task {
-                                await SupabaseSync.sync(context: context)
-                                pending = SupabaseSync.pendingCount(context: context)
-                                if SyncStatus.shared.problem == nil { Haptics.success() }
-                            }
-                        } label: {
-                            LabeledContent {
-                                if syncStatus.syncing {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Text("Sync now")
-                                        .font(.subheadline)
-                                        .foregroundStyle(themes.current.ink)
-                                }
-                            } label: {
-                                SettingsRow(
-                                    title: syncStatus.online ? "Sync" : "Sync (offline)",
-                                    icon: "arrow.triangle.2.circlepath",
-                                    subtitle: syncSummary
-                                )
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(syncStatus.syncing)
-                        .accessibilityLabel("Sync now. \(syncSummary)")
-                        if let problem = SyncStatus.shared.problem {
-                            VStack(alignment: .leading, spacing: 6) {
-                                row("Sync issue", icon: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(AppBackground.warning)
-                                Text(problem.message)
-                                    .font(.subheadline)
-                                    .foregroundStyle(AppBackground.secondaryInk)
-                                if let detail = problem.detail {
-                                    Text(detail)
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
-                                        .textSelection(.enabled)
-                                        .lineLimit(4)
-                                }
-                            }
-                        }
-                        Button(role: .destructive) {
-                            Haptics.tap()
-                            confirmSignOut = true
-                        } label: {
-                            row("Sign out", icon: "rectangle.portrait.and.arrow.right", destructive: true)
-                        }
-                        Button(role: .destructive) {
-                            Haptics.tap()
-                            deletePhrase = ""
-                            deleteError = nil
-                            confirmDelete = true
-                        } label: {
-                            row("Delete account", icon: "trash", destructive: true)
-                        }
-                        .confirmationDialog(
-                            "Delete your account?",
-                            isPresented: $confirmDelete,
-                            titleVisibility: .visible
+                        door(
+                            "Account",
+                            icon: "person.crop.circle",
+                            subtitle: syncStatus.problem != nil ? "Sync issue" : (auth.email ?? "Signed in"),
+                            warning: syncStatus.problem != nil,
+                            isAddress: syncStatus.problem == nil
                         ) {
-                            Button("Export my library first") {
-                                deleteAfterExport = true
-                                showExport = true
-                            }
-                            Button("Delete without a copy", role: .destructive) {
-                                deletePhrase = ""
-                                showDeleteConfirm = true
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text(deleteAccountCopy)
+                            path.append(.account)
                         }
-                        .confirmationDialog(
-                            "Sign out?",
-                            isPresented: $confirmSignOut,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Sign out", role: .destructive) {
-                                // RootGate resets the cursor and group card on
-                                // any sign-out, this one included. Dismiss so
-                                // the sign-in screen isn't trapped under this
-                                // sheet.
-                                Task {
-                                    await SupabaseSync.flushBeforeSignOut(context: context)
-                                    SupabaseAuth.shared.signOut()
-                                    dismiss()
-                                }
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("Your saves stay on this phone. You can sign back in any time.")
-                        }
-
-                        #if !APP_EXTENSION
-                        Button {
-                            Haptics.tap()
-                            showOnboardingPreview = true
-                        } label: {
-                            row("Preview first-run", icon: "list.bullet.clipboard")
-                        }
-                        #endif
-                    } else {
-                        Button {
-                            Haptics.tap()
-                            showAuth = true
-                        } label: {
-                            SettingsRow(title: "Sign in", icon: "person.fill")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                } header: {
-                    Text("Account").id("account")
-                } footer: {
-                    if !auth.signedIn {
-                        Text("Sign in to sync your shared library across phones.")
-                            .font(.footnote)
-                            .foregroundStyle(AppBackground.secondaryInk)
                     }
                 }
                 .listRowBackground(Self.rowBackground)
+
+                footer
             }
-            .appBackground(AppBackground.sheet)
-            .appColorScheme()
-            .tint(themes.current.ink)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
+            .listSectionSpacing(.compact)
+            // The grouped list's own top margin left a gap under the close
+            // button; this keeps the footer on the first screen.
+            .contentMargins(.top, 4, for: .scrollContent)
+            .settingsPage(nil)
+            .navigationDestination(for: Page.self) { page in
+                switch page {
+                case .group: groupPage
+                case .preferences: preferencesPage
+                case .account: accountPage
                 }
             }
             .task {
                 if ProcessInfo.processInfo.environment["CWG_JOIN"] != nil {
                     groupUI.showJoin = true
                 }
-                // CWG_SCROLL=account: screenshot runs photograph a section
-                // below the fold.
-                if let anchor = ProcessInfo.processInfo.environment["CWG_SCROLL"] {
-                    try? await Task.sleep(for: .milliseconds(400))
-                    scroller.scrollTo(anchor, anchor: .top)
+                // CWG_SETTINGS_PAGE=account: screenshot runs photograph a
+                // page one level in.
+                if let raw = ProcessInfo.processInfo.environment["CWG_SETTINGS_PAGE"],
+                   let page = Page(rawValue: raw) {
+                    path = [page]
                 }
                 pending = SupabaseSync.pendingCount(context: context)
-            }
             }
             .onChange(of: syncStatus.syncing) { _, now in
                 if !now { pending = SupabaseSync.pendingCount(context: context) }
@@ -432,17 +225,329 @@ struct SettingsView: View {
         .onDisappear(perform: syncAppIcon)
     }
 
-    /// One row, modern-settings style: a small icon squircle, then the
-    /// title. Monochrome — every badge wears the current theme's accent,
-    /// with the icon glyph in the theme base for contrast.
-    private func row(_ title: String, icon: String, destructive: Bool = false) -> some View {
-        SettingsRow(title: title, icon: icon, destructive: destructive)
+    // MARK: - First page
+
+    /// Who shares the library, before anything else.
+    @ViewBuilder private var groupCard: some View {
+        Section {
+            if let card = group.card {
+                GroupHeroCard(card: card, ui: groupUI) { path.append(.group) }
+            } else if group.loaded {
+                Button {
+                    Task { await group.refresh() }
+                } label: {
+                    SettingsRow(title: "Couldn\u{2019}t load your group. Tap to retry")
+                }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            }
+        }
+        .listRowBackground(Self.rowBackground)
+    }
+
+    /// Signed out, the brand and the one thing to do.
+    private var signInCard: some View {
+        Section {
+            VStack(spacing: 14) {
+                LogoTitle(height: 40, writes: .settings)
+                Text("The shows, gigs and places you keep meaning to go to, in one list you share.")
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.secondaryInk)
+                    .multilineTextAlignment(.center)
+                Button {
+                    Haptics.tap()
+                    showAuth = true
+                } label: {
+                    Text("Sign in")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                }
+                .prominentGlass()
+                .controlSize(.large)
+                Text("Sign in to sync your shared library across phones.")
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.secondaryInk)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        }
+        .listRowBackground(Self.rowBackground)
+    }
+
+    /// A way one level in: a plain glyph, the name, and what's behind it.
+    /// An email address keeps both ends when it's too long; anything else
+    /// wraps.
+    private func door(
+        _ title: String, icon: String, subtitle: String, warning: Bool = false, isAddress: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AppBackground.ink)
+                    .frame(width: 26)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(AppBackground.ink)
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(warning ? AppBackground.warning : AppBackground.secondaryInk)
+                        .lineLimit(isAddress ? 1 : 2)
+                        .truncationMode(isAddress ? .middle : .tail)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink.opacity(0.45))
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 4)
+            .contentShape(.rect)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The brand signs off, with the legal pages and the version.
+    private var footer: some View {
+        Section {
+            VStack(spacing: 12) {
+                if auth.signedIn {
+                    LogoTitle(height: 26, writes: .settings)
+                }
+                HStack(spacing: 8) {
+                    Button("Privacy") {
+                        Haptics.tap()
+                        legal = .privacy
+                    }
+                    Text("·").accessibilityHidden(true)
+                    Button("Terms") {
+                        Haptics.tap()
+                        legal = .terms
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.footnote)
+                .foregroundStyle(AppBackground.secondaryInk)
+                Text("for science and pleasure · v\(version)")
+                    .font(.caption)
+                    .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
+                    #if !APP_EXTENSION
+                    // The first-run preview, for whoever made it.
+                    .onLongPressGesture {
+                        Haptics.tap()
+                        showOnboardingPreview = true
+                    }
+                    #endif
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    // MARK: - Pages
+
+    private var groupPage: some View {
+        List {
+            GroupSection(ui: groupUI)
+        }
+        .settingsPage("Group")
+    }
+
+    private var preferencesPage: some View {
+        List {
+            Section {
+                menuRow("Directions in") {
+                    Picker(selection: $transportApp) {
+                        ForEach(TransportApp.allCases) { app in
+                            Text(app.name).tag(app.rawValue)
+                        }
+                    } label: { EmptyView() }
+                }
+                .sensoryFeedback(.selection, trigger: transportApp)
+                #if !APP_EXTENSION
+                calendarRow
+                #endif
+            } header: {
+                Text("Directions and calendar")
+            }
+            .listRowBackground(Self.rowBackground)
+
+            #if !APP_EXTENSION
+            Section {
+                Toggle(isOn: $liveActivities) {
+                    SettingsRow(title: "Live Activity")
+                }
+                .tint(themes.current.ink.opacity(0.85))
+                .sensoryFeedback(.selection, trigger: liveActivities)
+                .onChange(of: liveActivities) { _, on in
+                    Task { await LiveDay.set(on) }
+                }
+            } header: {
+                Text("On the day")
+            } footer: {
+                // Footers here (and in GroupSection) spell out `.footnote`:
+                // when a menu picker opens or closes, the List re-measures
+                // the visible footers without its own footer styling —
+                // body-sized text, an extra line, and everything below
+                // jumps ~33pt for one frame. With the font explicit both
+                // passes agree and nothing moves.
+                Text("On the day of a reminder or a plan, the save stays on your Lock Screen instead of sending a notification.")
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.secondaryInk)
+            }
+            .listRowBackground(Self.rowBackground)
+            #endif
+        }
+        .settingsPage("Preferences")
+    }
+
+    @ViewBuilder private var accountPage: some View {
+        List {
+            if let email = auth.email {
+                Section {
+                    SettingsRow(title: email, subtitle: auth.usesApple ? "Signed in with Apple" : "Signed in")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    // Sync, honestly: when it last worked, what's still
+                    // waiting on this phone, whether there's a route out,
+                    // and a way to try now.
+                    Button {
+                        Haptics.tap()
+                        Task {
+                            await SupabaseSync.sync(context: context)
+                            pending = SupabaseSync.pendingCount(context: context)
+                            if SyncStatus.shared.problem == nil { Haptics.success() }
+                        }
+                    } label: {
+                        LabeledContent {
+                            if syncStatus.syncing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text("Sync now")
+                                    .font(.subheadline)
+                                    .foregroundStyle(themes.current.ink)
+                            }
+                        } label: {
+                            SettingsRow(title: syncStatus.online ? "Sync" : "Sync (offline)", subtitle: syncSummary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(syncStatus.syncing)
+                    .accessibilityLabel("Sync now. \(syncSummary)")
+                    if let problem = SyncStatus.shared.problem {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Sync issue")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(AppBackground.warning)
+                            Text(problem.message)
+                                .font(.subheadline)
+                                .foregroundStyle(AppBackground.secondaryInk)
+                            if let detail = problem.detail {
+                                Text(detail)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
+                                    .textSelection(.enabled)
+                                    .lineLimit(4)
+                            }
+                        }
+                    }
+                }
+                .listRowBackground(Self.rowBackground)
+
+                Section {
+                    Button {
+                        Haptics.tap()
+                        showExport = true
+                    } label: {
+                        HStack {
+                            SettingsRow(title: "Export library")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppBackground.ink.opacity(0.45))
+                        }
+                    }
+                } footer: {
+                    Text("Your saves as a spreadsheet, a calendar file and a readable list.")
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.secondaryInk)
+                }
+                .listRowBackground(Self.rowBackground)
+
+                PlusSection(manage: $manageSubscription)
+
+                Section {
+                    Button(role: .destructive) {
+                        Haptics.tap()
+                        confirmSignOut = true
+                    } label: {
+                        SettingsRow(title: "Sign out", destructive: true)
+                    }
+                    .confirmationDialog(
+                        "Sign out?",
+                        isPresented: $confirmSignOut,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Sign out", role: .destructive) {
+                            // RootGate resets the cursor and group card on
+                            // any sign-out, this one included. Dismiss so
+                            // the sign-in screen isn't trapped under this
+                            // sheet.
+                            Task {
+                                await SupabaseSync.flushBeforeSignOut(context: context)
+                                SupabaseAuth.shared.signOut()
+                                dismiss()
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Your saves stay on this phone. You can sign back in any time.")
+                    }
+                    Button(role: .destructive) {
+                        Haptics.tap()
+                        deletePhrase = ""
+                        deleteError = nil
+                        confirmDelete = true
+                    } label: {
+                        SettingsRow(title: "Delete account", destructive: true)
+                    }
+                    .confirmationDialog(
+                        "Delete your account?",
+                        isPresented: $confirmDelete,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Export my library first") {
+                            deleteAfterExport = true
+                            showExport = true
+                        }
+                        Button("Delete without a copy", role: .destructive) {
+                            deletePhrase = ""
+                            showDeleteConfirm = true
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(deleteAccountCopy)
+                    }
+                }
+                .listRowBackground(Self.rowBackground)
+            }
+        }
+        .settingsPage("Account")
     }
 
     /// A Settings-style value row: the title on the left, a menu picker as
     /// the small trailing value, matching the system Settings app.
     private func menuRow<P: View>(
-        _ title: String, icon: String, @ViewBuilder picker: () -> P
+        _ title: String, @ViewBuilder picker: () -> P
     ) -> some View {
         LabeledContent {
             picker()
@@ -450,63 +555,58 @@ struct SettingsView: View {
                 .labelsHidden()
                 .tint(themes.current.ink)
         } label: {
-            row(title, icon: icon)
+            SettingsRow(title: title)
         }
         // The menu button is UIKit-backed and asks the cell for ~34pt via
         // Auto Layout, over SwiftUI's head; meet it, and trim the row insets
-        // so the row still measures the same ~51pt as its neighbours. Keep
+        // so the row still measures the same 52pt as its neighbours. Keep
         // `listRowInsets` the outermost modifier on the row — anything
         // wrapped around it hides the insets from the List.
         .frame(minHeight: 34)
-        .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
+        .listRowInsets(EdgeInsets(top: 9, leading: 20, bottom: 9, trailing: 20))
     }
 
     #if !APP_EXTENSION
     /// Everyone starts on the iPhone's default calendar with add-only
     /// access; the list, and the full-access prompt it needs, are only for
     /// someone who taps here asking for them.
-    private var calendarSection: some View {
-        Section {
-            if calendarAccess == .fullAccess {
-                menuRow("Add events to", icon: "calendar") {
-                    Picker(selection: $calendarID) {
-                        Text("iPhone default").tag("")
-                        ForEach(calendars) { calendar in
-                            Text(calendar.name).tag(calendar.id)
-                        }
-                    } label: { EmptyView() }
-                }
-                .sensoryFeedback(.selection, trigger: calendarID)
-            } else {
-                Button {
-                    Haptics.tap()
-                    Task {
-                        _ = await CalendarChoice.requestFullAccess()
-                        refreshCalendars()
-                        calendarRefused = calendarAccess != .fullAccess
+    @ViewBuilder private var calendarRow: some View {
+        if calendarAccess == .fullAccess {
+            menuRow("Add events to") {
+                Picker(selection: $calendarID) {
+                    Text("iPhone default").tag("")
+                    ForEach(calendars) { calendar in
+                        Text(calendar.name).tag(calendar.id)
                     }
-                } label: {
-                    // Dressed as the picker it turns into once allowed.
-                    LabeledContent {
-                        HStack(spacing: 5) {
-                            Text("iPhone default")
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.footnote.weight(.medium))
-                        }
-                        .foregroundStyle(themes.current.ink)
-                    } label: {
-                        row("Add events to", icon: "calendar")
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Choose a calendar. iOS will ask to let Can We Go see your calendars.")
-                .frame(minHeight: 34)
-                .listRowInsets(EdgeInsets(top: 8.5, leading: 20, bottom: 8.5, trailing: 20))
+                } label: { EmptyView() }
             }
-        } header: {
-            Text("Calendar").id("calendar")
+            .sensoryFeedback(.selection, trigger: calendarID)
+        } else {
+            Button {
+                Haptics.tap()
+                Task {
+                    _ = await CalendarChoice.requestFullAccess()
+                    refreshCalendars()
+                    calendarRefused = calendarAccess != .fullAccess
+                }
+            } label: {
+                // Dressed as the picker it turns into once allowed.
+                LabeledContent {
+                    HStack(spacing: 5) {
+                        Text("iPhone default")
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.footnote.weight(.medium))
+                    }
+                    .foregroundStyle(themes.current.ink)
+                } label: {
+                    SettingsRow(title: "Add events to")
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Choose a calendar. iOS will ask to let Can We Go see your calendars.")
+            .frame(minHeight: 34)
+            .listRowInsets(EdgeInsets(top: 9, leading: 20, bottom: 9, trailing: 20))
         }
-        .listRowBackground(Self.rowBackground)
     }
 
     /// A calendar that's gone falls back to the default, so the picker
@@ -625,4 +725,47 @@ struct SettingsButton: View {
     }
 
     @MainActor private static var openedForTest = false
+}
+
+private extension View {
+    /// Every Settings page: the theme's sheet, its ink, rows of one
+    /// height, the title in the display face and the close button.
+    func settingsPage(_ title: String?) -> some View {
+        modifier(SettingsPageChrome(title: title))
+    }
+}
+
+private struct SettingsPageChrome: ViewModifier {
+    let title: String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var themes = ThemeStore.shared
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.defaultMinListRowHeight, 52)
+            .appBackground(AppBackground.sheet)
+            .appColorScheme()
+            .tint(themes.current.ink)
+            .navigationTitle(title ?? "")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if let title {
+                    ToolbarItem(placement: .principal) {
+                        Text(title)
+                            .font(.displaySmallBold(20, relativeTo: .headline))
+                            .foregroundStyle(AppBackground.ink)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Haptics.tap()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
+    }
 }

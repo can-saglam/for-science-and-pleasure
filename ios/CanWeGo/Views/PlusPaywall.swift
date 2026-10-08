@@ -808,19 +808,18 @@ struct BusyDaySheet: View {
 /// looks for — Restore Purchases and Manage Subscription.
 /// The Settings rows for Plus. Its sheets hang off the Settings list: one
 /// attached to a list section tears Settings down along with it.
+/// The purchase plumbing, on the Account page; Plus itself is a row on
+/// the first page of Settings.
 struct PlusSection: View {
-    @Binding var showPaywall: Bool
     @Binding var manage: Bool
-    @State private var group = GroupStore.shared
     @State private var plus = PlusStore.shared
     @State private var restoring = false
     @State private var note: String?
 
-    private var status: String {
-        guard let card = group.card else { return "No cap on lists, and room for four" }
-        guard card.isPlus else {
-            return "Free: \(CategoryCap.limit) of a kind, \(DailyCap.free) new a day, two people"
-        }
+    /// One line for the Plus row: who covers it, or what it adds.
+    static func status(for card: GroupCard?) -> String {
+        guard let card else { return "No cap on lists, and room for four" }
+        guard card.isPlus else { return "Free plan" }
         let holders = card.members.filter(\.isPlus)
         if holders.contains(where: { $0.userId == SupabaseAuth.shared.userId }) { return "On, covered by you" }
         if let first = holders.first { return "On, covered by \(first.name)" }
@@ -830,24 +829,18 @@ struct PlusSection: View {
     var body: some View {
         if SupabaseAuth.shared.signedIn {
             Section {
-                Button {
-                    Haptics.tap()
-                    showPaywall = true
-                } label: {
-                    HStack {
-                        SettingsRow(title: "Can We Go? Plus", icon: "star.fill", subtitle: status)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppBackground.ink.opacity(0.45))
-                    }
-                }
                 if plus.subscribed {
                     Button {
                         Haptics.tap()
                         manage = true
                     } label: {
-                        SettingsRow(title: "Manage subscription", icon: "creditcard.fill")
+                        HStack {
+                            SettingsRow(title: "Manage subscription")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppBackground.ink.opacity(0.45))
+                        }
                     }
                 }
                 Button {
@@ -859,12 +852,14 @@ struct PlusSection: View {
                     }
                 } label: {
                     HStack {
-                        SettingsRow(title: "Restore purchases", icon: "arrow.clockwise")
+                        SettingsRow(title: "Restore purchases")
                         Spacer()
                         if restoring { ProgressView() }
                     }
                 }
                 .disabled(restoring)
+            } header: {
+                Text("Plus")
             } footer: {
                 if let note = note ?? plus.problem {
                     Text(note)

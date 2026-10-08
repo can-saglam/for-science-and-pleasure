@@ -69,7 +69,9 @@ shoot capture-blank 4 CWG_CAPTURE=1 CWG_BLANK=1
 
 echo "Settings and gates"
 shoot settings 4 CWG_SETTINGS=1
-shoot settings-account 5 CWG_SETTINGS=1 CWG_SCROLL=account
+shoot settings-group 5 CWG_SETTINGS=1 CWG_SETTINGS_PAGE=group
+shoot settings-preferences 5 CWG_SETTINGS=1 CWG_SETTINGS_PAGE=preferences
+shoot settings-account 5 CWG_SETTINGS=1 CWG_SETTINGS_PAGE=account
 shoot settings-join 5 CWG_SETTINGS=1 CWG_JOIN=1
 shoot update-required 4 CWG_FORCE_UPDATE=1
 
