@@ -592,11 +592,21 @@ export interface ExtractInput {
   image_media_type?: string;
 }
 
+/// The model's fields, before the lookups after it (address, pin, photo,
+/// colour) are done. Nothing here changes by the time the card is final,
+/// except an end date the page's own listing can still fill in.
+export type EarlyCard = Pick<
+  ParsedCard,
+  "kind" | "title" | "summary" | "venue" | "area" | "category" | "price" | "starts_on" | "ends_on" | "showings"
+>;
+
 export async function extractCard(
   input: ExtractInput,
   home: Home = LONDON,
   /** The link's page, already read (or found unreadable) by the caller. */
   read?: { page: Page | null },
+  /** Called once the model has answered, while the lookups run. */
+  onEarly?: (early: EarlyCard) => void,
 ): Promise<
   ParsedCard & {
     url: string | null;
@@ -610,6 +620,7 @@ export async function extractCard(
   }
 > {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const started = Date.now();
 
   const text = (input.text ?? "").trim();
   const url = text ? firstUrl(text) : null;
@@ -745,6 +756,7 @@ export async function extractCard(
   }
   content.push({ type: "text", text: parts.join("\n\n") });
 
+  const modelStarted = Date.now();
   const response = await anthropic.messages.create({
     // Sonnet whenever search is on: opus + web search blows past the edge
     // worker's 150s wall-clock budget (same lesson as the locate function).
@@ -761,6 +773,7 @@ export async function extractCard(
       : {}),
     messages: [{ role: "user", content }],
   });
+  const modelDone = Date.now();
 
   // With web search the model may emit commentary text between searches —
   // the structured JSON is always the final text block.
@@ -778,6 +791,19 @@ export async function extractCard(
     if (!card.starts_on || first < card.starts_on) card.starts_on = first;
     if (!card.ends_on || last > card.ends_on) card.ends_on = last;
   }
+  if (is_specific === false) throw new VagueInputError();
+  onEarly?.({
+    kind: card.kind,
+    title: card.title,
+    summary: card.summary,
+    venue: card.venue,
+    area: card.area,
+    category: card.category,
+    price: card.price,
+    starts_on: card.starts_on,
+    ends_on: card.ends_on,
+    showings: card.showings,
+  });
   const seen = new Set<string>();
   for (const block of response.content) {
     if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;
@@ -825,9 +851,10 @@ export async function extractCard(
   }
 
   // A card with nothing to stand on is not a save. The model's own verdict
-  // comes first; the structural check catches the times it said "specific"
-  // but still produced a spot with no link, no site, no pin and no address.
-  if (is_specific === false || !isAnchored(card, { url, coords })) {
+  // came first, before the lookups; this catches the times it said
+  // "specific" but still produced a spot with no link, no site, no pin and
+  // no address.
+  if (!isAnchored(card, { url, coords })) {
     throw new VagueInputError();
   }
 
@@ -890,6 +917,19 @@ export async function extractCard(
   } else if (!color && imageUrl) {
     color = await colorFromImageUrl(imageUrl).catch(() => null);
   }
+  const placeId = (await placeFound)?.id ?? null;
+
+  const done = Date.now();
+  console.log("parse timing", JSON.stringify({
+    source: input.image_base64 ? "image" : url ? "link" : "text",
+    search: useWebSearch,
+    searches: response.usage?.server_tool_use?.web_search_requests ?? 0,
+    output_tokens: response.usage?.output_tokens ?? null,
+    read_ms: modelStarted - started,
+    model_ms: modelDone - modelStarted,
+    lookups_ms: done - modelDone,
+    total_ms: done - started,
+  }));
 
   return {
     ...card,
@@ -899,6 +939,6 @@ export async function extractCard(
     lng: coords?.lng ?? null,
     color,
     image_url: imageUrl,
-    place_id: (await placeFound)?.id ?? null,
+    place_id: placeId,
   };
 }

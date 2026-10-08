@@ -46,6 +46,8 @@ struct CaptureView: View {
     @State private var busyDay = false
     /// The on-device model's quick read, shown while the parser works.
     @State private var firstLook: Item?
+    /// The parser's fields, while its lookups finish the card.
+    @State private var early: Item?
     /// Set while the parser reads (and kept once its card is in): what it
     /// was sent. The input stage gives way to the capture drawer.
     @State private var reading: CaptureInput?
@@ -90,7 +92,7 @@ struct CaptureView: View {
             ScrollView {
                 if showsDrawer {
                     CaptureDrawer(
-                        draft: draft, look: firstLook, peek: peek, input: reading ?? .text,
+                        draft: draft, early: early, look: firstLook, peek: peek, input: reading ?? .text,
                         editFirst: { withAnimation(.snappy) { editing = true } }
                     ) {
                         if let draft {
@@ -121,6 +123,12 @@ struct CaptureView: View {
             // The drawer's photo runs edge to edge under the close button.
             .ignoresSafeArea(edges: showsDrawer ? .top : [])
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let draft {
+                    previewActions(draft)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
             // The header lives in the top safe-area inset, so its height
             // shows up here rather than in the content above.
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { height in
@@ -414,79 +422,59 @@ struct CaptureView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
+    }
 
-        VStack(spacing: 10) {
-            Button {
-                save(draft)
-            } label: {
-                SaveMorphLabel("Save to library", systemImage: "checkmark", saved: saved)
+    /// The card's actions, floating bottom right like the detail drawer's.
+    private func previewActions(_ draft: Item) -> some View {
+        FloatingActions {
+            if !saved, manual {
+                // A blank card is always in edit mode and the × already
+                // throws it away, so the one side action is the way back
+                // to the composer.
+                FloatingCircleButton("Look it up instead", systemImage: "sparkle.magnifyingglass") {
+                    leaveManual()
+                }
+            } else if !saved {
+                FloatingCircleButton(
+                    editing ? "Show card" : "Edit first",
+                    systemImage: editing ? "rectangle.on.rectangle" : "pencil"
+                ) {
+                    withAnimation(.snappy) { editing.toggle() }
+                }
+                .contentTransition(.symbolEffect(.replace))
+
+                FloatingCircleButton("Discard", systemImage: "trash", tint: AppBackground.destructive) {
+                    confirmDiscard = true
+                }
+                .confirmationDialog(
+                    "Discard this save?",
+                    isPresented: $confirmDiscard,
+                    titleVisibility: .visible
+                ) {
+                    Button("Discard", role: .destructive) {
+                        withAnimation(.snappy) {
+                            self.draft = nil
+                            early = nil
+                            reading = nil
+                            peek = nil
+                            editing = false
+                            manual = false
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("The card goes away. Nothing is saved.")
+                }
             }
-            .prominentGlass()
-            .controlSize(.large)
+
+            FloatingMainButton(saved ? "Saved" : "Save", systemImage: saved ? "checkmark.circle.fill" : "checkmark") {
+                save(draft)
+            }
             .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
             // Not `.disabled`: that would grey the button out under "Saved".
             .allowsHitTesting(!saved)
-
-            if !saved, manual {
-                // A blank card is always in edit mode and the × already
-                // throws it away, so the one secondary action is the way
-                // back to the composer.
-                Button {
-                    Haptics.tap()
-                    leaveManual()
-                } label: {
-                    Label("Look it up instead", systemImage: "sparkle.magnifyingglass")
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-                .controlSize(.large)
-            } else if !saved {
-                HStack(spacing: 10) {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(.snappy) { editing.toggle() }
-                    } label: {
-                        Label(editing ? "Show card" : "Edit first", systemImage: editing ? "rectangle.on.rectangle" : "pencil")
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-
-                    Button(role: .destructive) {
-                        Haptics.tap()
-                        confirmDiscard = true
-                    } label: {
-                        Label("Discard", systemImage: "trash")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(AppBackground.destructive)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-                    .confirmationDialog(
-                        "Discard this save?",
-                        isPresented: $confirmDiscard,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Discard", role: .destructive) {
-                            withAnimation(.snappy) {
-                                self.draft = nil
-                                reading = nil
-                                peek = nil
-                                editing = false
-                                manual = false
-                            }
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("The card goes away. Nothing is saved.")
-                    }
-                }
-                // Match the save button's height so the stack reads as one set.
-                .controlSize(.large)
-            }
         }
-        .padding(.top, 4)
+        .animation(reduceMotion ? nil : .snappy, value: editing)
     }
 
     // MARK: - Actions
@@ -585,6 +573,7 @@ struct CaptureView: View {
         nudge = nil
         offline = false
         firstLook = nil
+        early = nil
         defer { busy = false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Known URL? Say so before spending a parse — unless they've already
@@ -620,41 +609,27 @@ struct CaptureView: View {
             let card = try await ParseClient.parse(
                 text: trimmed.isEmpty ? nil : trimmed,
                 imageJPEG: imageJPEG
-            )
+            ) { fields in
+                guard !Task.isCancelled, busy, draft == nil else { return }
+                withAnimation(reveal) { early = item(from: fields) }
+            }
             guard !Task.isCancelled else { return }
             // The card's photo lands with the card when it can.
             if let url = card.image_url.flatMap(URL.init(string:)) {
                 await ImageStore.warm(url, variant: .hero, limit: .milliseconds(900))
             }
             firstLook = nil
-            let item = Item()
-            item.kind = card.kind
-            item.title = card.title
-            item.summary = card.summary
-            item.venue = card.venue
-            item.area = card.area
-            item.address = card.address
-            item.category = card.category
-            item.price = card.price
-            item.startsOn = card.starts_on
-            item.endsOn = card.ends_on
-            item.url = card.url
-            item.lat = card.lat
-            item.lng = card.lng
-            item.colorHex = card.color
-            item.imageUrl = card.image_url
-            item.source = card.source
-            item.placeId = card.place_id
-            item.showings = card.showings ?? []
+            let parsed = item(from: card)
             // A partner's save may have synced in while the parser worked.
             loadLibrary()
-            withAnimation(reveal) { draft = item }
+            withAnimation(reveal) { draft = parsed }
         } catch {
             guard !Task.isCancelled else { return }
             // Back to the composer, the input still in it.
             withAnimation(reveal) {
                 reading = nil
                 peek = nil
+                early = nil
             }
             // ParseError already speaks to a person; everything else
             // (URLError, decoding) gets the same translation sync uses.
@@ -676,6 +651,30 @@ struct CaptureView: View {
                 firstLook = nil
             }
         }
+    }
+
+    /// An unsaved card from the parser's answer.
+    private func item(from card: ParseClient.Card) -> Item {
+        let item = Item()
+        item.kind = card.kind
+        item.title = card.title
+        item.summary = card.summary
+        item.venue = card.venue
+        item.area = card.area
+        item.address = card.address
+        item.category = card.category
+        item.price = card.price
+        item.startsOn = card.starts_on
+        item.endsOn = card.ends_on
+        item.url = card.url
+        item.lat = card.lat
+        item.lng = card.lng
+        item.colorHex = card.color
+        item.imageUrl = card.image_url
+        item.source = card.source
+        item.placeId = card.place_id
+        item.showings = card.showings ?? []
+        return item
     }
 
     /// Parse first, paywall second: the finished card is on screen when a

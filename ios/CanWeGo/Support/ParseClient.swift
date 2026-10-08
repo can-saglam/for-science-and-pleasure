@@ -68,19 +68,23 @@ enum ParseClient {
 
     static var isConfigured: Bool { Secrets.shared != nil }
 
+    /// The model's fields, a few seconds before the card: no address, pin,
+    /// photo or colour yet. Decoded as a `Card` with those left empty.
+    typealias Early = @MainActor (Card) -> Void
+
     /// One silent retry on a transient failure — a dropped connection, a
     /// gateway timeout while the web-search fallback runs long — before the
     /// user is asked to try again. Anything that reads like a real answer
     /// ("couldn't find a venue", 4xx) surfaces straight away.
-    static func parse(text: String?, imageJPEG: Data?) async throws -> Card {
+    static func parse(text: String?, imageJPEG: Data?, early: Early? = nil) async throws -> Card {
         // Social links pick up their caption and cover on-device first —
         // the phone can read what the server's IP is often walled from.
         let input = await SocialPrefetch.enrich(text: text, imageJPEG: imageJPEG)
         do {
-            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG)
+            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG, early: early)
         } catch let error where isTransient(error) {
             try? await Task.sleep(for: .seconds(1.5))
-            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG)
+            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG, early: early)
         }
     }
 
@@ -88,12 +92,12 @@ enum ParseClient {
     /// phone. The server says so before reading anything else; the phone
     /// reads the page and sends it back, so the save comes from the page
     /// (its photo, its dates, its showings) rather than a web search.
-    private static func parseReadingPage(text: String?, imageJPEG: Data?) async throws -> Card {
+    private static func parseReadingPage(text: String?, imageJPEG: Data?, early: Early?) async throws -> Card {
         do {
-            return try await parseOnce(text: text, imageJPEG: imageJPEG, extra: ["page_fallback": "true"])
+            return try await parseOnce(text: text, imageJPEG: imageJPEG, extra: ["page_fallback": "true"], early: early)
         } catch let blocked as PageBlocked {
             let html = await pageHTML(blocked.url)
-            return try await parseOnce(text: text, imageJPEG: imageJPEG, extra: html.map { ["page_html": $0] } ?? [:])
+            return try await parseOnce(text: text, imageJPEG: imageJPEG, extra: html.map { ["page_html": $0] } ?? [:], early: early)
         }
     }
 
@@ -147,7 +151,7 @@ enum ParseClient {
         }
     }
 
-    private static func parseOnce(text: String?, imageJPEG: Data?, extra: [String: String]) async throws -> Card {
+    private static func parseOnce(text: String?, imageJPEG: Data?, extra: [String: String], early: Early?) async throws -> Card {
         guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
 
         var body = extra
@@ -156,6 +160,7 @@ enum ParseClient {
             body["image_base64"] = imageJPEG.base64EncodedString()
             body["image_media_type"] = "image/jpeg"
         }
+        if early != nil { body["stream"] = "true" }
 
         var request = URLRequest(url: secrets.supabaseURL.appending(path: "functions/v1/parse"))
         request.httpMethod = "POST"
@@ -165,22 +170,57 @@ enum ParseClient {
         request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            let body = try? JSONDecoder().decode([String: String].self, from: data)
-            if status == 409, body?["code"] == "page_blocked",
-               let url = body?["url"].flatMap(URL.init(string:)) {
-                throw PageBlocked(url: url)
-            }
-            let message = friendly(status: status, serverMessage: body?["error"])
-            if status == 422, body?["code"] == "too_vague" {
-                throw ParseError.tooVague(message, firm: body?["firm"] == "true")
-            }
-            throw ParseError.server(message, status: status)
+        let streamed = (response as? HTTPURLResponse)?
+            .value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true
+        guard status == 200, streamed, let early else {
+            var data = Data()
+            for try await byte in bytes { data.append(byte) }
+            guard status == 200 else { throw failure(status: status, data: data) }
+            struct Envelope: Decodable { let card: Card }
+            return try JSONDecoder().decode(Envelope.self, from: data).card
         }
-        struct Envelope: Decodable { let card: Card }
-        return try JSONDecoder().decode(Envelope.self, from: data).card
+
+        // One JSON object per `data:` line, named by the `event:` before it.
+        var event = ""
+        for try await line in bytes.lines {
+            if line.hasPrefix("event:") {
+                event = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            guard line.hasPrefix("data:") else { continue }
+            let data = Data(line.dropFirst(5).utf8)
+            switch event {
+            case "early":
+                if let card = try? JSONDecoder().decode(Card.self, from: data) {
+                    await early(card)
+                }
+            case "card":
+                return try JSONDecoder().decode(Card.self, from: data)
+            case "error":
+                struct Failure: Decodable { let status: Int }
+                let status = (try? JSONDecoder().decode(Failure.self, from: data))?.status ?? 500
+                throw failure(status: status, data: data)
+            default:
+                continue
+            }
+        }
+        throw URLError(.networkConnectionLost)
+    }
+
+    private static func failure(status: Int, data: Data) -> Error {
+        struct Body: Decodable { let error: String?; let code: String?; let firm: String?; let url: String? }
+        let body = try? JSONDecoder().decode(Body.self, from: data)
+        if status == 409, body?.code == "page_blocked",
+           let url = body?.url.flatMap(URL.init(string:)) {
+            return PageBlocked(url: url)
+        }
+        let message = friendly(status: status, serverMessage: body?.error)
+        if status == 422, body?.code == "too_vague" {
+            return ParseError.tooVague(message, firm: body?.firm == "true")
+        }
+        return ParseError.server(message, status: status)
     }
 
     // MARK: - Suggestions (chips for the home city)

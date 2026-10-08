@@ -33,6 +33,8 @@ struct ShareView: View {
     /// The phone's own preview of a shared link, while the parser reads.
     @State private var peek: LinkPeek?
     @State private var peekTask: Task<Void, Never>?
+    /// The parser's fields, while its lookups finish the card.
+    @State private var early: Item?
 
     private var isPreview: Bool {
         if case .preview = stage { return true }
@@ -60,6 +62,7 @@ struct ShareView: View {
                 if showsDrawer {
                     CaptureDrawer(
                         draft: draft,
+                        early: early,
                         peek: peek,
                         input: payloadImage != nil ? .image : (extractedURL != nil || payloadText == nil ? .link : .text),
                         showsMap: false,
@@ -81,6 +84,12 @@ struct ShareView: View {
                 }
             }
             .ignoresSafeArea(edges: showsDrawer ? .top : [])
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let draft {
+                    previewActions(draft)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
             // Mirrors the in-app capture flow's preview title.
             .sheetTitle(
                 showsDrawer ? nil : (isPreview ? "Looks right?" : "Can We Go?")
@@ -200,42 +209,23 @@ struct ShareView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
+    }
 
-        VStack(spacing: 10) {
-            Button {
-                save(draft)
-            } label: {
-                SaveMorphLabel("Save to library", systemImage: "checkmark", saved: saved)
-            }
-            .prominentGlass()
-            .controlSize(.large)
-            .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
-            .allowsHitTesting(!saved)
-
-            HStack(spacing: 10) {
-                Button {
-                    Haptics.tap()
+    /// The card's actions, floating bottom right like the app's.
+    private func previewActions(_ draft: Item) -> some View {
+        FloatingActions {
+            if !saved {
+                FloatingCircleButton(
+                    editing ? "Show card" : "Edit first",
+                    systemImage: editing ? "rectangle.on.rectangle" : "pencil"
+                ) {
                     withAnimation(.snappy) { editing.toggle() }
-                } label: {
-                    Label(
-                        editing ? "Show card" : "Edit first",
-                        systemImage: editing ? "rectangle.on.rectangle" : "pencil"
-                    )
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
+                .contentTransition(.symbolEffect(.replace))
 
-                Button(role: .destructive) {
-                    Haptics.tap()
+                FloatingCircleButton("Discard", systemImage: "trash", tint: AppBackground.destructive) {
                     confirmDiscard = true
-                } label: {
-                    Label("Discard", systemImage: "trash")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(AppBackground.destructive)
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glass)
                 .confirmationDialog(
                     "Discard this save?",
                     isPresented: $confirmDiscard,
@@ -245,9 +235,13 @@ struct ShareView: View {
                     Button("Keep editing", role: .cancel) {}
                 }
             }
-            .controlSize(.large)
+
+            FloatingMainButton(saved ? "Saved" : "Save", systemImage: saved ? "checkmark.circle.fill" : "checkmark") {
+                save(draft)
+            }
+            .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+            .allowsHitTesting(!saved)
         }
-        .padding(.top, 4)
     }
 
     private var duplicateBlock: some View {
@@ -324,6 +318,7 @@ struct ShareView: View {
     private func parse() async {
         withAnimation(.snappy) { stage = .parsing }
         editing = false
+        early = nil
         peekTask?.cancel()
         if payloadImage == nil, let url = extractedURL.flatMap(URL.init(string:)) {
             peekTask = Task {
@@ -333,7 +328,10 @@ struct ShareView: View {
         }
         defer { peekTask?.cancel() }
         do {
-            let card = try await ParseClient.parse(text: payloadText, imageJPEG: payloadImage)
+            let card = try await ParseClient.parse(text: payloadText, imageJPEG: payloadImage) { fields in
+                guard !Task.isCancelled, !isPreview else { return }
+                withAnimation(.spring(duration: 0.45)) { early = item(from: fields) }
+            }
             // The card's photo lands with the card when it can.
             if let url = card.image_url.flatMap(URL.init(string:)) {
                 await ImageStore.warm(url, variant: .hero, limit: .milliseconds(900))
@@ -344,6 +342,7 @@ struct ShareView: View {
             guard !Task.isCancelled else { return }
             withAnimation(.snappy) {
                 peek = nil
+                early = nil
                 stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
             }
         }

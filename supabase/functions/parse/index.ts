@@ -1,6 +1,11 @@
 // parse: stateless extraction endpoint. Takes {text?, image_base64?, image_media_type?}
 // and returns a parsed card; nothing is stored. A member JWT is required —
 // the home city comes from their group. The old ingest-secret path is gone.
+//
+// With `stream: "true"` the answer comes as server-sent events instead: an
+// `early` event with the model's fields as soon as it has answered, then
+// `card` once the lookups are done (or `error`, with the status it would
+// have had). Builds that don't ask get the single JSON body.
 import { internalErrorBody } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -30,7 +35,22 @@ const json = (body: unknown, status = 200) =>
 /// today: the app's note gets more direct.
 async function vague(userId: string, message: string) {
   const strikes = await bumpVague(admin(), userId);
-  return json({ error: message, code: "too_vague", ...(strikes > VAGUE_STRIKES ? { firm: "true" } : {}) }, 422);
+  return { error: message, code: "too_vague", ...(strikes > VAGUE_STRIKES ? { firm: "true" } : {}) };
+}
+
+/// A failed extraction as the app reads it. A social post nothing could
+/// read is a question for the user, not a server error: 422 so the app
+/// shows the message as-is (and doesn't retry — see ParseClient.isTransient).
+async function failure(e: unknown, userId: string | null): Promise<{ status: number; body: Record<string, string> }> {
+  if (e instanceof VagueInputError && userId) {
+    return { status: 422, body: await vague(userId, e.message) };
+  }
+  if (e instanceof SocialUnreadableError || e instanceof VagueInputError) {
+    const code = e instanceof VagueInputError ? "too_vague" : "social_unreadable";
+    return { status: 422, body: { error: e.message, code } };
+  }
+  console.error(e);
+  return { status: 500, body: JSON.parse(internalErrorBody()) };
 }
 
 Deno.serve(async (req) => {
@@ -62,7 +82,7 @@ Deno.serve(async (req) => {
       await vagueStrikes(admin(), caller.userId) >= VAGUE_STRIKES &&
       await looksLikeSearch(text)
     ) {
-      return await vague(caller.userId, new VagueInputError().message);
+      return json(await vague(caller.userId, new VagueInputError().message), 422);
     }
 
     // Some sites wall off this server but not the phone. A build that can
@@ -92,23 +112,37 @@ Deno.serve(async (req) => {
       return json({ error: String(limitErr) }, 413);
     }
 
+    if (body.stream === "true") {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          // A phone that hung up mid-read just stops hearing.
+          const send = (event: string, data: unknown) => {
+            try {
+              controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+            } catch { /* closed */ }
+          };
+          try {
+            const card = await extractCard(body, home, read, (early) => send("early", early));
+            send("card", card);
+          } catch (e) {
+            const { status, body } = await failure(e, caller.userId);
+            send("error", { ...body, status });
+          }
+          try {
+            controller.close();
+          } catch { /* closed */ }
+        },
+      });
+      return new Response(stream, {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+      });
+    }
+
     const card = await extractCard(body, home, read);
     return json({ card });
   } catch (e) {
-    // A social post nothing could read: a question for the user, not a
-    // server error. 422 so the app shows the message as-is (and doesn't
-    // retry — see ParseClient.isTransient).
-    if (e instanceof VagueInputError && userId) {
-      return await vague(userId, e.message);
-    }
-    if (e instanceof SocialUnreadableError || e instanceof VagueInputError) {
-      const code = e instanceof VagueInputError ? "too_vague" : "social_unreadable";
-      return json({ error: e.message, code }, 422);
-    }
-    console.error(e);
-    return new Response(internalErrorBody(), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const { status, body } = await failure(e, userId);
+    return json(body, status);
   }
 });

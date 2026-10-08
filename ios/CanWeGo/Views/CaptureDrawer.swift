@@ -18,12 +18,16 @@ enum CaptureInput {
 /// The wait for the parser, spent building the card in front of you: the
 /// drawer's header (photo edge to edge, title, the quiet lines under it)
 /// fills in piece by piece — the phone's link preview and on-device guess
-/// first, then the parser's card confirming or correcting them — and once
-/// the card is in, the same drawer is the "Looks right?" preview, with
-/// the actions unfolding below. Shared with the share extension.
+/// first, then the parser's fields confirming or correcting them, then its
+/// finished card with the photo and the map — and once the card is in, the
+/// same drawer is the "Looks right?" preview, with the actions unfolding
+/// below. Shared with the share extension.
 struct CaptureDrawer<Actions: View>: View {
     /// The parser's card; nil while it's still reading.
     let draft: Item?
+    /// The parser's fields while its lookups finish: no photo, map or
+    /// colour yet.
+    var early: Item? = nil
     /// The on-device model's quick guess.
     var look: Item? = nil
     var peek: LinkPeek? = nil
@@ -39,8 +43,11 @@ struct CaptureDrawer<Actions: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    /// What the parser has said so far.
+    private var fields: Item? { draft ?? early }
+
     private var title: String? {
-        let raw = draft?.title ?? peek?.title ?? look?.title
+        let raw = fields?.title ?? peek?.title ?? look?.title
         return raw?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? raw : nil
     }
 
@@ -52,6 +59,21 @@ struct CaptureDrawer<Actions: View>: View {
 
     private var settle: AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6))
+    }
+
+    /// Fields that land together settle one after another, top to bottom.
+    private func arrival(_ order: Int) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: settle.animation(.spring(duration: 0.45).delay(Double(order) * 0.07)),
+            removal: .opacity
+        )
+    }
+
+    /// The card's own additions — photo credit, gaps, map — follow the
+    /// fields when they all land at once, and come straight in after them.
+    private func finishing(_ order: Int) -> AnyTransition {
+        arrival(early == nil ? order : order - 6)
     }
 
     var body: some View {
@@ -87,13 +109,13 @@ struct CaptureDrawer<Actions: View>: View {
                 lines
                 if showsMap, let draft {
                     PlaceMap(item: draft)
-                        .transition(settle)
+                        .transition(finishing(7))
                 }
                 if draft != nil {
                     actions()
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
                 } else {
-                    CaptureStatus(input: input)
+                    CaptureStatus(input: input, finishing: early != nil)
                         .transition(.opacity)
                 }
             }
@@ -140,9 +162,9 @@ struct CaptureDrawer<Actions: View>: View {
                 .transition(.opacity)
             }
 
-            if let draft {
-                subtitle(draft)
-                    .transition(settle)
+            if let fields {
+                subtitle(fields)
+                    .transition(arrival(0))
             } else {
                 skeleton(width: 120, height: 10)
                     .padding(.vertical, 4)
@@ -186,12 +208,12 @@ struct CaptureDrawer<Actions: View>: View {
     /// lines hold its place while reading.
     @ViewBuilder
     private var summary: some View {
-        if let draft {
-            if let text = draft.summary, !text.isEmpty {
+        if let fields {
+            if let text = fields.summary, !text.isEmpty {
                 Text(text)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
-                    .transition(.opacity)
+                    .transition(arrival(1))
             }
         } else {
             VStack(alignment: .leading, spacing: 10) {
@@ -206,36 +228,45 @@ struct CaptureDrawer<Actions: View>: View {
 
     /// Dates, venue, area, price and the photo's credit, in the detail
     /// drawer's order. While reading, the first three are placeholders
-    /// until the quick guess has them; the card's answer replaces both,
-    /// and a line it has nothing for goes away.
+    /// until the quick guess has them; the parser's fields replace both,
+    /// and a line it has nothing for goes away. What's missing is only
+    /// said once the card is in: the page's listing can still date it.
     private var lines: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let draft {
-                let showings = PlanSheet.showings(of: draft)
-                if draft.isEvent, draft.startsOn == nil, draft.endsOn == nil, showings.isEmpty {
-                    gap("calendar", "No date on the page", fix: "Add one", action: editFirst)
+            if let fields {
+                let showings = PlanSheet.showings(of: fields)
+                if fields.isEvent, fields.startsOn == nil, fields.endsOn == nil, showings.isEmpty {
+                    if draft != nil {
+                        gap("calendar", "No date on the page", fix: "Add one", action: editFirst)
+                            .transition(finishing(6))
+                    } else {
+                        line("calendar", nil, placeholder: 150, order: 2)
+                    }
                 } else if showings.isEmpty {
-                    line("calendar", draft.dateLine)
+                    line("calendar", fields.dateLine, order: 2)
                 } else {
                     Label {
-                        ShowingsLine(showings: showings, dateLine: draft.dateLine)
+                        ShowingsLine(showings: showings, dateLine: fields.dateLine)
                     } icon: {
                         icon("calendar")
                     }
                     .font(.subheadline)
-                    .transition(settle)
+                    .transition(arrival(2))
                 }
-                line("building.2", draft.venue != draft.title ? draft.venue : nil)
-                line("map", draft.areaLine)
-                line("banknote", draft.price)
-                line("camera", draft.photoCredit)
-                if photoURL == nil, pageURL(draft) != nil {
-                    gap("photo", "No photo found", fix: "Pick one") { choosingPhoto = true }
+                line("building.2", fields.venue != fields.title ? fields.venue : nil, order: 3)
+                line("map", fields.areaLine, order: 4)
+                line("banknote", fields.price, order: 5)
+                if let draft {
+                    line("camera", draft.photoCredit, order: early == nil ? 6 : 0)
+                    if photoURL == nil, pageURL(draft) != nil {
+                        gap("photo", "No photo found", fix: "Pick one") { choosingPhoto = true }
+                            .transition(finishing(6))
+                    }
                 }
             } else {
-                line("calendar", lookDate, placeholder: 150)
-                line("building.2", look?.venue, placeholder: 190)
-                line("map", look?.areaLine, placeholder: 110)
+                line("calendar", lookDate, placeholder: 150, order: 0)
+                line("building.2", look?.venue, placeholder: 190, order: 1)
+                line("map", look?.areaLine, placeholder: 110, order: 2)
             }
         }
     }
@@ -250,7 +281,7 @@ struct CaptureDrawer<Actions: View>: View {
     }
 
     @ViewBuilder
-    private func line(_ symbol: String, _ text: String?, placeholder width: CGFloat? = nil) -> some View {
+    private func line(_ symbol: String, _ text: String?, placeholder width: CGFloat? = nil, order: Int) -> some View {
         if let text {
             Label {
                 Text(text)
@@ -261,7 +292,7 @@ struct CaptureDrawer<Actions: View>: View {
                 icon(symbol)
             }
             .font(.subheadline)
-            .transition(settle)
+            .transition(arrival(order))
         } else if let width {
             Label {
                 skeleton(width: width, height: 10)
@@ -297,7 +328,6 @@ struct CaptureDrawer<Actions: View>: View {
             icon(symbol)
         }
         .font(.subheadline)
-        .transition(settle)
     }
 
     private func icon(_ symbol: String) -> some View {
@@ -316,9 +346,12 @@ struct CaptureDrawer<Actions: View>: View {
 
 /// One line saying what the parser is doing, moved on by the clock: what
 /// it was sent first, then the same few steps for everything, holding on
-/// the last for a slow read. VoiceOver hears the first line once.
+/// the last for a slow read — or going straight to it once the parser's
+/// fields are in. VoiceOver hears the first line once.
 struct CaptureStatus: View {
     let input: CaptureInput
+    /// The fields are in; only the photo and the map are left.
+    var finishing = false
     @State private var step = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -356,8 +389,11 @@ struct CaptureStatus: View {
             for hold in Self.holds {
                 try? await Task.sleep(for: .seconds(hold))
                 guard !Task.isCancelled else { return }
-                step += 1
+                step = min(step + 1, phrases.count - 1)
             }
+        }
+        .onChange(of: finishing, initial: true) { _, done in
+            if done { step = phrases.count - 1 }
         }
     }
 }
