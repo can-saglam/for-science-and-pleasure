@@ -1,5 +1,5 @@
-// suggestions: things on in a home city, for the empty library tabs and
-// the first-save page. Body: { locality, country }. Answers from the
+// suggestions: things on in a home city, for the add page, the empty
+// library tabs and the first-save page. Body: { locality, country }. Answers from the
 // stored pool straight away, ended events filtered out; a stale pool
 // refreshes after the answer, so the next ask gets the new one. A city
 // with no places yet waits for the quick knowledge call so the first ask
@@ -10,8 +10,11 @@ import { admin, resolveCaller } from "../_shared/groups.ts";
 import { consumeQuota } from "../_shared/quota.ts";
 import { fallbackStarters, starterKey } from "../_shared/starters.ts";
 import {
+  BUSY_CITY_PEOPLE,
+  type Refreshed,
   type Suggestion,
   type SuggestionKind,
+  busyMatters,
   isDue,
   leaseFree,
   refreshEvents,
@@ -57,6 +60,24 @@ Deno.serve(async (req) => {
       .eq("key", key);
     const rows = (data ?? []) as Row[];
     const row = (kind: SuggestionKind) => rows.find((r) => r.kind === kind) ?? null;
+    let busy = false;
+
+    const record = async (kind: SuggestionKind, outcome: string, result: Refreshed | null, ms: number) => {
+      const { error } = await db.from("suggestion_runs").insert({
+        key,
+        kind,
+        outcome,
+        busy: kind === "event" && busy,
+        proposed: result?.proposed ?? null,
+        kept: result?.items.length ?? null,
+        model: result?.usage.model ?? null,
+        searches: result?.usage.searches ?? null,
+        input_tokens: result?.usage.input_tokens ?? null,
+        output_tokens: result?.usage.output_tokens ?? null,
+        total_ms: ms,
+      });
+      if (error) console.error("suggestion_runs", error.message);
+    };
 
     /// One refresh per row at a time. An empty or failed refresh keeps the
     /// old pool and holds the lease, so the next try waits it out.
@@ -85,6 +106,7 @@ Deno.serve(async (req) => {
           ? await refreshEvents(locality, country, today, (s) => note(stage = `${s} (${took()})`))
           : await refreshPlaces(locality, country, today);
         const summary = `kept ${result.items.length} of ${result.proposed} in ${took()}; ${stage}`;
+        await record(kind, result.items.length === 0 ? "empty" : "kept", result, Date.now() - started);
         if (result.items.length === 0) {
           await note(summary);
           return null;
@@ -103,6 +125,7 @@ Deno.serve(async (req) => {
       } catch (error) {
         console.error("suggestions refresh", kind, error);
         await note(`error after ${took()}: ${String(error).slice(0, 300)}`);
+        await record(kind, "error", null, Date.now() - started);
         return null;
       }
     };
@@ -115,13 +138,17 @@ Deno.serve(async (req) => {
 
     const later: Promise<unknown>[] = [];
     let eventsComing = false;
+    if (allowed && busyMatters(eventRow?.fetched_at ?? null, "event")) {
+      const { data: people } = await db.rpc("city_people", { p_key: key });
+      busy = typeof people === "number" && people >= BUSY_CITY_PEOPLE;
+    }
     if (allowed) {
       if (places.length === 0 && leaseFree(placeRow?.refreshing_since ?? null)) {
         places = (await refresh("place")) ?? [];
       } else if (isDue(placeRow?.fetched_at ?? null, "place", places.length) && leaseFree(placeRow?.refreshing_since ?? null)) {
         later.push(refresh("place"));
       }
-      if (isDue(eventRow?.fetched_at ?? null, "event", events.length) && leaseFree(eventRow?.refreshing_since ?? null)) {
+      if (isDue(eventRow?.fetched_at ?? null, "event", events.length, new Date(), busy) && leaseFree(eventRow?.refreshing_since ?? null)) {
         later.push(refresh("event"));
         eventsComing = events.length === 0;
       }

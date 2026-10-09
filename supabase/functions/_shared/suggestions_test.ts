@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, isDue, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
+import { aboutEvent, answerText, busyMatters, isDue, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -97,15 +97,42 @@ Deno.test("a one-night event is on through its day", () => {
   assert(!stillOn(s, "2026-09-27"));
 });
 
-Deno.test("refresh timing: weekly events, fortnightly places, sooner when thin", () => {
+Deno.test("refresh timing: weekly events, monthly places, sooner when thin", () => {
   const now = new Date("2026-09-26T12:00:00Z");
   assert(isDue(null, "event", 8, now));
   assert(!isDue("2026-09-22T12:00:00Z", "event", 8, now));
   assert(isDue("2026-09-19T12:00:00Z", "event", 8, now));
-  assert(!isDue("2026-09-19T12:00:00Z", "place", 8, now));
-  assert(isDue("2026-09-12T12:00:00Z", "place", 8, now));
+  assert(!isDue("2026-09-12T12:00:00Z", "place", 8, now));
+  assert(isDue("2026-08-27T12:00:00Z", "place", 8, now));
   assert(isDue("2026-09-24T12:00:00Z", "event", 2, now));
   assert(!isDue("2026-09-26T06:00:00Z", "event", 2, now));
+});
+
+Deno.test("a busy city's events refresh every three days; places don't change", () => {
+  const now = new Date("2026-09-26T12:00:00Z");
+  assert(!isDue("2026-09-24T12:00:00Z", "event", 8, now, true));
+  assert(isDue("2026-09-23T12:00:00Z", "event", 8, now, true));
+  assert(!isDue("2026-09-23T12:00:00Z", "event", 8, now, false));
+  assert(!isDue("2026-09-12T12:00:00Z", "place", 8, now, true));
+});
+
+Deno.test("busyness is only looked up when it would change the answer", () => {
+  const now = new Date("2026-09-26T12:00:00Z");
+  assert(!busyMatters(null, "event", now));
+  assert(!busyMatters("2026-09-25T12:00:00Z", "event", now));
+  assert(busyMatters("2026-09-22T12:00:00Z", "event", now));
+  assert(!busyMatters("2026-09-18T12:00:00Z", "event", now));
+  assert(!busyMatters("2026-09-22T12:00:00Z", "place", now));
+});
+
+Deno.test("the event pool holds fourteen, places eight", () => {
+  const events = Array.from({ length: 20 }, (_, i) => ({
+    title: `Show ${i}`, starts_on: "2026-10-01", ends_on: null, url: `https://www.barbican.org.uk/show-${i}`,
+  }));
+  assertEquals(shapeSuggestions({ items: events }, "event", today).length, 14);
+  assertEquals(shapeSuggestions({ items: events }, "event", today, Infinity).length, 20);
+  const places = Array.from({ length: 12 }, (_, i) => ({ title: `Place ${i}`, venue: null, url: `https://place${i}.org/` }));
+  assertEquals(shapeSuggestions({ items: places }, "place", today).length, 8);
 });
 
 Deno.test("a stuck refresh frees up after five minutes", () => {

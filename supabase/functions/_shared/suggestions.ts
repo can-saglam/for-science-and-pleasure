@@ -1,5 +1,5 @@
-// Suggestions: a pool of real things in a home city for the empty library
-// tabs and the first-save page. Events come from a web search and are
+// Suggestions: a pool of real things in a home city for the add page, the
+// empty library tabs and the first-save page. Events come from a web search and are
 // checked the way a save's link is (the page loads and dates this run);
 // places come from the model's knowledge, official sites only. Pure
 // helpers first, then the two refreshes.
@@ -19,18 +19,39 @@ export interface Suggestion {
   ends_on: string | null;
 }
 
-export const POOL_SIZE = 8;
-const TTL_DAYS: Record<SuggestionKind, number> = { event: 7, place: 14 };
+/// The add page shows two events a day in a new order each day, so a
+/// bigger event pool goes longer before it repeats; places barely change.
+export const POOL_SIZE: Record<SuggestionKind, number> = { event: 14, place: 8 };
+/// Places change slowly. Events weekly, or every three days in a city
+/// with enough people to notice the same ones coming round.
+const TTL_DAYS: Record<SuggestionKind, number> = { event: 7, place: 30 };
+const BUSY_EVENT_TTL_DAYS = 3;
+export const BUSY_CITY_PEOPLE = 20;
 /// A refresh that never finished (the worker died) stops blocking the next.
 const REFRESH_LEASE_MS = 5 * 60_000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /// Stale by age, or thinned out by events ending: under three left and a
 /// day since the last try.
-export function isDue(fetchedAt: string | null, kind: SuggestionKind, live: number, now = new Date()): boolean {
+export function isDue(
+  fetchedAt: string | null,
+  kind: SuggestionKind,
+  live: number,
+  now = new Date(),
+  busy = false,
+): boolean {
   if (!fetchedAt) return true;
   const age = now.getTime() - new Date(fetchedAt).getTime();
-  return age >= TTL_DAYS[kind] * 86_400_000 || (live < 3 && age >= 86_400_000);
+  const ttl = kind === "event" && busy ? BUSY_EVENT_TTL_DAYS : TTL_DAYS[kind];
+  return age >= ttl * 86_400_000 || (live < 3 && age >= 86_400_000);
+}
+
+/// Only an event pool between the busy and the normal age needs to know
+/// whether its city is busy.
+export function busyMatters(fetchedAt: string | null, kind: SuggestionKind, now = new Date()): boolean {
+  if (kind !== "event" || !fetchedAt) return false;
+  const age = now.getTime() - new Date(fetchedAt).getTime();
+  return age >= BUSY_EVENT_TTL_DAYS * 86_400_000 && age < TTL_DAYS.event * 86_400_000;
 }
 
 export function leaseFree(refreshingSince: string | null, now = new Date()): boolean {
@@ -46,7 +67,7 @@ export function stillOn(s: Suggestion, today: string): boolean {
 
 /// Tidy the model's list: official https pages only, no listings sites,
 /// real dates on events (ended ones dropped), no duplicates, pool-sized.
-export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: string): Suggestion[] {
+export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: string, cap = POOL_SIZE[kind]): Suggestion[] {
   const list = Array.isArray((raw as { items?: unknown })?.items) ? (raw as { items: unknown[] }).items : [];
   const out: Suggestion[] = [];
   const seen = new Set<string>();
@@ -74,7 +95,7 @@ export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: stri
     if (!stillOn(suggestion, today)) continue;
     seen.add(key);
     out.push(suggestion);
-    if (out.length === POOL_SIZE) break;
+    if (out.length >= cap) break;
   }
   return out;
 }
@@ -197,17 +218,47 @@ export function readItems(text: string): unknown[] | null {
   return attempt(text) ?? (start >= 0 && end > start ? attempt(text.slice(start, end + 1)) : null);
 }
 
+/// What a refresh's model calls used, for suggestion_runs.
+export interface Usage {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  searches: number;
+}
+
 export interface Refreshed {
   items: Suggestion[];
   proposed: number;
+  usage: Usage;
 }
 
-/// Two narrower searches side by side: one long search for ten ran out
-/// of output before it answered. Each stays well inside the worker's wall
-/// clock, and one coming back empty doesn't sink the other.
+const SUGGEST_MODEL = "claude-sonnet-5";
+
+function usageOf(response: { usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } | null } }): Usage {
+  return {
+    model: SUGGEST_MODEL,
+    input_tokens: response.usage?.input_tokens ?? 0,
+    output_tokens: response.usage?.output_tokens ?? 0,
+    searches: response.usage?.server_tool_use?.web_search_requests ?? 0,
+  };
+}
+
+export function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    model: a.model,
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    searches: a.searches + b.searches,
+  };
+}
+
+/// Narrower searches side by side: one long search for ten ran out of
+/// output before it answered. Each stays well inside the worker's wall
+/// clock, and one coming back empty doesn't sink the others.
 const EVENT_FOCUSES = [
   "exhibitions, theatre and film seasons",
   "gigs, festivals, talks and markets",
+  "food and drink events, supper clubs, pop-ups, comedy and club nights",
 ];
 
 async function searchEvents(
@@ -216,10 +267,11 @@ async function searchEvents(
   locality: string,
   country: string,
   today: string,
-): Promise<{ raw: unknown[]; seen: string[]; note: string }> {
+): Promise<{ raw: unknown[]; seen: string[]; note: string; usage: Usage }> {
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 8192,
+    model: SUGGEST_MODEL,
+    // 8192 cut answers off mid-list after three searches' worth of reading.
+    max_tokens: 16_384,
     output_config: { format: { type: "json_schema", schema: EVENT_SCHEMA } },
     tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 }],
     messages: [{
@@ -247,6 +299,7 @@ async function searchEvents(
     raw: raw ?? [],
     seen,
     note: raw ? `${raw.length} (${response.stop_reason})` : `unreadable (${response.stop_reason}): ${text.slice(0, 120)}`,
+    usage: usageOf(response),
   };
 }
 
@@ -265,25 +318,32 @@ export async function refreshEvents(
   const lists: unknown[][] = [];
   const seen = new Set<string>();
   const notes: string[] = [];
+  let usage: Usage = { model: SUGGEST_MODEL, input_tokens: 0, output_tokens: 0, searches: 0 };
   for (const s of searches) {
     if (s.status === "fulfilled") {
       lists.push(s.value.raw);
       s.value.seen.forEach((k) => seen.add(k));
       notes.push(s.value.note);
+      usage = addUsage(usage, s.value.usage);
     } else {
       notes.push(`failed: ${String(s.reason).slice(0, 120)}`);
     }
   }
-  // Alternate the two lists so the pool's cap doesn't cut one kind.
+  // Alternate the lists so the pool's cap doesn't cut one kind.
   const raw = Array.from({ length: Math.max(0, ...lists.map((l) => l.length)) })
     .flatMap((_, i) => lists.map((l) => l[i]).filter((x) => x !== undefined));
-  const shaped = shapeSuggestions({ items: raw }, "event", today);
+  // Every candidate is checked, and the cap applies to what passes.
+  const shaped = shapeSuggestions({ items: raw }, "event", today, Infinity);
   await stage(`searches: ${notes.join(" / ")}; checking ${shaped.length} links`);
   const checked = await Promise.all(shaped.map(async (s) => {
     const own = await ownPage(s.url, seen, [s.starts_on, s.ends_on].filter((d): d is string => !!d));
     return own && aboutEvent(s.title, own.html, own.url) ? { ...s, url: own.url } : null;
   }));
-  return { items: checked.filter((s): s is Suggestion => s !== null), proposed: shaped.length };
+  return {
+    items: checked.filter((s): s is Suggestion => s !== null).slice(0, POOL_SIZE.event),
+    proposed: shaped.length,
+    usage,
+  };
 }
 
 /// Places worth going to, from the model's knowledge: quick, and famous
@@ -291,13 +351,13 @@ export async function refreshEvents(
 export async function refreshPlaces(locality: string, country: string, today: string): Promise<Refreshed> {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-5",
+    model: SUGGEST_MODEL,
     max_tokens: 2048,
     output_config: { format: { type: "json_schema", schema: PLACE_SCHEMA } },
     messages: [{
       role: "user",
       content:
-        `Name ${POOL_SIZE + 2} real places in ${locality}, ${country} worth going to with a friend: ` +
+        `Name ${POOL_SIZE.place + 2} real places in ${locality}, ${country} worth going to with a friend: ` +
         `about half restaurants, cafés and bars, half galleries, museums, cinemas and music venues. ` +
         `Loved by locals, not only the famous landmarks. Each url MUST be that place's own official https website, ` +
         `a domain you are sure exists — never google, maps, tripadvisor, timeout, wikipedia, instagram, facebook or a tourism portal. ` +
@@ -306,7 +366,7 @@ export async function refreshPlaces(locality: string, country: string, today: st
   });
   const shaped = shapeSuggestions({ items: readItems(answerText(response.content)) ?? [] }, "place", today);
   const alive = await Promise.all(shaped.map(async (s) => (await resolves(s.url)) ? s : null));
-  return { items: alive.filter((s): s is Suggestion => s !== null), proposed: shaped.length };
+  return { items: alive.filter((s): s is Suggestion => s !== null), proposed: shaped.length, usage: usageOf(response) };
 }
 
 /// The site answers at all. Bot walls (403, 429, 503) count as alive; a
