@@ -123,6 +123,7 @@ struct HomeCitySheet: View {
                 note = "Couldn't look that up."
                 return
             }
+            request.preferredLocale = HomeStore.namesLocale
             present(try await request.mapItems)
             if matches.isEmpty {
                 note = "No city matched “\(trimmed)”. Try the city name on its own."

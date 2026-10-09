@@ -1667,6 +1667,7 @@ struct OnboardingView: View {
                 note = "Couldn't read that location."
                 return
             }
+            request.preferredLocale = HomeStore.namesLocale
             present(try await request.mapItems)
         } catch {
             note = "Couldn't read that location. Type your city instead."
@@ -1687,6 +1688,7 @@ struct OnboardingView: View {
                 note = "Couldn't look that up."
                 return
             }
+            request.preferredLocale = HomeStore.namesLocale
             present(try await request.mapItems)
             if matches.isEmpty {
                 note = "No city matched “\(query)”. Try the city name on its own."

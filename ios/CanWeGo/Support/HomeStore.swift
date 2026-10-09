@@ -40,6 +40,11 @@ final class HomeStore {
 
     nonisolated private static let cacheKey = "groupHome"
 
+    /// City lookups ask for English names whatever the phone's language,
+    /// so one city is one name: the suggestion pools and the busy-city
+    /// count key on it ("Londra" would be a second London).
+    static let namesLocale = Locale(identifier: "en")
+
     private(set) var home: Home
     /// True only when this group has a real home on the server — not the
     /// London fallback used so the clock always has *somewhere* to tick.
