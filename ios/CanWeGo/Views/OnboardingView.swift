@@ -1854,39 +1854,15 @@ struct OnboardingView: View {
                     }
 
                     if linkDraft.isEmpty, linkImage == nil {
-                        if !starterChips.isEmpty, let city = starterCity {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Or try one of these in \(city)")
-                                    .font(.footnote)
-                                    .foregroundStyle(AppBackground.secondaryInk)
-                                ScrollView(.horizontal) {
-                                    HStack(spacing: 8) {
-                                        ForEach(starterChips) { s in
-                                            Button {
-                                                Haptics.tap()
-                                                linkDraft = s.url
-                                                startParse()
-                                            } label: {
-                                                Label(s.title, systemImage: s.kind == "event" ? "ticket" : "mappin.and.ellipse")
-                                                    .font(.footnote.weight(.medium))
-                                                    .lineLimit(1)
-                                            }
-                                            .buttonStyle(.glass)
-                                        }
-                                    }
-                                }
-                                .scrollIndicators(.hidden)
-                                .scrollClipDisabled()
-                            }
-                            .transition(.opacity)
-                        } else if suggestions.loading, let city = chosenHome?.locality {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("Looking up a few things in \(city)…")
-                                    .font(.footnote)
-                                    .foregroundStyle(AppBackground.secondaryInk)
-                            }
-                            .transition(.opacity)
+                        // The add page's list, so the first save looks like
+                        // every one after it.
+                        Recommendations(
+                            city: starterChips.isEmpty ? chosenHome?.locality : starterCity,
+                            picks: starterChips,
+                            loading: suggestions.loading
+                        ) { pick in
+                            linkDraft = pick.url
+                            startParse()
                         }
                     }
 

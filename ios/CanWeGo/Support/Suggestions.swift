@@ -109,10 +109,11 @@ final class Suggestions {
             .map(\.self)
     }
 
-    /// The first-save page's three: events first, places to fill.
-    func mixed(for home: HomeStore.Home, count: Int = 3) -> [Pick] {
-        let on = picks(kind: Item.Kind.event, for: home, excluding: [], count: 2)
-        return on + picks(kind: Item.Kind.place, for: home, excluding: [], count: count - on.count)
+    /// The add page's three (and the first-save page's): events first,
+    /// places to fill.
+    func mixed(for home: HomeStore.Home, excluding saved: [Item] = [], count: Int = 3) -> [Pick] {
+        let on = picks(kind: Item.Kind.event, for: home, excluding: saved, count: 2)
+        return on + picks(kind: Item.Kind.place, for: home, excluding: saved, count: count - on.count)
     }
 
     /// "until 2 Nov", "from 3 Oct", "tomorrow", "Sat 4 Oct".

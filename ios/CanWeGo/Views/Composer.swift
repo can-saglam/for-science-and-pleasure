@@ -1,25 +1,25 @@
 import PhotosUI
 import SwiftUI
 
-/// The one way anything gets typed into the app: the field on top,
-/// an attached picture in the middle, and a tool row along the bottom
-/// (gallery, camera and — where offered — a blank card on the left, the
-/// round send button on the right).
-/// Shared by the capture sheet and the first-run's save page so they
-/// are the same thing, not two things that look alike.
+/// The one way anything gets typed into the app, as a Messages-style bar:
+/// + on the left for a photo, the camera or (where offered) a blank card,
+/// then the field with the round send button inside it. An attached
+/// picture sits in the field above the text.
+/// Shared by the add page, where it's docked on the keyboard, and the
+/// first-run's save page, so they are the same thing, not two things
+/// that look alike.
 ///
 /// While the field is empty a ticker of ideas stands in for the
 /// placeholder, one line at a time, until they start typing.
 struct Composer: View {
     @Binding var text: String
     @Binding var imageJPEG: Data?
-    /// The parent is reading what was sent; the tool row shows the
-    /// parsing phrases and the send button spins.
+    /// The parent is reading what was sent; the send button spins.
     var busy = false
     /// No connection: the send button becomes Save, which keeps the input
     /// to be finished later instead of reading it now.
     var offline = false
-    /// Optional third tool after the camera: start a blank card by hand,
+    /// Optional last item in the + menu: start a blank card by hand,
     /// skipping the parser. Nil hides it (the first-run page has no
     /// manual path).
     var onManual: (() -> Void)? = nil
@@ -28,6 +28,7 @@ struct Composer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
     @State private var photoItem: PhotosPickerItem?
+    @State private var photoOpen = false
     @State private var cameraOpen = false
     @State private var tickerIndex = 0
 
@@ -46,175 +47,26 @@ struct Composer: View {
         "That bar a friend swears by",
     ]
 
+    private static let control: CGFloat = 40
+
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            TextField("", text: $text, axis: .vertical)
-                .foregroundStyle(AppBackground.ink)
-                .lineLimit(3...8)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .accessibilityLabel("Link or name")
-                .background(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text(Self.prompts[tickerIndex % Self.prompts.count])
-                            .foregroundStyle(AppBackground.ink.opacity(0.72))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                            .id(tickerIndex)
-                            // Rolls upward: the old line leaves at the top
-                            // as the new one rises from below.
-                            .transition(reduceMotion ? .opacity : .asymmetric(
-                                insertion: .offset(y: 14).combined(with: .opacity),
-                                removal: .offset(y: -14).combined(with: .opacity)
-                            ))
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .clipped()
-                .task {
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(2.6))
-                        guard text.isEmpty else { continue }
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
-                            tickerIndex += 1
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
-
-            if let image = imageJPEG.flatMap(UIImage.init(data:)) {
-                attachedThumbnail(image)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-            }
-
-            HStack(spacing: 8) {
-                if busy && !offline {
-                    // The send button is already spinning; the copy alone
-                    // says what's happening.
-                    ParsingPhrases(text: text, hasImage: imageJPEG != nil)
-                        .padding(.leading, 6)
-                } else if !busy {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        toolIcon("photo")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Attach a photo")
-
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button {
-                            Haptics.tap()
-                            cameraOpen = true
-                        } label: {
-                            toolIcon("camera")
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Take a photo")
-                    }
-
-                    if let onManual {
-                        Button {
-                            Haptics.tap()
-                            onManual()
-                        } label: {
-                            // Worded, unlike its neighbours: the glyph
-                            // alone doesn't say "skip the parser".
-                            Label("Add manually", systemImage: "rectangle.and.pencil.and.ellipsis")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(AppBackground.ink.opacity(0.85))
-                                .padding(.horizontal, 12)
-                                .frame(height: 34)
-                                .background(AppBackground.wash(0.10), in: .capsule)
-                                .contentShape(.capsule)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                Button {
-                    Haptics.tap()
-                    onSend()
-                } label: {
-                    Group {
-                        if offline {
-                            // The spinner sits over the hidden label, so the
-                            // pill keeps its width while the draft is made.
-                            // Worded, no glyph: with one, "Add manually"
-                            // no longer fits beside it.
-                            Text("Save")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 16)
-                                .opacity(busy ? 0 : 1)
-                                .overlay { if busy { sendSpinner } }
-                        } else if busy {
-                            sendSpinner.frame(width: 34)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.body.weight(.semibold))
-                                .frame(width: 34)
-                        }
-                    }
-                    .frame(height: 34)
-                    // Lit (white pill, dark glyph) whenever there's something
-                    // to send — including while it's being sent, so the
-                    // spinner stays dark-on-white in every theme.
-                    .foregroundStyle(
-                        canSend
-                            ? AnyShapeStyle(AppBackground.onProminent)
-                            : AnyShapeStyle(AppBackground.ink.opacity(0.45))
-                    )
-                    .background(
-                        Capsule().fill(canSend
-                            ? Color.white.opacity(0.92)
-                            : AppBackground.wash(0.16))
-                    )
-                    // On cream the lit white disc sits on a near-white
-                    // field; a hairline gives it an edge.
-                    .overlay(
-                        Capsule().strokeBorder(
-                            AppBackground.ink.opacity(
-                                canSend && AppBackground.theme.isLight ? 0.22 : 0),
-                            lineWidth: 1)
-                    )
-                    .contentShape(.capsule)
-                }
-                .buttonStyle(.plain)
-                .disabled(busy || !canSend)
-                .accessibilityLabel(offline ? "Save for later" : "Add something")
-            }
-            .padding(10)
-            .animation(.snappy, value: busy)
-            .animation(.snappy, value: offline)
+        HStack(alignment: .bottom, spacing: 8) {
+            moreMenu
+            field
         }
-        .background(AppBackground.wash(0.08), in: .rect(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(
-                    AppBackground.ink.opacity(focused ? 0.22 : 0.10),
-                    lineWidth: 1
-                )
-        )
-        // Anywhere on the composer counts as the field. No auto-focus on
-        // appear: in the sheet the keyboard would shove it to full height,
-        // and the half-open drawer is the point.
-        .contentShape(.rect(cornerRadius: 24, style: .continuous))
-        .onTapGesture { focused = true }
-        .animation(.snappy, value: focused)
+        .animation(.snappy, value: busy)
+        .animation(.snappy, value: offline)
         // Sending puts the keyboard away so the result has the room.
         .onChange(of: busy) { _, now in if now { focused = false } }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task { await loadPhoto(item) }
         }
+        .photosPicker(isPresented: $photoOpen, selection: $photoItem, matching: .images)
         .fullScreenCover(isPresented: $cameraOpen) {
             CameraPicker { image in
                 withAnimation(.snappy) {
@@ -225,20 +77,156 @@ struct Composer: View {
         }
     }
 
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                photoOpen = true
+            } label: {
+                Label("Photo library", systemImage: "photo")
+            }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button {
+                    cameraOpen = true
+                } label: {
+                    Label("Camera", systemImage: "camera")
+                }
+            }
+            if let onManual {
+                Button(action: onManual) {
+                    Label("Fill it in yourself", systemImage: "rectangle.and.pencil.and.ellipsis")
+                }
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppBackground.ink)
+                .frame(width: Self.control, height: Self.control)
+                .contentShape(.circle)
+        }
+        .menuOrder(.fixed)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .disabled(busy)
+        .accessibilityLabel("More ways to add")
+    }
+
+    private var field: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let image = imageJPEG.flatMap(UIImage.init(data:)) {
+                attachedThumbnail(image)
+                    .padding(.top, 10)
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("", text: $text, axis: .vertical)
+                    .foregroundStyle(AppBackground.ink)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .accessibilityLabel("Link or name")
+                    .background(alignment: .topLeading) {
+                        if text.isEmpty {
+                            Text(Self.prompts[tickerIndex % Self.prompts.count])
+                                .foregroundStyle(AppBackground.ink.opacity(0.6))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .id(tickerIndex)
+                                // Rolls upward: the old line leaves at the top
+                                // as the new one rises from below.
+                                .transition(reduceMotion ? .opacity : .asymmetric(
+                                    insertion: .offset(y: 14).combined(with: .opacity),
+                                    removal: .offset(y: -14).combined(with: .opacity)
+                                ))
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .clipped()
+                    .task {
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(2.6))
+                            guard text.isEmpty else { continue }
+                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
+                                tickerIndex += 1
+                            }
+                        }
+                    }
+                    .padding(.vertical, 10)
+
+                sendButton
+                    .padding(.bottom, 5)
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 5)
+        .frame(minHeight: Self.control)
+        .background(AppBackground.wash(0.10), in: .rect(cornerRadius: Self.control / 2, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Self.control / 2, style: .continuous)
+                .strokeBorder(AppBackground.ink.opacity(focused ? 0.24 : 0.12), lineWidth: 1)
+        )
+        // Anywhere on the bar counts as the field. No auto-focus on
+        // appear: the keyboard would cover what the page offers.
+        .contentShape(.rect(cornerRadius: Self.control / 2, style: .continuous))
+        .onTapGesture { focused = true }
+        .animation(.snappy, value: focused)
+    }
+
+    private var sendButton: some View {
+        Button {
+            Haptics.tap()
+            onSend()
+        } label: {
+            Group {
+                if offline {
+                    // The spinner sits over the hidden label, so the pill
+                    // keeps its width while the draft is made.
+                    Text("Save")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .opacity(busy ? 0 : 1)
+                        .overlay { if busy { sendSpinner } }
+                } else if busy {
+                    sendSpinner.frame(width: 30)
+                } else {
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.weight(.bold))
+                        .frame(width: 30)
+                }
+            }
+            .frame(height: 30)
+            // Lit (white, dark glyph) whenever there's something to send,
+            // including while it's being sent, so the spinner stays
+            // dark-on-white in every theme.
+            .foregroundStyle(
+                canSend
+                    ? AnyShapeStyle(AppBackground.onProminent)
+                    : AnyShapeStyle(AppBackground.ink.opacity(0.45))
+            )
+            .background(
+                Capsule().fill(canSend
+                    ? Color.white.opacity(0.92)
+                    : AppBackground.wash(0.16))
+            )
+            // On cream the lit white disc sits on a near-white field; a
+            // hairline gives it an edge.
+            .overlay(
+                Capsule().strokeBorder(
+                    AppBackground.ink.opacity(
+                        canSend && AppBackground.theme.isLight ? 0.22 : 0),
+                    lineWidth: 1)
+            )
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .disabled(busy || !canSend)
+        .accessibilityLabel(offline ? "Save for later" : "Add something")
+    }
+
     private var sendSpinner: some View {
         ProgressView()
             .controlSize(.small)
             .tint(AppBackground.onProminent)
-    }
-
-    /// Small round tool button in the bottom row.
-    private func toolIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(AppBackground.ink.opacity(0.85))
-            .frame(width: 34, height: 34)
-            .background(AppBackground.wash(0.10), in: .circle)
-            .contentShape(.circle)
     }
 
     /// Just the picture with a small × on its corner — the way AI composers

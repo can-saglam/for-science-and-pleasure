@@ -27,12 +27,6 @@ struct CaptureView: View {
     /// True when the card was started blank — no parser involved.
     @State private var manual = false
     @State private var saved = false
-    /// The input stage hugs its content — title plus composer, plus the
-    /// error notice when there is one — instead of sitting at
-    /// half height over empty space. The card preview gets the full sheet.
-    @State private var detent: PresentationDetent = .medium
-    @State private var headerHeight: CGFloat = 0
-    @State private var inputHeight: CGFloat = 0
     @State private var confirmDiscard = false
     /// Set when Save meets a full category or a full day: the card stays,
     /// Plus is offered.
@@ -58,11 +52,12 @@ struct CaptureView: View {
     /// What the duplicate checks compare against. Read on opening and after
     /// each parse, not per render: the card's check runs on every keystroke.
     @State private var library: [Item] = []
-
-    private var inputDetent: PresentationDetent {
-        guard inputHeight > 0 else { return .medium }
-        return .height(headerHeight + inputHeight)
-    }
+    @State private var suggestions = Suggestions.shared
+    /// A tapped recommendation's name, venue and dates, shown in the
+    /// drawer while the parser reads its page.
+    @State private var pickedLook: Item?
+    /// The question and the drawer's title are one thing on screen.
+    @Namespace private var titleSpace
 
     private var canParse: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
@@ -75,8 +70,13 @@ struct CaptureView: View {
     /// editing (and the blank card) keep the plain sheet and its form.
     private var showsDrawer: Bool { (reading != nil || draft != nil) && !editing && !manual }
 
-    /// Past the input stage: the sheet stays at full height.
-    private var expanded: Bool { reading != nil || draft != nil }
+    private var home: HomeStore.Home? { HomeStore.shared.isSet ? HomeStore.shared.home : nil }
+
+    /// Only on an empty page: anything typed or attached is the thing.
+    private var recommendations: [ParseClient.Suggestion] {
+        guard text.isEmpty, imageJPEG == nil, !offlineMode, let home else { return [] }
+        return suggestions.mixed(for: home, excluding: library)
+    }
 
     private var reveal: Animation {
         reduceMotion ? .easeInOut(duration: 0.3) : .spring(duration: 0.45)
@@ -87,11 +87,14 @@ struct CaptureView: View {
             ScrollView {
                 if showsDrawer {
                     CaptureDrawer(
-                        draft: draft, early: early, look: firstLook, peek: peek, input: reading ?? .text,
+                        draft: draft, early: early, look: pickedLook ?? firstLook, peek: peek, input: reading ?? .text,
                         notice: draft.flatMap(twin(of:)).map { twin in
                             AnyView(DuplicateStrip(twin: twin, open: { openExisting(twin) }))
                         },
-                        editFirst: { withAnimation(.snappy) { editing = true } }
+                        editFirst: { withAnimation(.snappy) { editing = true } },
+                        typed: reading == .text ? trimmedText : nil,
+                        titleSpace: titleSpace,
+                        growsIn: true
                     ) {
                         if let draft {
                             VStack(alignment: .leading, spacing: 18) {
@@ -110,31 +113,32 @@ struct CaptureView: View {
                         }
                     }
                     .padding(20)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                        // Only the input stage drives the small detent; the
-                        // drawer and the form go to .large regardless.
-                        guard !expanded else { return }
-                        inputHeight = height
-                    }
+                    // The page clears out quickly so the drawer doesn't
+                    // land on top of it; only the title travels.
+                    .transition(.asymmetric(
+                        insertion: .opacity,
+                        removal: .opacity.animation(.easeOut(duration: 0.15))
+                    ))
                 }
             }
             // The drawer's photo runs edge to edge under the close button.
             .ignoresSafeArea(edges: showsDrawer ? .top : [])
             .scrollDismissesKeyboard(.interactively)
+            // The bar and the card's actions take the same strip, so the
+            // thumb ends where it started.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let draft {
                     previewActions(draft)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+                } else if reading == nil {
+                    composerBar
+                        .transition(.opacity)
                 }
             }
-            // The header lives in the top safe-area inset, so its height
-            // shows up here rather than in the content above.
-            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { height in
-                guard !showsDrawer else { return }
-                headerHeight = height
-            }
+            // The page draws its own question, so it can carry into the
+            // drawer's title.
             .sheetTitle(
-                showsDrawer ? nil : (draft == nil ? Voice.whereGoing : (manual ? "Add your own" : "Looks right?"))
+                showsDrawer || draft == nil ? nil : (manual ? "Add your own" : "Looks right?")
             ) {
                 dismiss()
             }
@@ -158,18 +162,11 @@ struct CaptureView: View {
         }
         .foregroundStyle(AppBackground.ink)
         .appColorScheme()
-        .presentationDetents([inputDetent, .large], selection: $detent)
+        // One height throughout: reading and the card are full height, so
+        // the page is too, and nothing jumps on send.
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
-        .onChange(of: expanded) { _, isExpanded in
-            withAnimation(.snappy) { detent = isExpanded ? .large : inputDetent }
-        }
-        // The measured height settles a frame or two after the sheet
-        // appears (and moves when a notice comes or goes): follow it.
-        .onChange(of: inputDetent) { _, now in
-            guard !expanded else { return }
-            withAnimation(.snappy) { detent = now }
-        }
         // Closing mid-read stops the parse and the link preview with it.
         .onDisappear {
             parseTask?.cancel()
@@ -177,6 +174,7 @@ struct CaptureView: View {
         }
         .onAppear {
             loadLibrary()
+            if let home { suggestions.load(for: home) }
             // A picture from Visual Intelligence is read straight away.
             if imageJPEG == nil, draft == nil, let picture = CaptureGate.take() {
                 imageJPEG = picture
@@ -208,7 +206,10 @@ struct CaptureView: View {
                 startParse()
             }
         }
-        .onChange(of: text) { _, _ in forgetFirstLook() }
+        .onChange(of: text) { _, now in
+            forgetFirstLook()
+            if now != pickedLook?.url { pickedLook = nil }
+        }
         .onChange(of: imageJPEG) { _, _ in forgetFirstLook() }
         // Back online mid-draft: the button goes back to reading it now.
         .onChange(of: sync.online) { _, online in
@@ -235,18 +236,16 @@ struct CaptureView: View {
 
     @ViewBuilder
     private var inputStage: some View {
-        // The shared composer (also the first-run's save page), here with
-        // the blank-card tool next to the photo and camera buttons.
-        Composer(
-            text: $text, imageJPEG: $imageJPEG,
-            busy: busy || savingOffline, offline: offlineMode, onManual: startManual
-        ) {
-            if offlineMode {
-                Task { await saveOffline() }
-            } else {
-                startParse()
-            }
-        }
+        Text(Voice.whereGoing)
+            .font(.displaySmallBold(38, relativeTo: .largeTitle))
+            .foregroundStyle(AppBackground.ink)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .matchedTitle(in: titleSpace)
+            .accessibilityAddTraits(.isHeader)
+            // Level with the close button, and clear of it.
+            .padding(.top, 14)
+            .padding(.trailing, 56)
 
         // Offline is said once, under the field, and the field's own button
         // becomes Save — no second copy of the input.
@@ -288,6 +287,43 @@ struct CaptureView: View {
             .padding(12)
             .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
+
+        Recommendations(
+            city: home?.locality,
+            picks: recommendations,
+            loading: suggestions.loading && text.isEmpty && imageJPEG == nil && !offlineMode,
+            onPick: pick
+        )
+        .padding(.top, 6)
+        .animation(.easeInOut(duration: 0.3), value: recommendations)
+    }
+
+    /// The shared composer (also the first-run's save page), docked on
+    /// the keyboard, with the blank card in its + menu.
+    private var composerBar: some View {
+        Composer(
+            text: $text, imageJPEG: $imageJPEG,
+            busy: busy || savingOffline, offline: offlineMode, onManual: startManual
+        ) {
+            if offlineMode {
+                Task { await saveOffline() }
+            } else {
+                startParse()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+
+    /// A recommendation is read straight away, like a shared link, with
+    /// what it already knows standing in until the parser's fields land.
+    private func pick(_ suggestion: ParseClient.Suggestion) {
+        withAnimation(reveal) {
+            pickedLook = Item(suggestion: suggestion)
+            reading = .link
+        }
+        startParse(link: suggestion.url)
     }
 
     /// With the phone's quick read, the save goes into the library now and
@@ -441,6 +477,12 @@ struct CaptureView: View {
                             editing = false
                             manual = false
                         }
+                        // Typed words go back in the bar; a recommendation
+                        // leaves the page as it was, its list included.
+                        if pickedLook != nil {
+                            pickedLook = nil
+                            text = ""
+                        }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
@@ -507,12 +549,16 @@ struct CaptureView: View {
 
     /// Every way into a parse goes through here, so closing the sheet can
     /// stop the one in flight.
-    private func startParse() {
+    private func startParse(link: String? = nil) {
         parseTask?.cancel()
-        parseTask = Task { await parse() }
+        parseTask = Task { await parse(link: link) }
     }
 
-    private func parse() async {
+    /// `link` is a recommendation's, read without passing through the
+    /// field: the bar fading out still shows the field's text. It goes in
+    /// the field once the read is over, for the duplicate check and Try
+    /// again.
+    private func parse(link: String? = nil) async {
         busy = true
         errorMessage = nil
         nudge = nil
@@ -520,7 +566,7 @@ struct CaptureView: View {
         firstLook = nil
         early = nil
         defer { busy = false }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = (link ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
         withAnimation(reveal) {
             peek = nil
             reading = CaptureInput(text: trimmed, hasImage: imageJPEG != nil)
@@ -557,17 +603,21 @@ struct CaptureView: View {
                 await ImageStore.warm(url, variant: .hero, limit: .milliseconds(900))
             }
             firstLook = nil
+            if let link { text = link }
             let parsed = item(from: card)
             // A partner's save may have synced in while the parser worked.
             loadLibrary()
             withAnimation(reveal) { draft = parsed }
         } catch {
             guard !Task.isCancelled else { return }
-            // Back to the composer, the input still in it.
+            if let link { text = link }
+            // Back to the composer, the input still in it (a
+            // recommendation's link too, for Try again).
             withAnimation(reveal) {
                 reading = nil
                 peek = nil
                 early = nil
+                pickedLook = nil
             }
             // ParseError already speaks to a person; everything else
             // (URLError, decoding) gets the same translation sync uses.

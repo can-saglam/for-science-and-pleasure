@@ -39,9 +39,17 @@ struct CaptureDrawer<Actions: View>: View {
     var notice: AnyView? = nil
     /// Opens the form, for a gap the parser left ("No date on the page").
     var editFirst: (() -> Void)? = nil
+    /// The words that were sent, as the title until anything better is in.
+    var typed: String? = nil
+    /// Shared with the add page's question, so it carries into the title.
+    var titleSpace: Namespace.ID? = nil
+    /// The photo grows down from the top on arrival rather than being
+    /// there already: the add page has no photo to hand over.
+    var growsIn = false
     @ViewBuilder var actions: () -> Actions
 
     @State private var choosingPhoto = false
+    @State private var grown = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -50,7 +58,7 @@ struct CaptureDrawer<Actions: View>: View {
     private var fields: Item? { draft ?? early }
 
     private var title: String? {
-        let raw = fields?.title ?? peek?.title ?? look?.title
+        let raw = fields?.title ?? peek?.title ?? look?.title ?? typed
         return raw?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? raw : nil
     }
 
@@ -92,6 +100,11 @@ struct CaptureDrawer<Actions: View>: View {
                         Shimmer(highlight: AppBackground.ink.opacity(0.07)).clipped()
                     }
                 }
+                // Only the picture grows; the heading is already where
+                // it will sit, at the photo's foot.
+                .mask(alignment: .top) {
+                    Rectangle().scaleEffect(y: grown || !growsIn || reduceMotion ? 1 : 0.001, anchor: .top)
+                }
                 .accessibilityHidden(true)
                 .overlay(alignment: .bottomLeading) {
                     heading
@@ -131,6 +144,10 @@ struct CaptureDrawer<Actions: View>: View {
         .onChange(of: draft != nil) { _, ready in
             if ready { AccessibilityNotification.Announcement("Ready").post() }
         }
+        .onAppear {
+            guard growsIn, !grown else { return }
+            withAnimation(.spring(duration: 0.6).delay(0.05)) { grown = true }
+        }
         .sheet(isPresented: $choosingPhoto) {
             if let draft, let page = pageURL(draft) {
                 PagePhotoPicker(page: page, current: draft.imageUrl) { url, colour in
@@ -152,22 +169,25 @@ struct CaptureDrawer<Actions: View>: View {
 
     private var heading: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let title {
-                Text(title)
-                    .font(.displaySmallBold(28, relativeTo: .title2))
-                    .foregroundStyle(AppBackground.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    // A corrected title cross-fades rather than snapping.
-                    .id(title)
+            ZStack(alignment: .leading) {
+                if let title {
+                    Text(title)
+                        .font(.displaySmallBold(28, relativeTo: .title2))
+                        .foregroundStyle(AppBackground.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        // A corrected title cross-fades rather than snapping.
+                        .id(title)
+                        .transition(.opacity)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        skeleton(width: 230, height: 20)
+                        skeleton(width: 150, height: 20)
+                    }
+                    .padding(.vertical, 4)
                     .transition(.opacity)
-            } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    skeleton(width: 230, height: 20)
-                    skeleton(width: 150, height: 20)
                 }
-                .padding(.vertical, 4)
-                .transition(.opacity)
             }
+            .matchedTitle(in: titleSpace)
 
             if let fields {
                 subtitle(fields)
@@ -401,6 +421,21 @@ struct CaptureStatus: View {
         }
         .onChange(of: finishing, initial: true) { _, done in
             if done { step = phrases.count - 1 }
+        }
+    }
+}
+
+extension View {
+    /// The add page's question and the drawer's title are one thing on
+    /// screen: whichever is showing takes the other's place. Position
+    /// only, from the top-leading corner: matching sizes would rewrap the
+    /// words mid-move.
+    @ViewBuilder
+    func matchedTitle(in space: Namespace.ID?) -> some View {
+        if let space {
+            matchedGeometryEffect(id: "captureTitle", in: space, properties: .position, anchor: .topLeading)
+        } else {
+            self
         }
     }
 }
