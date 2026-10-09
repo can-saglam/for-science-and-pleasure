@@ -3,7 +3,8 @@
 // stored pool straight away, ended events filtered out; a stale pool
 // refreshes after the answer, so the next ask gets the new one. A city
 // with no places yet waits for the quick knowledge call so the first ask
-// has something, with curated starters behind it. Only a brand-new city
+// has something, with curated starters behind it; the searched pool
+// replaces it in the background. Only a brand-new city
 // counts against the caller's daily limit. Authenticated (member JWT).
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
@@ -81,7 +82,7 @@ Deno.serve(async (req) => {
 
     /// One refresh per row at a time. An empty or failed refresh keeps the
     /// old pool and holds the lease, so the next try waits it out.
-    const refresh = async (kind: SuggestionKind): Promise<Suggestion[] | null> => {
+    const refresh = async (kind: SuggestionKind, quick = false): Promise<Suggestion[] | null> => {
       await db
         .from("city_suggestions")
         .upsert({ key, kind, locality, country }, { onConflict: "key,kind", ignoreDuplicates: true });
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
         await note(stage);
         const result = kind === "event"
           ? await refreshEvents(locality, country, today, (s) => note(stage = `${s} (${took()})`))
-          : await refreshPlaces(locality, country, today);
+          : await refreshPlaces(locality, country, today, quick);
         const summary = `kept ${result.items.length} of ${result.proposed} in ${took()}; ${stage}`;
         await record(kind, result.items.length === 0 ? "empty" : "kept", result, Date.now() - started);
         if (result.items.length === 0) {
@@ -144,7 +145,8 @@ Deno.serve(async (req) => {
     }
     if (allowed) {
       if (places.length === 0 && leaseFree(placeRow?.refreshing_since ?? null)) {
-        places = (await refresh("place")) ?? [];
+        places = (await refresh("place", true)) ?? [];
+        if (places.length > 0) later.push(refresh("place"));
       } else if (isDue(placeRow?.fetched_at ?? null, "place", places.length) && leaseFree(placeRow?.refreshing_since ?? null)) {
         later.push(refresh("place"));
       }

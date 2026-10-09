@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, busyMatters, isDue, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
+import { aboutEvent, answerText, busyMatters, interleave, isDue, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -133,6 +133,25 @@ Deno.test("the event pool holds fourteen, places eight", () => {
   assertEquals(shapeSuggestions({ items: events }, "event", today, Infinity).length, 20);
   const places = Array.from({ length: 12 }, (_, i) => ({ title: `Place ${i}`, venue: null, url: `https://place${i}.org/` }));
   assertEquals(shapeSuggestions({ items: places }, "place", today).length, 8);
+});
+
+Deno.test("guides are where picks come from, never what they link to", () => {
+  const places = [
+    { title: "Brat", venue: "Shoreditch", url: "https://www.theinfatuation.com/london/reviews/brat" },
+    { title: "Kiln", venue: "Soho", url: "https://www.eater.com/maps/best-london-restaurants" },
+    { title: "Rochelle Canteen", venue: "Shoreditch", url: "https://www.cntraveller.com/gallery/rochelle" },
+    { title: "Brat", venue: "Shoreditch", url: "https://www.bratrestaurant.com/" },
+    { title: "Theater", venue: null, url: "https://www.theater.com/" },
+  ];
+  assertEquals(shapeSuggestions({ items: places }, "place", today).map((p) => p.url), [
+    "https://www.bratrestaurant.com/",
+    "https://www.theater.com/",
+  ]);
+});
+
+Deno.test("searched lists take turns so the cap doesn't cut one kind", () => {
+  assertEquals(interleave([["a1", "a2", "a3"], ["b1"], []]), ["a1", "b1", "a2", "a3"]);
+  assertEquals(interleave([]), []);
 });
 
 Deno.test("a stuck refresh frees up after five minutes", () => {

@@ -1,7 +1,8 @@
 // Suggestions: a pool of real things in a home city for the add page, the
-// empty library tabs and the first-save page. Events come from a web search and are
-// checked the way a save's link is (the page loads and dates this run);
-// places come from the model's knowledge, official sites only. Pure
+// empty library tabs and the first-save page. Both are picked from the
+// city's guides (Time Out, The Infatuation…) by a web search, but link to
+// the thing's own site. Events are checked the way a save's link is (the
+// page loads and dates this run); a place's site has to answer. Pure
 // helpers first, then the two refreshes.
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { cleanLink, linkKey, ownPage } from "./extract.ts";
@@ -252,6 +253,12 @@ export function addUsage(a: Usage, b: Usage): Usage {
   };
 }
 
+/// Where the picks come from. Each city has its own best-read guides, so
+/// these are examples, not a list to stick to.
+const GUIDES =
+  "the city's best-read guides and critics' picks — Time Out, The Infatuation, Eater, Resident Advisor, " +
+  "Condé Nast Traveller, the local press's critics, or whatever plays that part locally";
+
 /// Narrower searches side by side: one long search for ten ran out of
 /// output before it answered. Each stays well inside the worker's wall
 /// clock, and one coming back empty doesn't sink the others.
@@ -273,16 +280,19 @@ async function searchEvents(
     // 8192 cut answers off mid-list after three searches' worth of reading.
     max_tokens: 16_384,
     output_config: { format: { type: "json_schema", schema: EVENT_SCHEMA } },
-    tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 }],
+    // One or two searches of the guides, then the picks' own pages.
+    tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 4 }],
     messages: [{
       role: "user",
       content:
         `Today is ${today}. Find 6 ${focus} in ${locality}, ${country} that are on now or open in the next six weeks, ` +
-        `worth going to with a friend. Prefer what critics and locals rate over tourist staples; no permanent collections, ` +
-        `tours or chains, and nothing that ends before today. For each, the url must be that one event's own page on the ` +
+        `worth going to with a friend: the interesting, new and talked-about, not tourist staples. ` +
+        `Start from what editors pick: first search ${GUIDES}. ` +
+        `No permanent collections, tours or chains, and nothing that ends before today. ` +
+        `Guides are where you find them, not what you return: the url must be that one event's own page on the ` +
         `venue's or organiser's site, the kind of address that names the event (e.g. a venue's /whats-on/<event-name> page) — ` +
-        `never a what's-on listing, a round-up, a ticketing, news or guide site — and only a url you saw in the search results. ` +
-        `Search venues' own sites. Search at most three times, then answer straight away with the JSON: no commentary.`,
+        `never a what's-on listing, a round-up, a ticketing, news or guide site — and only a url you saw in the search results, ` +
+        `so search the venues' own sites for the picks. Search at most four times, then answer straight away with the JSON: no commentary.`,
     }],
   });
   const seen: string[] = [];
@@ -329,11 +339,8 @@ export async function refreshEvents(
       notes.push(`failed: ${String(s.reason).slice(0, 120)}`);
     }
   }
-  // Alternate the lists so the pool's cap doesn't cut one kind.
-  const raw = Array.from({ length: Math.max(0, ...lists.map((l) => l.length)) })
-    .flatMap((_, i) => lists.map((l) => l[i]).filter((x) => x !== undefined));
   // Every candidate is checked, and the cap applies to what passes.
-  const shaped = shapeSuggestions({ items: raw }, "event", today, Infinity);
+  const shaped = shapeSuggestions({ items: interleave(lists) }, "event", today, Infinity);
   await stage(`searches: ${notes.join(" / ")}; checking ${shaped.length} links`);
   const checked = await Promise.all(shaped.map(async (s) => {
     const own = await ownPage(s.url, seen, [s.starts_on, s.ends_on].filter((d): d is string => !!d));
@@ -346,10 +353,68 @@ export async function refreshEvents(
   };
 }
 
-/// Places worth going to, from the model's knowledge: quick, and famous
-/// official sites are what it knows best. A site that doesn't resolve drops.
-export async function refreshPlaces(locality: string, country: string, today: string): Promise<Refreshed> {
+/// Alternate the lists so the pool's cap doesn't cut one kind.
+export function interleave(lists: unknown[][]): unknown[] {
+  return Array.from({ length: Math.max(0, ...lists.map((l) => l.length)) })
+    .flatMap((_, i) => lists.map((l) => l[i]).filter((x) => x !== undefined));
+}
+
+const PLACE_FOCUSES = [
+  "restaurants, cafés, bakeries and bars",
+  "galleries, cinemas, bookshops and music venues",
+];
+
+async function searchPlaces(
+  anthropic: Anthropic,
+  focus: string,
+  locality: string,
+  country: string,
+): Promise<{ raw: unknown[]; usage: Usage }> {
+  const response = await anthropic.messages.create({
+    model: SUGGEST_MODEL,
+    max_tokens: 8_192,
+    output_config: { format: { type: "json_schema", schema: PLACE_SCHEMA } },
+    tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 }],
+    messages: [{
+      role: "user",
+      content:
+        `Find 6 ${focus} in ${locality}, ${country} worth going to with a friend: the interesting ones critics and locals rate, ` +
+        `new openings and long-loved favourites, not famous landmarks or chains. Start from what editors pick: search ${GUIDES}. ` +
+        `Guides are where you find them, not what you return: each url must be the place's own official https website — ` +
+        `never a guide, google, maps, tripadvisor, instagram, facebook, a booking site or a tourism portal; leave out a place ` +
+        `without its own site. Search at most three times, then answer straight away with the JSON: no commentary.`,
+    }],
+  });
+  return { raw: readItems(answerText(response.content)) ?? [], usage: usageOf(response) };
+}
+
+/// Places worth going to, picked from the city's guides by a web search.
+/// `quick` is a brand-new city's first ask, which waits on the answer:
+/// the model's own knowledge, in seconds, until the searched pool lands.
+/// A site that doesn't resolve drops.
+export async function refreshPlaces(locality: string, country: string, today: string, quick = false): Promise<Refreshed> {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  if (quick) return await knownPlaces(anthropic, locality, country, today);
+  const searches = await Promise.allSettled(
+    PLACE_FOCUSES.map((focus) => searchPlaces(anthropic, focus, locality, country)),
+  );
+  const lists: unknown[][] = [];
+  let usage: Usage = { model: SUGGEST_MODEL, input_tokens: 0, output_tokens: 0, searches: 0 };
+  for (const s of searches) {
+    if (s.status !== "fulfilled") continue;
+    lists.push(s.value.raw);
+    usage = addUsage(usage, s.value.usage);
+  }
+  const shaped = shapeSuggestions({ items: interleave(lists) }, "place", today, Infinity);
+  const alive = await Promise.all(shaped.map(async (s) => (await resolves(s.url)) ? s : null));
+  return {
+    items: alive.filter((s): s is Suggestion => s !== null).slice(0, POOL_SIZE.place),
+    proposed: shaped.length,
+    usage,
+  };
+}
+
+async function knownPlaces(anthropic: Anthropic, locality: string, country: string, today: string): Promise<Refreshed> {
   const response = await anthropic.messages.create({
     model: SUGGEST_MODEL,
     max_tokens: 2048,
