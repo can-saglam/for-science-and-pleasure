@@ -66,6 +66,15 @@ export function stillOn(s: Suggestion, today: string): boolean {
   return !!last && last >= today;
 }
 
+/// A club night, supper club or pop-up often has no page but its ticket
+/// page: one event's page on Dice or Resident Advisor counts as its own.
+export function isTicketEventPage(url: string): boolean {
+  const u = new URL(url);
+  const host = u.hostname.replace(/^www\./, "");
+  return (host === "dice.fm" && /^\/event\/[^/]+\/?$/.test(u.pathname)) ||
+    (host === "ra.co" && /^\/events\/\d+\/?$/.test(u.pathname));
+}
+
 /// Tidy the model's list: official https pages only, no listings sites,
 /// real dates on events (ended ones dropped), no duplicates, pool-sized.
 export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: string, cap = POOL_SIZE[kind]): Suggestion[] {
@@ -79,7 +88,7 @@ export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: stri
     const url = typeof e.url === "string" ? cleanLink(e.url.trim().replace(/^http:/, "https:")) : null;
     if (!title || title.length > 60 || !url) continue;
     const host = new URL(url).hostname;
-    if (AGGREGATOR_RE.test(host)) continue;
+    if (AGGREGATOR_RE.test(host) && !(kind === "event" && isTicketEventPage(url))) continue;
     // Places are one per site; events can share a venue's site.
     const key = kind === "place" ? host.replace(/^www\./, "") : linkKey(url);
     if (!key || seen.has(key)) continue;
@@ -117,12 +126,14 @@ function words(s: string): string[] {
 
 /// Is this page about the event, not a listing that mentions it? Most of
 /// the title's telling words must be in the page's own title or headline,
-/// or, for a site that walls off servers (no html), in the link itself.
-export function aboutEvent(title: string, html: string | null, url: string): boolean {
+/// or, for a site that walls off servers (no html), in the link itself or
+/// the title the search showed it under.
+export function aboutEvent(title: string, html: string | null, url: string, shown?: string): boolean {
   let telling = words(title).filter((w) => !TITLE_FILLER.has(w));
   if (telling.length === 0) telling = words(title);
   if (telling.length === 0) return false;
   let where = words(decodeURIComponent(new URL(url).pathname)).join(" ");
+  if (!html && shown) where += " " + words(shown).join(" ");
   if (html) {
     const heads = [
       html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1],
@@ -274,7 +285,7 @@ async function searchEvents(
   locality: string,
   country: string,
   today: string,
-): Promise<{ raw: unknown[]; seen: string[]; note: string; usage: Usage }> {
+): Promise<{ raw: unknown[]; seen: [string, string][]; note: string; usage: Usage }> {
   const response = await anthropic.messages.create({
     model: SUGGEST_MODEL,
     // 8192 cut answers off mid-list after three searches' worth of reading.
@@ -290,17 +301,18 @@ async function searchEvents(
         `Start from what editors pick: first search ${GUIDES}. ` +
         `No permanent collections, tours or chains, and nothing that ends before today. ` +
         `Guides are where you find them, not what you return: the url must be that one event's own page on the ` +
-        `venue's or organiser's site, the kind of address that names the event (e.g. a venue's /whats-on/<event-name> page) — ` +
-        `never a what's-on listing, a round-up, a ticketing, news or guide site — and only a url you saw in the search results, ` +
-        `so search the venues' own sites for the picks. Search at most four times, then answer straight away with the JSON: no commentary.`,
+        `venue's or organiser's site, the kind of address that names the event (e.g. a venue's /whats-on/<event-name> page), ` +
+        `or, for a club night, gig, supper club or pop-up that has no such page, its single event page on Dice ` +
+        `(dice.fm/event/…) or Resident Advisor (ra.co/events/…). Never a what's-on listing, a round-up, another ` +
+        `ticketing, news or guide site, and only a url you saw in the search results, so search for the picks' own pages. Search at most four times, then answer straight away with the JSON: no commentary.`,
     }],
   });
-  const seen: string[] = [];
+  const seen: [string, string][] = [];
   for (const block of response.content) {
     if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;
     for (const result of block.content) {
       const key = linkKey(result.url);
-      if (key) seen.push(key);
+      if (key) seen.push([key, result.title ?? ""]);
     }
   }
   const text = answerText(response.content);
@@ -326,13 +338,14 @@ export async function refreshEvents(
     EVENT_FOCUSES.map((focus) => searchEvents(anthropic, focus, locality, country, today)),
   );
   const lists: unknown[][] = [];
-  const seen = new Set<string>();
+  // Every link the searches showed, with the title they showed it under.
+  const seen = new Map<string, string>();
   const notes: string[] = [];
   let usage: Usage = { model: SUGGEST_MODEL, input_tokens: 0, output_tokens: 0, searches: 0 };
   for (const s of searches) {
     if (s.status === "fulfilled") {
       lists.push(s.value.raw);
-      s.value.seen.forEach((k) => seen.add(k));
+      s.value.seen.forEach(([k, title]) => seen.set(k, title));
       notes.push(s.value.note);
       usage = addUsage(usage, s.value.usage);
     } else {
@@ -342,9 +355,12 @@ export async function refreshEvents(
   // Every candidate is checked, and the cap applies to what passes.
   const shaped = shapeSuggestions({ items: interleave(lists) }, "event", today, Infinity);
   await stage(`searches: ${notes.join(" / ")}; checking ${shaped.length} links`);
+  const vouched = new Set(seen.keys());
   const checked = await Promise.all(shaped.map(async (s) => {
-    const own = await ownPage(s.url, seen, [s.starts_on, s.ends_on].filter((d): d is string => !!d));
-    return own && aboutEvent(s.title, own.html, own.url) ? { ...s, url: own.url } : null;
+    const own = await ownPage(s.url, vouched, [s.starts_on, s.ends_on].filter((d): d is string => !!d));
+    if (!own) return null;
+    const shown = seen.get(linkKey(s.url) ?? "");
+    return aboutEvent(s.title, own.html, own.url, shown) ? { ...s, url: own.url } : null;
   }));
   return {
     items: checked.filter((s): s is Suggestion => s !== null).slice(0, POOL_SIZE.event),

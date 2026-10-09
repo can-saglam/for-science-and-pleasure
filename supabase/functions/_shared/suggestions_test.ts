@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, busyMatters, interleave, isDue, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
+import { aboutEvent, answerText, busyMatters, interleave, isDue, isTicketEventPage, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -48,7 +48,7 @@ Deno.test("events need a date and must still be on", () => {
 Deno.test("listings sites and duplicates are dropped", () => {
   const got = shapeSuggestions({
     items: [
-      { title: "Gig", starts_on: "2026-10-01", ends_on: null, url: "https://dice.fm/event/abc" },
+      { title: "Gig", starts_on: "2026-10-01", ends_on: null, url: "https://dice.fm/browse/london/music" },
       { title: "Show A", starts_on: "2026-10-01", ends_on: null, url: "https://www.barbican.org.uk/a" },
       { title: "Show A again", starts_on: "2026-10-01", ends_on: null, url: "https://barbican.org.uk/a/" },
       { title: "Show B", starts_on: "2026-10-02", ends_on: null, url: "https://www.barbican.org.uk/b?utm_source=x" },
@@ -147,6 +147,26 @@ Deno.test("guides are where picks come from, never what they link to", () => {
     "https://www.bratrestaurant.com/",
     "https://www.theater.com/",
   ]);
+});
+
+Deno.test("an event's single Dice or RA page counts as its own; their listings don't", () => {
+  const events = [
+    { title: "Body Movements", starts_on: "2026-10-17", ends_on: null, url: "https://dice.fm/event/abc123-body-movements-17th-oct-the-cause-tickets" },
+    { title: "Floating Points", starts_on: "2026-10-18", ends_on: null, url: "https://ra.co/events/2187654" },
+    { title: "London gigs", starts_on: "2026-10-18", ends_on: null, url: "https://dice.fm/browse/london" },
+    { title: "RA London", starts_on: "2026-10-18", ends_on: null, url: "https://ra.co/events/uk/london" },
+  ];
+  assertEquals(shapeSuggestions({ items: events }, "event", today).map((e) => e.title), ["Body Movements", "Floating Points"]);
+  const places = [{ title: "Body Movements", venue: null, url: "https://dice.fm/event/abc123-body-movements" }];
+  assertEquals(shapeSuggestions({ items: places }, "place", today), []);
+  assert(isTicketEventPage("https://ra.co/events/2187654"));
+  assert(!isTicketEventPage("https://ra.co/clubs/12345"));
+});
+
+Deno.test("a walled-off page is judged by the title the search showed it under", () => {
+  assert(!aboutEvent("Floating Points", null, "https://ra.co/events/2187654"));
+  assert(aboutEvent("Floating Points", null, "https://ra.co/events/2187654", "RA: Floating Points at Printworks"));
+  assert(!aboutEvent("Floating Points", null, "https://ra.co/events/2187654", "RA: London events this week"));
 });
 
 Deno.test("searched lists take turns so the cap doesn't cut one kind", () => {
