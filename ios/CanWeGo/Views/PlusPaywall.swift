@@ -321,6 +321,19 @@ struct PlusPaywall: View {
         }
     }
 
+    /// For the subscriber: when it renews or ends, and that Apple holds the
+    /// subscription, so nothing in the app can change or cancel it.
+    static func appleNote(_ renewal: PlusStore.Renewal?) -> String {
+        var note = ""
+        if let renewal {
+            let plan = renewal.yearly ? "yearly" : "monthly"
+            note = renewal.renews
+                ? "Your \(plan) plan renews on \(renewal.day). "
+                : "Your \(plan) plan ends on \(renewal.day) and won\u{2019}t renew. "
+        }
+        return note + "Plus is billed through your Apple Account, so that\u{2019}s the only place to change or cancel it: open the App Store, tap your photo, then Subscriptions."
+    }
+
     /// "four", "ten", "fifty": limits read as words in a sentence.
     static func spelled(_ n: Int) -> String {
         let formatter = NumberFormatter()
@@ -379,11 +392,11 @@ struct PlusPaywall: View {
             // The one that answers this moment goes first.
             if case .seats = reason {
                 seats
-                Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
+                Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 64)
                 room
             } else {
                 room
-                Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 52)
+                Divider().overlay(AppBackground.ink.opacity(0.08)).padding(.leading, 64)
                 seats
             }
         }
@@ -392,10 +405,11 @@ struct PlusPaywall: View {
     }
 
     private func benefit(_ icon: String, _ title: String, _ detail: String, _ unlocked: Bool) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
+            // Wide enough for person.3.fill, the widest of the glyphs.
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .semibold))
-                .frame(width: 24)
+                .frame(width: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.semibold))
                 Text(detail)
@@ -403,7 +417,7 @@ struct PlusPaywall: View {
                     .foregroundStyle(AppBackground.ink.opacity(0.62))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
             if unlocked {
                 Image(systemName: "checkmark")
                     .font(.footnote.weight(.bold))
@@ -558,7 +572,7 @@ struct PlusPaywall: View {
     private var bottomBar: some View {
         VStack(spacing: 10) {
             if isCovered {
-                if plus.subscribed {
+                if plus.subscribed || Self.screenshot == "covered" {
                     Button {
                         Haptics.tap()
                         manage = true
@@ -567,6 +581,13 @@ struct PlusPaywall: View {
                     }
                     .buttonStyle(.glass)
                     .controlSize(.large)
+
+                    Text(Self.appleNote(plus.renewal ?? (Self.screenshot == "covered" ? .sample : nil)))
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.ink.opacity(0.72))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 8)
                 }
                 Button {
                     Haptics.tap()
@@ -816,14 +837,19 @@ struct PlusSection: View {
     @State private var restoring = false
     @State private var note: String?
 
-    /// One line for the Plus row: who covers it, or what it adds.
+    /// One line for the Plus row: whose subscription it's on, or what it adds.
     static func status(for card: GroupCard?) -> String {
         guard let card else { return "No cap on lists, and room for four" }
-        guard card.isPlus else { return "Free plan" }
+        guard card.isPlus else { return "Free plan. Plus lifts the caps and makes room for four" }
         let holders = card.members.filter(\.isPlus)
-        if holders.contains(where: { $0.userId == SupabaseAuth.shared.userId }) { return "On, covered by you" }
-        if let first = holders.first { return "On, covered by \(first.name)" }
-        return "On"
+        if holders.contains(where: { $0.userId == SupabaseAuth.shared.userId }) {
+            if let renewal = PlusStore.shared.renewal {
+                return "Active until \(renewal.day)"
+            }
+            return "Active for the whole group"
+        }
+        if let first = holders.first { return "Active for the whole group, through \(first.name)\u{2019}s subscription" }
+        return "Active for the whole group"
     }
 
     var body: some View {
@@ -865,6 +891,9 @@ struct PlusSection: View {
                     Text(note)
                         .font(.footnote)
                         .foregroundStyle(AppBackground.warning)
+                } else if plus.subscribed {
+                    Text(PlusPaywall.appleNote(plus.renewal))
+                        .font(.footnote)
                 }
             }
             .listRowBackground(SettingsView.rowBackground)

@@ -94,7 +94,7 @@ struct SettingsView: View {
                 .listRowBackground(Self.rowBackground)
 
                 Section {
-                    door("Preferences", icon: "slider.horizontal.3", subtitle: "Directions, calendar, Lock Screen") {
+                    door("Preferences", icon: "slider.horizontal.3", subtitle: preferencesSummary) {
                         path.append(.preferences)
                     }
                     if auth.signedIn {
@@ -131,6 +131,11 @@ struct SettingsView: View {
             .task {
                 if ProcessInfo.processInfo.environment["CWG_JOIN"] != nil {
                     groupUI.showJoin = true
+                }
+                // CWG_INVITE: a made-up code, so screenshot runs can show the
+                // invite sheet without creating a real invite.
+                if ProcessInfo.processInfo.environment["CWG_INVITE"] != nil {
+                    groupUI.invite = .init(code: "LGU-2GT", expiresAt: .now.addingTimeInterval(7 * 86_400), message: nil)
                 }
                 // CWG_SETTINGS_PAGE=account: screenshot runs photograph a
                 // page one level in.
@@ -274,6 +279,19 @@ struct SettingsView: View {
             .padding(.vertical, 12)
         }
         .listRowBackground(Self.rowBackground)
+    }
+
+    /// What's set, like the Plus and Account rows: "Directions in Citymapper
+    /// · Plans in Home". The Lock Screen is only mentioned once it's off.
+    private var preferencesSummary: String {
+        let maps = (TransportApp(rawValue: transportApp) ?? .google).name
+        var parts = ["Directions in \(maps)"]
+        #if !APP_EXTENSION
+        let calendar = calendars.first { $0.id == calendarID }?.name
+        parts.append(calendar.map { "Plans in \($0)" } ?? "Plans in your calendar")
+        if !liveActivities { parts.append("Lock Screen off") }
+        #endif
+        return parts.joined(separator: " · ")
     }
 
     /// A way one level in: a plain glyph, the name, and what's behind it.

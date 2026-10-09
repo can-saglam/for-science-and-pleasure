@@ -27,13 +27,8 @@ struct CaptureView: View {
     /// True when the card was started blank — no parser involved.
     @State private var manual = false
     @State private var saved = false
-    /// A save already in the library that the input points at — shown as a
-    /// notice with a way to open it, never as a wall. "Save anyway" sets the
-    /// override and the same input parses through.
-    @State private var existing: Item?
-    @State private var saveAnyway = false
     /// The input stage hugs its content — title plus composer, plus the
-    /// error or duplicate notice when there is one — instead of sitting at
+    /// error notice when there is one — instead of sitting at
     /// half height over empty space. The card preview gets the full sheet.
     @State private var detent: PresentationDetent = .medium
     @State private var headerHeight: CGFloat = 0
@@ -93,6 +88,9 @@ struct CaptureView: View {
                 if showsDrawer {
                     CaptureDrawer(
                         draft: draft, early: early, look: firstLook, peek: peek, input: reading ?? .text,
+                        notice: draft.flatMap(twin(of:)).map { twin in
+                            AnyView(DuplicateStrip(twin: twin, open: { openExisting(twin) }))
+                        },
                         editFirst: { withAnimation(.snappy) { editing = true } }
                     ) {
                         if let draft {
@@ -203,19 +201,14 @@ struct CaptureView: View {
                 }
             }
             // CWG_DUPE (screenshot runs): type in a link already in the
-            // library and send it, to photograph the duplicate notice.
+            // library and send it, to photograph the duplicate strip.
             if ProcessInfo.processInfo.environment["CWG_DUPE"] != nil,
                let url = library.compactMap(\.url).first {
                 text = url
                 startParse()
             }
         }
-        // A changed input is a new question; the old duplicate verdict goes.
-        .onChange(of: text) { _, _ in
-            existing = nil
-            saveAnyway = false
-            forgetFirstLook()
-        }
+        .onChange(of: text) { _, _ in forgetFirstLook() }
         .onChange(of: imageJPEG) { _, _ in forgetFirstLook() }
         // Back online mid-draft: the button goes back to reading it now.
         .onChange(of: sync.online) { _, online in
@@ -295,15 +288,6 @@ struct CaptureView: View {
             .padding(12)
             .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
         }
-
-        if let existing {
-            duplicateNotice(existing) {
-                saveAnyway = true
-                self.existing = nil
-                startParse()
-            }
-            .transition(.opacity)
-        }
     }
 
     /// With the phone's quick read, the save goes into the library now and
@@ -379,18 +363,14 @@ struct CaptureView: View {
         // Reading, this sits under the drawer's header, which is the
         // card; editing, the form is the preview and the header steps out.
         if editing {
+            // The drawer says it under its title; the form says it on top.
+            if let match = twin(of: draft) {
+                DuplicateStrip(twin: match, open: { openExisting(match) })
+            }
             ItemForm(item: draft)
                 .transition(.opacity)
         } else {
             RemindRow(item: draft)
-        }
-
-        // The parser may land on something we already have — the same URL
-        // after redirects, or the same gig from a different ticket site.
-        // Flag it with a way to the original; the Save button below is the
-        // "save anyway".
-        if !saved, !saveAnyway, let twin = duplicate(ofCard: draft) {
-            duplicateNotice(twin, saveAnyway: nil)
         }
 
         // An event that's already happened would land straight in "Ended".
@@ -426,7 +406,8 @@ struct CaptureView: View {
 
     /// The card's actions, floating bottom right like the detail drawer's.
     private func previewActions(_ draft: Item) -> some View {
-        FloatingActions {
+        let match = twin(of: draft)
+        return FloatingActions {
             if !saved, manual {
                 // A blank card is always in edit mode and the × already
                 // throws it away, so the one side action is the way back
@@ -467,7 +448,10 @@ struct CaptureView: View {
                 }
             }
 
-            FloatingMainButton(saved ? "Saved" : "Save", systemImage: saved ? "checkmark.circle.fill" : "checkmark") {
+            FloatingMainButton(
+                saved ? "Saved" : (match != nil ? "Save anyway" : "Save"),
+                systemImage: saved ? "checkmark.circle.fill" : (match != nil ? "plus" : "checkmark")
+            ) {
                 save(draft)
             }
             .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -501,52 +485,13 @@ struct CaptureView: View {
         )
     }
 
-    /// "Joyce saved this 2 weeks ago" with a way to the original. Warn, don't
-    /// block: the pair may genuinely want two entries.
-    private func duplicateNotice(_ twin: Item, saveAnyway: (() -> Void)?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(DuplicateFinder.describe(twin), systemImage: "books.vertical")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(AppBackground.warning)
-
-            // The card itself, as it sits in the library: "already saved"
-            // is obvious at a glance, and a tap opens it.
-            Button {
-                Haptics.tap()
-                openExisting(twin)
-            } label: {
-                ItemCard(item: twin, compact: true)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(twin.title)")
-
-            HStack(spacing: 10) {
-                Button {
-                    Haptics.tap()
-                    openExisting(twin)
-                } label: {
-                    Label("Open it", systemImage: "arrow.up.right")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .prominentGlass()
-
-                if let saveAnyway {
-                    Button {
-                        Haptics.tap()
-                        saveAnyway()
-                    } label: {
-                        Label("Save anyway", systemImage: "plus")
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+    /// The card may be something we already have — the link that was
+    /// pasted, the same URL after redirects, or the same gig from a
+    /// different ticket site. Said on the card, never blocked: the pair
+    /// may genuinely want two entries.
+    private func twin(of card: Item) -> Item? {
+        guard !saved else { return nil }
+        return duplicate(ofCard: card) ?? (manual ? nil : duplicate(of: firstURL(in: text)))
     }
 
     /// Close the composer and bring up the original — the same route a
@@ -576,13 +521,6 @@ struct CaptureView: View {
         early = nil
         defer { busy = false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Known URL? Say so before spending a parse — unless they've already
-        // chosen to save it anyway.
-        loadLibrary()
-        if !saveAnyway, let twin = duplicate(of: firstURL(in: trimmed)) {
-            withAnimation(.snappy) { existing = twin }
-            return
-        }
         withAnimation(reveal) {
             peek = nil
             reading = CaptureInput(text: trimmed, hasImage: imageJPEG != nil)

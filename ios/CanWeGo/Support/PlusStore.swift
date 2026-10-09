@@ -22,6 +22,20 @@ final class PlusStore {
 
     /// This Apple ID holds a live Plus subscription, per StoreKit.
     private(set) var subscribed = false
+    /// When this Apple ID's subscription next renews, or ends if it's been
+    /// cancelled. Only the subscriber's phone knows; nil for everyone else.
+    private(set) var renewal: Renewal?
+
+    struct Renewal: Equatable {
+        let date: Date
+        let renews: Bool
+        let yearly: Bool
+
+        /// "12 November 2026".
+        var day: String { date.formatted(.dateTime.day().month(.wide).year()) }
+
+        static let sample = Renewal(date: .now.addingTimeInterval(200 * 86_400), renews: true, yearly: true)
+    }
     /// Why the last purchase couldn't be credited to this account, if it
     /// couldn't. Shown on the paywall and in Settings.
     private(set) var problem: String?
@@ -67,9 +81,11 @@ final class PlusStore {
         guard SupabaseAuth.shared.signedIn else { return }
         guard let (result, transaction) = await current() else {
             subscribed = false
+            renewal = nil
             return
         }
         subscribed = true
+        renewal = await Self.renewal(of: transaction)
         let stamp = Self.stamp(transaction)
         let last = Self.defaults.dictionary(forKey: Self.postedKey)
         let seen = last?["stamp"] as? String == stamp
@@ -115,7 +131,20 @@ final class PlusStore {
     }
 
     private func refreshSubscribed() async {
-        subscribed = await current() != nil
+        let held = await current()
+        subscribed = held != nil
+        renewal = if let held { await Self.renewal(of: held.1) } else { nil }
+    }
+
+    /// A cancelled subscription still runs to its date; Apple's renewal
+    /// info says whether it carries on after that.
+    private static func renewal(of transaction: Transaction) async -> Renewal? {
+        guard let date = transaction.expirationDate else { return nil }
+        var renews = true
+        if case .verified(let info)? = await transaction.subscriptionStatus?.renewalInfo {
+            renews = info.willAutoRenew
+        }
+        return Renewal(date: date, renews: renews, yearly: transaction.productID == productIDs[0])
     }
 
     /// One state of one subscription: renewals change the expiry.

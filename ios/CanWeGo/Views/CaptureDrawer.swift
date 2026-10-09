@@ -34,6 +34,9 @@ struct CaptureDrawer<Actions: View>: View {
     let input: CaptureInput
     /// Off in the share extension, where a live map is too much memory.
     var showsMap = true
+    /// Said straight under the title once the card is in: "Joyce saved
+    /// this yesterday".
+    var notice: AnyView? = nil
     /// Opens the form, for a gap the parser left ("No date on the page").
     var editFirst: (() -> Void)? = nil
     @ViewBuilder var actions: () -> Actions
@@ -105,6 +108,10 @@ struct CaptureDrawer<Actions: View>: View {
             }
 
             VStack(alignment: .leading, spacing: 20) {
+                if draft != nil, let notice {
+                    notice
+                        .transition(arrival(0))
+                }
                 summary
                 lines
                 if showsMap, let draft {

@@ -378,14 +378,6 @@ struct GroupHeroCard: View {
 
     private var me: UUID? { SupabaseAuth.shared.userId }
 
-    private var summary: String {
-        var parts: [String] = []
-        if let home = card.homeLocality, !home.isEmpty { parts.append(home) }
-        parts.append(card.members.count == 1 ? "Just you" : "\(card.members.count) people")
-        if card.isPlus { parts.append("Plus") }
-        return parts.joined(separator: " · ")
-    }
-
     var body: some View {
         VStack(spacing: 16) {
             HStack(alignment: .top, spacing: 14) {
@@ -396,17 +388,11 @@ struct GroupHeroCard: View {
                     inviteSeat
                 }
             }
-            VStack(spacing: 4) {
-                Text(card.name)
-                    .font(.displaySmallBold(30, relativeTo: .title2))
-                    .foregroundStyle(AppBackground.ink)
-                    .multilineTextAlignment(.center)
-                    .accessibilityAddTraits(.isHeader)
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(AppBackground.secondaryInk)
-                    .multilineTextAlignment(.center)
-            }
+            Text(card.name)
+                .font(.displaySmallBold(30, relativeTo: .title2))
+                .foregroundStyle(AppBackground.ink)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
             Button {
                 Haptics.tap()
                 manage()
@@ -544,47 +530,51 @@ struct InviteSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Spacer(minLength: 0)
-                VStack(spacing: 8) {
-                    Text(invite.code)
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .kerning(2)
-                        .textSelection(.enabled)
-                        .accessibilityLabel("Invite code \(invite.code.map(String.init).joined(separator: " "))")
-                    Text("Valid until \(invite.expiresAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+            // Scrolls: a plain stack taller than the sheet gets centred,
+            // and takes the title up past the sheet's top edge.
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Text(invite.code)
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .kerning(2)
+                            .textSelection(.enabled)
+                            .accessibilityLabel("Invite code \(invite.code.map(String.init).joined(separator: " "))")
+                        Text("Valid until \(invite.expiresAt.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                            .font(.footnote)
+                            .foregroundStyle(AppBackground.secondaryInk)
+                    }
+                    VStack(spacing: 12) {
+                        ShareLink(item: message) {
+                            Label("Share invite", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .prominentGlass()
+                        .controlSize(.large)
+                        Button {
+                            UIPasteboard.general.string = invite.code
+                            Haptics.success()
+                            withAnimation(.snappy) { copied = true }
+                        } label: {
+                            Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                    }
+                    Text("Anyone with this code can join until it expires or you cancel it. Their saves come with them.")
                         .font(.footnote)
                         .foregroundStyle(AppBackground.secondaryInk)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                VStack(spacing: 12) {
-                    ShareLink(item: message) {
-                        Label("Share invite", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .prominentGlass()
-                    .controlSize(.large)
-                    Button {
-                        UIPasteboard.general.string = invite.code
-                        Haptics.success()
-                        withAnimation(.snappy) { copied = true }
-                    } label: {
-                        Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
-                            .frame(maxWidth: .infinity)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
-                }
-                Text("Anyone with this code can join until it expires or you cancel it. Their saves come with them.")
-                    .font(.footnote)
-                    .foregroundStyle(AppBackground.secondaryInk)
-                    .multilineTextAlignment(.center)
-                    // Never squeezed to one line by the spacers around it.
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
             }
-            .padding(24)
+            .scrollBounceBehavior(.basedOnSize)
             .appBackground(AppBackground.sheet)
             .sheetTitle(groupName) {
                 dismiss()

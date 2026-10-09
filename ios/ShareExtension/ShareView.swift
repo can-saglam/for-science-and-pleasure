@@ -15,7 +15,6 @@ struct ShareView: View {
         case signedOut
         case parsing
         case preview(Item)
-        case duplicate
         case failed(String, retryText: String?)
     }
 
@@ -29,7 +28,6 @@ struct ShareView: View {
     /// success screen.
     @State private var saved = false
     @State private var confirmDiscard = false
-    @State private var saveAnyway = false
     /// The phone's own preview of a shared link, while the parser reads.
     @State private var peek: LinkPeek?
     @State private var peekTask: Task<Void, Never>?
@@ -66,6 +64,7 @@ struct ShareView: View {
                         peek: peek,
                         input: payloadImage != nil ? .image : (extractedURL != nil || payloadText == nil ? .link : .text),
                         showsMap: false,
+                        notice: alreadySaved ? AnyView(duplicateStrip) : nil,
                         editFirst: { withAnimation(.snappy) { editing = true } }
                     ) {
                         if let draft {
@@ -147,9 +146,6 @@ struct ShareView: View {
         case .preview(let draft):
             preview(draft)
 
-        case .duplicate:
-            duplicateBlock
-
         case .failed(let message, let retryText):
             Label(message, systemImage: "exclamationmark.triangle")
                 .font(.subheadline)
@@ -178,6 +174,10 @@ struct ShareView: View {
         if !editing {
             RemindRow(item: draft)
         } else {
+            // The drawer says it under its title; the form says it on top.
+            if alreadySaved {
+                duplicateStrip
+            }
             ItemForm(item: draft)
                 .transition(.opacity)
         }
@@ -236,7 +236,10 @@ struct ShareView: View {
                 }
             }
 
-            FloatingMainButton(saved ? "Saved" : "Save", systemImage: saved ? "checkmark.circle.fill" : "checkmark") {
+            FloatingMainButton(
+                saved ? "Saved" : (alreadySaved ? "Save anyway" : "Save"),
+                systemImage: saved ? "checkmark.circle.fill" : (alreadySaved ? "plus" : "checkmark")
+            ) {
                 save(draft)
             }
             .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -244,51 +247,17 @@ struct ShareView: View {
         }
     }
 
-    private var duplicateBlock: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Already in your library")
-                        .font(.footnote.weight(.semibold))
-                    Text("One of you saved this link before.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                }
-            } icon: {
-                Image(systemName: "books.vertical")
-            }
-            .foregroundStyle(AppBackground.warning)
+    /// The shared link is already in the library. The extension only has
+    /// the saved links, not who saved them, so the strip goes without a name.
+    private var alreadySaved: Bool { !saved && SavedURLIndex.contains(extractedURL) }
 
-            HStack(spacing: 10) {
-                if let id = SavedURLIndex.id(for: extractedURL),
-                   let url = URL(string: "canwego://item/\(id.uuidString)") {
-                    Button {
-                        Haptics.tap()
-                        extensionContext?.open(url) { _ in complete() }
-                    } label: {
-                        Label("Open it", systemImage: "arrow.up.right")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .prominentGlass()
-                }
-
-                Button {
-                    Haptics.tap()
-                    saveAnyway = true
-                    Task { await parse() }
-                } label: {
-                    Label("Save anyway", systemImage: "plus")
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
-        .padding(.vertical, 24)
+    private var duplicateStrip: some View {
+        let original = SavedURLIndex.id(for: extractedURL)
+            .flatMap { URL(string: "canwego://item/\($0.uuidString)") }
+        return DuplicateStrip(
+            line: "Already in your library",
+            open: original.map { url in { extensionContext?.open(url) { _ in complete() } } }
+        )
     }
 
     // MARK: - Pipeline
@@ -302,11 +271,6 @@ struct ShareView: View {
         await loadAttachments()
         guard payloadText != nil || payloadImage != nil else {
             stage = .failed("Nothing shareable found.", retryText: nil)
-            return
-        }
-        // The app mirrors saved URLs into the App Group for exactly this.
-        if SavedURLIndex.contains(extractedURL) {
-            withAnimation(.snappy) { stage = .duplicate }
             return
         }
         // Straight to the lookup: the whole point of sharing is to get a
@@ -449,7 +413,9 @@ struct ShareView: View {
             return
         }
         var pending = SharedInbox.PendingSave(item: item, userId: userId)
-        pending.allowDuplicate = saveAnyway ? true : nil
+        // The app drops a shared link it already has, unless the card
+        // said so and Save was tapped anyway.
+        pending.allowDuplicate = SavedURLIndex.contains(extractedURL) ? true : nil
         finish(pending)
     }
 
