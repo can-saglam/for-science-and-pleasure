@@ -3,7 +3,7 @@
 // knowledge-only model call (no web search — search is what timed out
 // and came back empty). If that fails too: curated city list, then a
 // stale cache. Authenticated (member JWT).
-import Anthropic from "npm:@anthropic-ai/sdk";
+import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { consumeQuota } from "../_shared/quota.ts";

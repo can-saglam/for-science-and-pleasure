@@ -46,6 +46,25 @@ enum PagePhotos {
         return found
     }
 
+    struct Lead: Sendable {
+        let url: URL
+        let colour: String?
+    }
+
+    /// The page's own picture, the way the parser would have chosen it had
+    /// it been let in: the first card image that loads at photo size.
+    static func lead(at page: URL) async -> Lead? {
+        for url in await candidates(at: page, limit: 3) {
+            guard let (data, response) = try? await URLSession.shared.data(from: url),
+                  (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
+                  let image = UIImage(data: data),
+                  min(image.size.width * image.scale, image.size.height * image.scale) >= 300
+            else { continue }
+            return Lead(url: url, colour: colour(of: image))
+        }
+        return nil
+    }
+
     private static func usable(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https" || url.scheme?.lowercased() == "http" else { return false }
         let s = url.absoluteString.lowercased()

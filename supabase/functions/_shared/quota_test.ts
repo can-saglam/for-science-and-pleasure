@@ -1,5 +1,13 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { bumpVague, consumeQuota, DAILY, VAGUE_STRIKES, vagueStrikes } from "./quota.ts";
+import {
+  bumpVague,
+  chargeQuota,
+  consumeQuota,
+  DAILY,
+  hasQuota,
+  VAGUE_STRIKES,
+  vagueStrikes,
+} from "./quota.ts";
 
 /** A fake client: `usage` is today's usage_daily row, `plus` whether the
  * entitlements count comes back non-zero. Counting goes through the
@@ -74,6 +82,20 @@ Deno.test("Plus keeps going past twenty", async () => {
 Deno.test("Plus stops at a hundred", async () => {
   const ok = await consumeQuota(stub({ parse: 95, locate: 0, suggest: 5 }, true, () => {}), "u1", "parse");
   assertEquals(ok, false);
+});
+
+Deno.test("checking the allowance counts nothing; charging counts one", async () => {
+  const bumps: Record<string, unknown>[] = [];
+  const db = stub({ parse: 3, locate: 0, suggest: 0 }, false, (a) => bumps.push(a));
+  assertEquals(await hasQuota(db, "u1"), true);
+  assertEquals(bumps, []);
+  assertEquals(await chargeQuota(db, "u1", "parse"), true);
+  assertEquals(bumps.map((b) => b.p_kind), ["parse"]);
+});
+
+Deno.test("a spent allowance says so before anything is asked", async () => {
+  assertEquals(await hasQuota(stub({ parse: 20, locate: 0, suggest: 0 }, false, () => {}), "u1"), false);
+  assertEquals(await hasQuota(stub({ parse: 20, locate: 0, suggest: 0 }, true, () => {}), "u1"), true);
 });
 
 Deno.test("the note gets firmer after four searches", () => {

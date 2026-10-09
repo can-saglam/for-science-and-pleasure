@@ -1,0 +1,17 @@
+[
+  { "id": "search-ramen", "group": "search", "input": "good ramen in soho", "expect": { "vague": true } },
+  { "id": "search-gigs", "group": "search", "input": "gigs this weekend", "expect": { "vague": true } },
+  { "id": "search-museums", "group": "search", "input": "modern art museums in London", "expect": { "vague": true } },
+  { "id": "search-rooftop", "group": "search", "input": "rooftop bars with a view", "expect": { "vague": true } },
+  { "id": "search-brighton", "group": "search", "input": "things to do in Brighton this weekend", "expect": { "vague": true } },
+  { "id": "search-brunch", "group": "search", "input": "best brunch spots near me?", "expect": { "vague": true } },
+  { "id": "search-exhibitions", "group": "search", "input": "exhibitions on in london right now", "expect": { "vague": true } },
+
+  { "id": "typed-hayward", "group": "typed", "input": "latest exhibition at the Hayward Gallery", "expect": { "vague": false, "kind": "event", "venue": "Hayward Gallery", "category": "exhibition", "host": "southbankcentre.co.uk" } },
+  { "id": "typed-tate-modern", "group": "typed", "input": "whats on at tate modern", "expect": { "vague": false, "kind": "event", "venue": "Tate Modern", "category": "exhibition", "host": "tate.org.uk" } },
+  { "id": "typed-bao", "group": "typed", "input": "Bao Borough", "expect": { "vague": false, "kind": "place", "title": "Bao", "category": "restaurant" } },
+  { "id": "typed-koya", "group": "typed", "input": "that udon place in soho called koya", "expect": { "vague": false, "kind": "place", "title": "Koya", "category": "restaurant" } },
+  { "id": "typed-pcc", "group": "typed", "input": "Prince Charles Cinema", "expect": { "vague": false, "kind": "place", "title": "Prince Charles Cinema", "host": "princecharlescinema.com" } },
+  { "id": "typed-kew", "group": "typed", "input": "kew gardens", "expect": { "vague": false, "kind": "place", "title": "Kew Gardens", "category": "park", "host": "kew.org" } },
+  { "id": "typed-bar-italia", "group": "typed", "input": "Bar Italia frith street", "expect": { "vague": false, "kind": "place", "title": "Bar Italia" } }
+]

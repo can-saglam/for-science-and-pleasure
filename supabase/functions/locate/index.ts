@@ -3,7 +3,7 @@
 // Nothing is written here — the client shows the proposals for confirmation
 // and applies the accepted ones itself (RLS enforces membership).
 // A member JWT is required. Stateless — proposals are returned, never written.
-import Anthropic from "npm:@anthropic-ai/sdk";
+import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { corsHeaders, geocode, resolveMapsLink } from "../_shared/geo.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { geocodeNearHome, groupHome, type Home, homeLabel } from "../_shared/home.ts";

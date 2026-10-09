@@ -42,6 +42,7 @@ Deno.test("phone-read pages: plain links only, bot walls refused", () => {
   assert(film?.ogImage === "https://whatson.bfi.org.uk/films/concrete.jpeg", `image: ${film?.ogImage}`);
   assert(film?.text.includes("18:15"), "the page's text");
   assert(pageFromHtml("<title>Just a moment...</title><body>Enable JavaScript and cookies to continue</body>", "https://x.org/") === null, "a wall is no page");
+  assert(pageFromHtml("<title>Reddit</title><meta property=\"og:title\" content=\"Reddit\"><script>x()</script>", "https://www.reddit.com/r/london/s/abc") === null, "nor is an empty shell");
 });
 
 Deno.test("showings: real days from today, in order, one each", () => {

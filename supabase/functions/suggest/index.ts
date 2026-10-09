@@ -1,6 +1,6 @@
 // suggest: "free on Saturday?" — Claude proposes 2-3 day plans from the
 // couple's own library for a given date. Authenticated (member JWT).
-import Anthropic from "npm:@anthropic-ai/sdk";
+import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { groupHome, homeLabel } from "../_shared/home.ts";

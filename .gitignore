@@ -5,6 +5,8 @@ dist/
 .env.*
 .DS_Store
 supabase/.temp/
+# Parser test cases and results: built from the library, so personal.
+scripts/parse-eval/data/
 
 # iOS: personal seed data (public repo) and Xcode cruft
 ios/CanWeGo/Resources/seed-items.json

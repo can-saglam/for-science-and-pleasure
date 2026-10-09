@@ -19,11 +19,16 @@ enum ParseClient {
         let url: String?
         let lat: Double?
         let lng: Double?
-        let color: String?
-        let image_url: String?
+        var color: String?
+        var image_url: String?
         let source: String?
         let place_id: String?
         let showings: [Showing]?
+        /// The page the model found for a typed name or a screenshot, on
+        /// the early fields only.
+        var link: String?
+        /// The server was walled off from the save's own page.
+        var page_unread: Bool?
     }
 
     enum ParseError: LocalizedError {
@@ -73,18 +78,72 @@ enum ParseClient {
     typealias Early = @MainActor (Card) -> Void
 
     /// One silent retry on a transient failure — a dropped connection, a
-    /// gateway timeout while the web-search fallback runs long — before the
-    /// user is asked to try again. Anything that reads like a real answer
-    /// ("couldn't find a venue", 4xx) surfaces straight away.
+    /// gateway error — before the user is asked to try again, but only
+    /// while nothing has come back: once the model's fields are in, the
+    /// lookup has been done and asking again would do it twice. Anything
+    /// that reads like a real answer ("couldn't find a venue", 4xx)
+    /// surfaces straight away.
     static func parse(text: String?, imageJPEG: Data?, early: Early? = nil) async throws -> Card {
         // Social links pick up their caption and cover on-device first —
         // the phone can read what the server's IP is often walled from.
         let input = await SocialPrefetch.enrich(text: text, imageJPEG: imageJPEG)
+        // The page the model finds for a typed name may wall off the
+        // server too; the phone starts on its picture while the server's
+        // lookups run, and uses it if the card says the server was kept out.
+        let photo = PagePhoto()
+        let heard = Flag()
+        let watch: Early = { card in
+            heard.set()
+            if let link = card.link.flatMap(URL.init(string:)) { photo.start(link) }
+            early?(card)
+        }
+        var card: Card
         do {
-            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG, early: early)
-        } catch let error where isTransient(error) {
+            card = try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG, early: watch)
+        } catch let error where isTransient(error) && !heard.isSet {
             try? await Task.sleep(for: .seconds(1.5))
-            return try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG, early: early)
+            card = try await parseReadingPage(text: input.text, imageJPEG: input.imageJPEG, early: watch)
+        }
+        if card.page_unread == true, let page = card.url.flatMap(URL.init(string:)),
+           let lead = await photo.lead(orStart: page, within: .seconds(3)) {
+            card.image_url = lead.url.absoluteString
+            card.color = lead.colour ?? card.color
+        }
+        return card
+    }
+
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() { lock.withLock { value = true } }
+        var isSet: Bool { lock.withLock { value } }
+    }
+
+    /// One page's picture, read on the phone, started at most once.
+    private final class PagePhoto: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<PagePhotos.Lead?, Never>?
+
+        func start(_ page: URL) {
+            lock.withLock {
+                if task == nil { task = Task { await PagePhotos.lead(at: page) } }
+            }
+        }
+
+        /// The picture, or nil if it isn't in by `limit`.
+        func lead(orStart page: URL, within limit: Duration) async -> PagePhotos.Lead? {
+            start(page)
+            guard let task = lock.withLock({ task }) else { return nil }
+            return await withTaskGroup(of: PagePhotos.Lead?.self) { group in
+                group.addTask { await task.value }
+                group.addTask {
+                    try? await Task.sleep(for: limit)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
+            }
         }
     }
 

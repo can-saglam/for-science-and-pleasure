@@ -23,12 +23,8 @@ async function coveredByPlus(db: SupabaseClient, userId: string): Promise<boolea
   return (count ?? 0) > 0;
 }
 
-/** Increment today's counter. Returns false when the day's allowance is spent. */
-export async function consumeQuota(
-  db: SupabaseClient,
-  userId: string,
-  kind: QuotaKind,
-): Promise<boolean> {
+/** Whether today's allowance has room for one more call. Counts nothing. */
+export async function hasQuota(db: SupabaseClient, userId: string): Promise<boolean> {
   const day = new Date().toISOString().slice(0, 10);
   const { data: existing } = await db
     .from("usage_daily")
@@ -37,10 +33,23 @@ export async function consumeQuota(
     .eq("day", day)
     .maybeSingle();
   const used = (existing?.parse ?? 0) + (existing?.locate ?? 0) + (existing?.suggest ?? 0);
-  if (used >= DAILY.free && (used >= DAILY.plus || !(await coveredByPlus(db, userId)))) return false;
+  return used < DAILY.free || (used < DAILY.plus && await coveredByPlus(db, userId));
+}
 
+/** Count one call against today's allowance. */
+export async function chargeQuota(db: SupabaseClient, userId: string, kind: QuotaKind): Promise<boolean> {
+  const day = new Date().toISOString().slice(0, 10);
   const { error } = await db.rpc("bump_usage", { p_user_id: userId, p_day: day, p_kind: kind });
   return !error;
+}
+
+/** Increment today's counter. Returns false when the day's allowance is spent. */
+export async function consumeQuota(
+  db: SupabaseClient,
+  userId: string,
+  kind: QuotaKind,
+): Promise<boolean> {
+  return await hasQuota(db, userId) && await chargeQuota(db, userId, kind);
 }
 
 /** Opening-hours lookups per person per day: each is a billed Google call,

@@ -3,7 +3,7 @@
 // checked the way a save's link is (the page loads and dates this run);
 // places come from the model's knowledge, official sites only. Pure
 // helpers first, then the two refreshes.
-import Anthropic from "npm:@anthropic-ai/sdk";
+import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { cleanLink, linkKey, ownPage } from "./extract.ts";
 import { publicFetch } from "./netguard.ts";
 import { AGGREGATOR_RE } from "./starters.ts";
