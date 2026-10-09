@@ -49,16 +49,17 @@ enum OnboardingGate {
 /// First run. One question a page, centred on a soft wash of the theme:
 /// a welcome, Sign in with Apple, then only what the account still lacks
 /// (a name if Apple didn't hand one over, a home city), the person's own
-/// first save, and only after that the ask for notifications, once
-/// there's a real card to be notified about.
+/// first saves (typed, or ticked from the city's picks), the invite for
+/// someone starting a shared library, the ask for notifications once
+/// there's a real card to be notified about, and a close that shows the
+/// three ways in: the share sheet, the widget, Siri.
 ///
 /// The look is not a question: a fresh install takes a theme from the
 /// system appearance, and the page that shows the first real card offers
 /// a row of swatches to repaint it. The first question after sign-in is
-/// who it's for: just them, or with someone. Only "with someone" leads to
-/// the code, framed as whether one of them has already started; an
-/// invite link skips the question and opens on the code. A join swaps
-/// the first-save page for a look at what the group already has.
+/// who it's for: just them, starting a shared library, or joining one
+/// with a code; an invite link answers it and opens on the code. A join
+/// swaps the first-save page for a look at what the group already has.
 ///
 /// Someone who already has an account never sees a page past sign-in:
 /// the moment the session lands and the card says name and home are on
@@ -83,8 +84,8 @@ struct OnboardingView: View {
     @State private var themes = ThemeStore.shared
     @State private var auth = SupabaseAuth.shared
 
-    enum Page: String, Hashable { case welcome, together, home, name, code, save, joined, notify }
-    @State private var pages: [Page] = [.welcome, .together, .name, .home, .save, .notify]
+    enum Page: String, Hashable { case welcome, together, home, name, save, joined, invite, notify, done }
+    @State private var pages: [Page] = [.welcome, .together, .name, .home, .save, .notify, .done]
     @State private var index = 0
 
     // Sign in (the welcome page is the front door when there's no session)
@@ -98,13 +99,11 @@ struct OnboardingView: View {
     // Name
     @State private var name = ""
 
-    // Together
-    private enum Together: String { case solo, someone }
+    // Together: just them, starting a shared library, or joining one
+    private enum Together: String { case solo, start, code }
     @State private var together: Together?
 
     // Code
-    private enum CodeChoice: String { case haveCode, first }
-    @State private var codeChoice: CodeChoice?
     @State private var codeDraft = ""
     @State private var codePreview: GroupStore.JoinPreview?
     @State private var lookingUp = false
@@ -119,6 +118,10 @@ struct OnboardingView: View {
     @State private var matches: [HomeStore.Home] = []
     @State private var picked: HomeStore.Home?
     @State private var wider: HomeStore.Home?
+    /// A lookup that named a ward shows its city instead; the ward is
+    /// kept here, by the city shown, so it can still be chosen.
+    @State private var wards: [HomeStore.Home: HomeStore.Home] = [:]
+    @State private var narrower: HomeStore.Home?
     @State private var locating = false
     @State private var camera: MapCameraPosition = .region(OnboardingView.worldRegion)
 
@@ -131,6 +134,16 @@ struct OnboardingView: View {
     /// The home city's suggestions, fetched the moment a home is known so
     /// they're waiting when the save page comes up.
     @State private var suggestions = Suggestions.shared
+    /// City picks ticked to save alongside (or instead of) a typed one.
+    @State private var tickedPicks: [ParseClient.Suggestion] = []
+    /// The ticked picks once saved, shown as cards before moving on.
+    @State private var savedPicks: [Item] = []
+
+    // Invite (only for someone starting a shared library)
+    @State private var invite: GroupStore.InviteResult?
+    @State private var inviteFailed = false
+    @State private var sharingInvite = false
+    @State private var copiedCode = false
 
     // Joined
     @State private var groupCards: [Item] = []
@@ -351,7 +364,7 @@ struct OnboardingView: View {
             if offersNotNow {
                 // The way out sits beside the ask, not up in the page.
                 // Back, dots and two pills don't fit one bar, so the
-                // dots step aside on this last page.
+                // dots step aside on this page.
                 notNowButton
                     .padding(.trailing, 10)
             } else {
@@ -405,7 +418,7 @@ struct OnboardingView: View {
         Button {
             Haptics.tap()
             if !preview { PushRegistrar.declinePrime() }
-            finish()
+            advance()
         } label: {
             Text("Not now")
                 .fontWeight(.semibold)
@@ -468,18 +481,20 @@ struct OnboardingView: View {
         case .joined:
             return Forward(run: advance)
         case .together:
-            if together == nil { return Forward(disabled: true, run: {}) }
-            return Forward(title: "Continue", run: advance)
+            switch together {
+            case nil:
+                return Forward(disabled: true, run: {})
+            case .code where !joined:
+                if let p = codePreview, p.canJoin {
+                    // The card above already names the group; keep the pill short.
+                    return Forward(title: "Join") { Task { await join() } }
+                }
+                return Forward(disabled: true, run: {})
+            default:
+                return Forward(title: "Continue", run: advance)
+            }
         case .name:
             return Forward(disabled: trimmedName.isEmpty, run: commitName)
-        case .code:
-            if joined { return Forward(run: advance) }
-            if codeChoice == .haveCode, let p = codePreview, p.canJoin {
-                // The card above already names the group; keep the pill short.
-                return Forward(title: "Join") { Task { await join() } }
-            }
-            if codeChoice == .first { return Forward(title: "Continue", run: advance) }
-            return Forward(disabled: true, run: {})
         case .home:
             if let picked, homeVariant != .finding {
                 // The headline or the ticked row already names the city.
@@ -487,26 +502,36 @@ struct OnboardingView: View {
             }
             return Forward(disabled: true, run: {})
         case .save:
-            if parsed != nil { return Forward(title: "Save it", run: commitSave) }
+            if parsed != nil {
+                return Forward(title: tickedPicks.isEmpty ? "Save it" : "Save \(tickedPicks.count + 1)", run: commitSave)
+            }
+            if !savedPicks.isEmpty { return Forward(title: "Continue", run: advance) }
+            if !tickedPicks.isEmpty, !parsing { return Forward(title: "Save \(tickedPicks.count)", run: commitPicks) }
             return Forward(disabled: parsing, run: advance)
+        case .invite:
+            if invite != nil { return Forward(title: "Send invite") { sharingInvite = true } }
+            if inviteFailed { return Forward(title: "Continue", run: advance) }
+            return Forward(disabled: true, run: {})
         case .notify:
             // Only ask when asking will do something: the system prompt
-            // shows once, for `.notDetermined`. Otherwise just finish.
+            // shows once, for `.notDetermined`. Otherwise just carry on.
             if notifyStatus == .notDetermined {
                 return Forward(title: "Notify me") { Task { await askNotifications() } }
             }
-            return Forward(title: "Done", run: finish)
+            return Forward(title: "Continue", run: advance)
+        case .done:
+            return Forward(title: "Open my library", run: finish)
         }
     }
 
     /// The system prompt comes up over this page — the one that explained
-    /// it — and the run finishes once it's answered, not underneath it.
+    /// it — and the run moves on once it's answered, not underneath it.
     private func askNotifications() async {
-        if preview { finish(); return }
+        if preview { advance(); return }
         busy = true
         await PushRegistrar.requestNow()
         busy = false
-        finish()
+        advance()
     }
 
     // MARK: Pages
@@ -517,11 +542,12 @@ struct OnboardingView: View {
         case .welcome: welcomePage
         case .together: togetherPage
         case .name: namePage
-        case .code: codePage
         case .home: homePage
         case .save: savePage
         case .joined: joinedPage
+        case .invite: invitePage
         case .notify: notifyPage
+        case .done: donePage
         }
     }
 
@@ -943,8 +969,7 @@ struct OnboardingView: View {
             // They came by invite link: `pageOrder` put the code page first,
             // already answered, with the group looked up.
             if let code = JoinGate.pendingCode {
-                together = .someone
-                codeChoice = .haveCode
+                together = .code
                 codeDraft = JoinSheet.formatTyping(code)
                 Task { await lookup(code) }
             }
@@ -1029,6 +1054,8 @@ struct OnboardingView: View {
 
     // MARK: Together
 
+    /// Who it's for and, for a shared library, which side of the invite
+    /// they're on, as one question. A code opens its field under the tile.
     private var togetherPage: some View {
         VStack(alignment: .leading, spacing: 18) {
             headline("Just you, or\nwith someone?")
@@ -1038,10 +1065,23 @@ struct OnboardingView: View {
                        "Your own library of things you want to go to.",
                        selected: together == .solo) { chooseTogether(.solo) }
                 .disabled(joined)
-            choiceTile("person.2.fill", "With someone",
-                       "A partner, a friend, housemates: one shared library you all add to.",
-                       selected: together == .someone) { chooseTogether(.someone) }
+            choiceTile("person.2.fill", "Start a shared library",
+                       "Set it up now. You'll send them an invite in a minute.",
+                       selected: together == .start) { chooseTogether(.start) }
+                .disabled(joined)
+            choiceTile("envelope.open.fill", "I have a code",
+                       "Someone already started. Codes look like KV7-P2M.",
+                       selected: together == .code) { chooseTogether(.code) }
+
+            if together == .code {
+                codeEntry
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            noteLine
         }
+        .animation(ease, value: codePreview?.status)
+        .animation(ease, value: together)
     }
 
     /// One answer to a page's question: a glass slab with a radio mark.
@@ -1076,63 +1116,34 @@ struct OnboardingView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// "With someone" puts the code page next; "Just me" takes it out.
+    /// Starting a shared library puts the invite page after the first
+    /// save; the other answers take it out.
     private func chooseTogether(_ choice: Together) {
+        note = nil
         withAnimation(ease) {
             together = choice
-            if choice == .someone {
-                if !pages.contains(.code), let i = pages.firstIndex(of: .together) {
-                    pages.insert(.code, at: i + 1)
-                }
-            } else if let i = pages.firstIndex(of: .code) {
-                pages.remove(at: i)
+            placeInvitePage()
+        }
+        if choice == .code {
+            refreshOffers()
+            if codeDraft.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { focus = .code }
             }
+        } else {
+            focus = nil
+        }
+    }
+
+    private func placeInvitePage() {
+        let wanted = together == .start && !joined && (preview || !alreadyShared)
+        if wanted, !pages.contains(.invite), let i = pages.firstIndex(of: .notify) {
+            pages.insert(.invite, at: i)
+        } else if !wanted, let i = pages.firstIndex(of: .invite) {
+            pages.remove(at: i)
         }
     }
 
     // MARK: Code
-
-    private var codePage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            headline("Has one of you\nalready started?")
-            lede("One of you starts the library, then invites the other with a code from Settings. After that it's shared: you both see, add and edit everything.")
-
-            choiceTile("envelope.open.fill", "Yes, they sent me a code",
-                       "Type or paste it in. Codes look like KV7-P2M.",
-                       selected: codeChoice == .haveCode, action: pickHaveCode)
-                .disabled(joined)
-
-            if codeChoice == .haveCode {
-                codeEntry
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            if !joined {
-                choiceTile("sparkles", "No, I'll start it",
-                           "Set up your library now, then invite them from Settings when you're ready.",
-                           selected: codeChoice == .first, action: pickFirst)
-            }
-
-            noteLine
-        }
-        .animation(ease, value: codePreview?.status)
-        .animation(ease, value: codeChoice)
-    }
-
-    private func pickHaveCode() {
-        note = nil
-        codeChoice = .haveCode
-        refreshOffers()
-        if codeDraft.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { focus = .code }
-        }
-    }
-
-    private func pickFirst() {
-        focus = nil
-        note = nil
-        codeChoice = .first
-    }
 
     /// The field, the paste offer and the group it opens — shown once
     /// they've said they have a code.
@@ -1454,6 +1465,7 @@ struct OnboardingView: View {
                     manualHome = true
                     picked = nil
                     wider = nil
+                    narrower = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { focus = .city }
                 }
 
@@ -1549,7 +1561,12 @@ struct OnboardingView: View {
 
     @ViewBuilder
     private var widerHint: some View {
-        if let wider, let picked, wider != picked {
+        if let narrower {
+            // The city was taken for them; the ward stays one tap away.
+            chip("Just \(narrower.locality)? Use that instead", icon: "arrow.down.right.and.arrow.up.left") {
+                pick(narrower)
+            }
+        } else if let wider, let picked, wider != picked {
             chip("\(picked.locality) is part of \(wider.locality). Use \(wider.locality) instead", icon: "arrow.up.left.and.arrow.down.right") {
                 pick(wider)
             }
@@ -1557,10 +1574,13 @@ struct OnboardingView: View {
     }
 
     private func pick(_ home: HomeStore.Home) {
+        let widened = home == wider || wards[home] != nil
         picked = home
-        wider = HomeStore.widerCity(for: home)
+        narrower = wards[home]
+        wider = narrower == nil ? HomeStore.widerCity(for: home) : nil
+        if let wider { wards[wider] = home }
         note = nil
-        frame(home)
+        frame(home, wide: widened)
         focus = nil
         // Start the city search now, not on "Set as home" — a cold miss
         // is a model call and the name page is the wait.
@@ -1583,10 +1603,11 @@ struct OnboardingView: View {
         camera = .region(region)
     }
 
-    private func frame(_ home: HomeStore.Home) {
+    /// `wide`: a whole city taken in place of one of its wards.
+    private func frame(_ home: HomeStore.Home, wide: Bool = false) {
         guard let c = home.coordinate else { return }
         let isLondon = home.locality.compare("London", options: .caseInsensitive) == .orderedSame
-        let span: CLLocationDistance = isLondon ? 60_000 : 22_000
+        let span: CLLocationDistance = isLondon || wide ? 60_000 : 22_000
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.0)) {
             camera = .region(MKCoordinateRegion(center: c, latitudinalMeters: span, longitudinalMeters: span))
         }
@@ -1683,6 +1704,7 @@ struct OnboardingView: View {
         matches = []
         picked = nil
         wider = nil
+        narrower = nil
         do {
             guard let request = MKGeocodingRequest(addressString: query) else {
                 note = "Couldn't look that up."
@@ -1700,13 +1722,19 @@ struct OnboardingView: View {
         }
     }
 
+    /// A ward (Nakano, Hackney) is listed as its city (Tokyo, London):
+    /// home is the city you go out in, and suggestions are per city.
     private func present(_ items: [MKMapItem]) {
         var seen = Set<String>()
         var homes: [HomeStore.Home] = []
         for item in items {
-            guard let home = HomeStore.from(item.placemark) else { continue }
+            guard let found = HomeStore.from(item.placemark) else { continue }
+            let city = HomeStore.widerCity(for: found)
+            let home = city ?? found
             let key = "\(home.locality)|\(home.country)"
-            if seen.insert(key).inserted { homes.append(home) }
+            guard seen.insert(key).inserted else { continue }
+            if let city { wards[city] = found }
+            homes.append(home)
         }
         matches = Array(homes.prefix(5))
     }
@@ -1795,7 +1823,7 @@ struct OnboardingView: View {
     /// blank wait), nothing if we have no home and no fallback.
     private var starterChips: [ParseClient.Suggestion] {
         if let home = chosenHome {
-            let pool = suggestions.mixed(for: home)
+            let pool = suggestions.mixed(for: home, count: 5)
             if !pool.isEmpty { return pool }
         }
         return Self.fallbackStarters(for: chosenHome)
@@ -1823,9 +1851,16 @@ struct OnboardingView: View {
 
     private var savePage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let parsed {
+            if !savedPicks.isEmpty {
+                headline(savedPicks.count == 1 ? "There it is." : "There they are.")
+                lede("Real saves. Everything you add lands in the library looking like this. The details fill in as we read each page.")
+                ForEach(savedPicks) { ItemCard(item: $0) }
+                themeSwatches
+            } else if let parsed {
                 headline("There it is.")
-                lede("A real save. Everything you add lands in the library looking like this.")
+                lede(tickedPicks.isEmpty
+                     ? "A real save. Everything you add lands in the library looking like this."
+                     : "A real save, and the \(tickedPicks.count == 1 ? "one" : "\(tickedPicks.count)") you ticked go in with it. Everything you add lands in the library looking like this.")
                 ItemCard(item: parsed)
                 quiet("Try another") {
                     self.parsed = nil
@@ -1836,8 +1871,8 @@ struct OnboardingView: View {
                 }
                 themeSwatches
             } else {
-                headline("What's the first thing\nyou'd go to?")
-                lede("Paste a link or just name it: a gig, a show, somewhere to eat. We look it up and make the card. Or skip and add one later.")
+                headline("What would you\ngo to first?")
+                lede("Paste a link or name it: a gig, a show, somewhere to eat. We look it up and make the card. Or tick a few from your city.")
 
                 if parsing {
                     formingCard
@@ -1861,10 +1896,14 @@ struct OnboardingView: View {
                         Recommendations(
                             city: starterChips.isEmpty ? chosenHome?.locality : starterCity,
                             picks: starterChips,
-                            loading: suggestions.loading
+                            loading: suggestions.loading,
+                            ticked: Set(tickedPicks.map(\.id))
                         ) { pick in
-                            linkDraft = pick.url
-                            startParse()
+                            if let i = tickedPicks.firstIndex(of: pick) {
+                                tickedPicks.remove(at: i)
+                            } else {
+                                tickedPicks.append(pick)
+                            }
                         }
                     }
 
@@ -1877,6 +1916,7 @@ struct OnboardingView: View {
         }
         .animation(ease, value: parsing)
         .animation(ease, value: parsed?.id)
+        .animation(ease, value: savedPicks.count)
         .animation(ease, value: starterChips)
         .animation(ease, value: suggestions.loading)
         .onAppear {
@@ -1955,24 +1995,7 @@ struct OnboardingView: View {
             // Skipped meanwhile: the page has moved on; drop the result.
             guard !Task.isCancelled else { return }
             let item = Item()
-            item.kind = card.kind
-            item.title = card.title
-            item.summary = card.summary
-            item.venue = card.venue
-            item.area = card.area
-            item.address = card.address
-            item.category = card.category
-            item.price = card.price
-            item.startsOn = card.starts_on
-            item.endsOn = card.ends_on
-            item.url = card.url
-            item.lat = card.lat
-            item.lng = card.lng
-            item.colorHex = card.color
-            item.imageUrl = card.image_url
-            item.source = card.source
-            item.placeId = card.place_id
-            item.showings = card.showings ?? []
+            item.take(card)
             parsed = item
             Haptics.success()
         } catch {
@@ -1982,22 +2005,171 @@ struct OnboardingView: View {
         }
     }
 
+    /// The typed save, plus anything ticked under it.
     private func commitSave() {
         guard let item = parsed else { return }
         if preview { advance(); return }
-        item.createdAt = .now
-        item.updatedAt = .now
-        item.stampAuthor()
-        context.insert(item)
+        let picks = tickedPicks.map(Item.init(suggestion:))
+        guard insert([item] + picks) else { return }
+        enrich(picks)
+        advance()
+    }
+
+    /// Ticked picks on their own: saved straight away from what the pool
+    /// knows, shown as cards, and filled in from their pages meanwhile.
+    private func commitPicks() {
+        let picks = tickedPicks.map(Item.init(suggestion:))
+        if preview {
+            savedPicks = picks
+            return
+        }
+        guard insert(picks) else { return }
+        savedPicks = picks
+        enrich(picks)
+    }
+
+    private func insert(_ items: [Item]) -> Bool {
+        for item in items {
+            item.createdAt = .now
+            item.updatedAt = .now
+            item.stampAuthor()
+            context.insert(item)
+        }
         do {
             try context.save()
         } catch {
-            note = "Couldn't save that. Try again."
-            return
+            items.forEach(context.delete)
+            note = items.count == 1 ? "Couldn't save that. Try again." : "Couldn't save those. Try again."
+            return false
         }
         Haptics.success()
-        Task { await SupabaseSync.announceSave(item) }
-        advance()
+        for item in items { Task { await SupabaseSync.announceSave(item) } }
+        return true
+    }
+
+    /// A pick's full card (summary, address, colour, picture), read from
+    /// its page after it's saved. A page that can't be read leaves the
+    /// pool's version, which is already a fine save. Not tied to the page,
+    /// so moving on doesn't stop it.
+    private func enrich(_ items: [Item]) {
+        let context = context
+        for item in items {
+            guard let url = item.url else { continue }
+            Task { @MainActor in
+                guard let card = try? await ParseClient.parse(text: url, imageJPEG: nil),
+                      !item.isDeleted, item.modelContext != nil
+                else { return }
+                item.take(card)
+                item.updatedAt = .now
+                try? context.save()
+                SupabaseSync.schedule(context: context)
+            }
+        }
+    }
+
+    // MARK: Invite
+
+    /// What this run saved first: the typed one, else the first ticked.
+    private var firstSave: Item? { parsed ?? savedPicks.first }
+
+    /// Only for someone who chose to start a shared library, right after
+    /// their first saves, so the invite has something in it worth opening.
+    private var invitePage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            headline("Now bring\nthem in")
+            lede("Send this to whoever you go out with. It opens the app on their phone and puts them straight into your library.")
+
+            if let firstSave {
+                ItemCard(item: firstSave)
+                    .allowsHitTesting(false)
+            }
+
+            if let invite {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Their code")
+                            .font(.footnote)
+                            .foregroundStyle(AppBackground.ink.opacity(0.72))
+                        Text(invite.code)
+                            .font(.displaySmallBold(30, relativeTo: .title2))
+                            .textSelection(.enabled)
+                    }
+                    .accessibilityElement(children: .combine)
+                    Spacer(minLength: 0)
+                    chip(copiedCode ? "Copied" : "Copy", icon: copiedCode ? "checkmark" : "doc.on.doc") {
+                        UIPasteboard.general.string = invite.code
+                        copiedCode = true
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                .transition(.opacity)
+            } else if !inviteFailed {
+                ProgressView().controlSize(.small).padding(.vertical, 8)
+            }
+
+            quiet("Later, from Settings") { advance() }
+
+            noteLine
+        }
+        .animation(ease, value: invite?.code)
+        .task { await loadInvite() }
+        .sheet(isPresented: $sharingInvite) {
+            ActivitySheet(items: [inviteMessage]) { sent in
+                guard sent else { return }
+                sharingInvite = false
+                Haptics.success()
+                advance()
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    /// The server's sentence (code and store link), led by the first save
+    /// so it reads as a reason to come, not a sign-up.
+    private var inviteMessage: String {
+        guard let invite else { return "" }
+        let base = invite.message ?? "Join me on Can We Go? \u{2014} code \(invite.code)"
+        guard let title = firstSave?.title, !title.isEmpty else { return base }
+        return "First on my list: \(title).\n\n\(base)"
+    }
+
+    private func loadInvite() async {
+        guard invite == nil, !inviteFailed else { return }
+        if preview {
+            invite = .init(code: "KV7-P2M", expiresAt: .now.addingTimeInterval(7 * 86_400), message: nil)
+            return
+        }
+        do {
+            invite = try await group.invite()
+        } catch {
+            inviteFailed = true
+            note = "Couldn't make an invite just now. Send one any time from Settings."
+        }
+    }
+
+    // MARK: Done
+
+    /// The close: the three ways things get in from now on, the share
+    /// sheet first because it's the one people don't find on their own.
+    private var donePage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            headline("You're set.")
+            lede("Three ways in, whenever something catches your eye.")
+
+            ShareClip(icon: themes.current.iconPreviewName, still: reduceMotion)
+                .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 16) {
+                row("square.and.arrow.up", "Share from anywhere",
+                    "In Instagram, Safari or Maps, tap Share, then Can We Go?. Not in the row? Tap More.")
+                row("square.grid.2x2", "A widget for what's on",
+                    "Hold the Home Screen, tap Edit, then Add Widget.")
+                row("waveform", "Ask Siri",
+                    "\u{201C}Add something to Can We Go?\u{201D} or \u{201C}What's closing soon in Can We Go?\u{201D}")
+            }
+        }
     }
 
     // MARK: Notify
@@ -2100,13 +2272,13 @@ struct OnboardingView: View {
     private func takeInviteCode(_ code: String) {
         codeDraft = JoinSheet.formatTyping(code)
         guard !needsSignIn else { return }
-        // A link answers both questions: with someone, and they've started.
-        together = .someone
-        codeChoice = .haveCode
-        if !pages.contains(.code) {
-            withAnimation(ease) { pages.insert(.code, at: min(max(index, 1), pages.count)) }
+        // A link answers the question: they're joining someone.
+        together = .code
+        placeInvitePage()
+        if !pages.contains(.together) {
+            withAnimation(ease) { pages.insert(.together, at: min(max(index, 1), pages.count)) }
         }
-        if let i = pages.firstIndex(of: .code) {
+        if let i = pages.firstIndex(of: .together) {
             withAnimation(ease) { index = i }
             note = nil
             Task { await lookup(code) }
@@ -2117,8 +2289,7 @@ struct OnboardingView: View {
         if preview { originalTheme = themes.current }
         if !preview, let code = JoinGate.pendingCode {
             codeDraft = JoinSheet.formatTyping(code)
-            together = .someone
-            codeChoice = .haveCode
+            together = .code
         }
         if !preview, let uid = SupabaseAuth.shared.userId, let existing = members.name(forUser: uid) {
             name = existing
@@ -2135,9 +2306,18 @@ struct OnboardingView: View {
         }
         // Preview of the code page answered: `CWG_ONBOARDING_CODE=KV7P2M`.
         if preview, let raw = ProcessInfo.processInfo.environment["CWG_ONBOARDING_CODE"] {
-            together = .someone
-            codeChoice = .haveCode
+            together = .code
             codeDraft = JoinSheet.formatTyping(raw)
+        }
+        // Preview of the invite page: `CWG_ONBOARDING_TOGETHER=start`.
+        if preview, let raw = ProcessInfo.processInfo.environment["CWG_ONBOARDING_TOGETHER"],
+           let choice = Together(rawValue: raw) {
+            together = choice
+            placeInvitePage()
+            if let page = ProcessInfo.processInfo.environment["CWG_ONBOARDING_PAGE"],
+               let i = pages.firstIndex(where: { $0.rawValue == page }) {
+                index = i
+            }
         }
         // Preview of the joined page: pretend the code was accepted.
         if preview, ProcessInfo.processInfo.environment["CWG_ONBOARDING_PAGE"] == "joined" {
@@ -2173,18 +2353,17 @@ struct OnboardingView: View {
     /// their saves, which answer two of the pages after it. Home leads the
     /// rest when it can be guessed; pages the account already answers are
     /// dropped (never in preview, which shows them all). An invite link
-    /// skips the question and opens on the code.
+    /// opens the question already answered, on the code. Starting a
+    /// shared library adds the invite after the first save.
     private func pageOrder() -> [Page] {
         var order: [Page] = locationAllowed
-            ? [.welcome, .home, .name, .save, .notify]
-            : [.welcome, .name, .home, .save, .notify]
-        if preview {
-            order.insert(contentsOf: [.together, .code], at: 1)
-        } else if JoinGate.pendingCode != nil {
-            order.insert(.code, at: 1)
-        } else if !alreadyShared {
+            ? [.welcome, .home, .name, .save, .notify, .done]
+            : [.welcome, .name, .home, .save, .notify, .done]
+        if preview || JoinGate.pendingCode != nil || !alreadyShared {
             order.insert(.together, at: 1)
-            if together == .someone { order.insert(.code, at: 2) }
+        }
+        if together == .start, !joined, preview || !alreadyShared, let i = order.firstIndex(of: .notify) {
+            order.insert(.invite, at: i)
         }
         if !preview {
             if OnboardingGate.hasName { order.removeAll { $0 == .name } }
@@ -2210,6 +2389,7 @@ struct OnboardingView: View {
         var cityDraft: String
         var linkDraft: String
         var together: String?
+        /// Before the two questions became one: "haveCode" or "first".
         var codeChoice: String?
     }
 
@@ -2225,7 +2405,7 @@ struct OnboardingView: View {
         guard !preview, let key = resumeKey, page != .welcome else { return }
         let state = Resume(page: page.rawValue, name: name, codeDraft: codeDraft,
                            cityDraft: cityDraft, linkDraft: linkDraft,
-                           together: together?.rawValue, codeChoice: codeChoice?.rawValue)
+                           together: together?.rawValue, codeChoice: nil)
         if let data = try? JSONEncoder().encode(state) {
             resumeDefaults.set(data, forKey: key)
         }
@@ -2235,22 +2415,21 @@ struct OnboardingView: View {
         guard let key = resumeKey,
               let data = resumeDefaults.data(forKey: key),
               let state = try? JSONDecoder().decode(Resume.self, from: data),
-              let target = Page(rawValue: state.page)
+              let target = Page(rawValue: state.page == "code" ? Page.together.rawValue : state.page)
         else { return }
         if name.isEmpty { name = state.name }
         cityDraft = state.cityDraft
         linkDraft = state.linkDraft
-        together = state.together.flatMap(Together.init(rawValue:))
-        codeChoice = state.codeChoice.flatMap(CodeChoice.init(rawValue:))
+        switch (state.together, state.codeChoice) {
+        case ("someone", "first"): together = .start
+        case ("someone", _): together = .code
+        default: together = state.together.flatMap(Together.init(rawValue:))
+        }
         if !state.codeDraft.isEmpty {
             codeDraft = state.codeDraft
-            together = .someone
-            if codeChoice == nil { codeChoice = .haveCode }
+            if together == nil { together = .code }
         }
-        if together == .someone, !pages.contains(.code) {
-            let after = pages.firstIndex(of: .together).map { $0 + 1 } ?? min(1, pages.count)
-            pages.insert(.code, at: after)
-        }
+        placeInvitePage()
         // The page may have been answered since (a second device): then
         // land on the first one still open rather than a page that's gone.
         // A joined page can't be rebuilt from cold; its neighbour will do.
@@ -2275,7 +2454,7 @@ struct OnboardingView: View {
     private func refreshOffers() {
         let board = UIPasteboard.general
         // A link is never a code; anything else that's text might be.
-        clipboardHasText = page == .code && board.hasStrings && !board.hasURLs
+        clipboardHasText = page == .together && together == .code && board.hasStrings && !board.hasURLs
     }
 
     /// Removes a page without moving the reader: if it sat before the
@@ -2291,8 +2470,8 @@ struct OnboardingView: View {
     private func advance() {
         note = nil
         focus = nil
-        // Leaving the code page, joined or not, settles the invite link.
-        if page == .code { JoinGate.pendingCode = nil }
+        // Leaving the question, joined or not, settles the invite link.
+        if page == .together { JoinGate.pendingCode = nil }
         guard index + 1 < pages.count else { finish(); return }
         withAnimation(ease) { index += 1 }
         if page == .name, trimmedName.isEmpty {
@@ -2316,6 +2495,8 @@ struct OnboardingView: View {
             // system's "you changed the icon" alert, is what comes next.
             themes.deferIconSync()
             clearResume()
+            // The closing page taught the share sheet and the widget.
+            ShareTip.taughtInOnboarding = true
         }
         onFinished()
     }
@@ -2332,4 +2513,152 @@ struct OnboardingView: View {
         center: CLLocationCoordinate2D(latitude: 30, longitude: 0),
         span: MKCoordinateSpan(latitudeDelta: 110, longitudeDelta: 110)
     )
+}
+
+/// The share sheet, acted out: a post, its Share button, Can We Go? in
+/// the row of apps, and the save that lands. Loops; with reduced motion
+/// it holds on the row of apps, the one step people miss.
+private struct ShareClip: View {
+    let icon: String
+    let still: Bool
+    @State private var step = 1
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            post
+                .opacity(step == 2 ? 0.3 : 1)
+            if step == 1 {
+                sheet
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if step == 2 {
+                saved
+                    .frame(maxHeight: .infinity)
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 210)
+        .clipShape(.rect(cornerRadius: 22))
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Example: on a post, tap Share, then Can We Go?, and it's saved.")
+        .task {
+            guard !still else { return }
+            step = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(step == 0 ? 1.4 : 2.0))
+                guard !Task.isCancelled else { return }
+                withAnimation(.smooth(duration: 0.45)) { step = (step + 1) % 3 }
+            }
+        }
+    }
+
+    private var post: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(AppBackground.ink.opacity(0.18))
+                    .frame(width: 22, height: 22)
+                Text("latenightjazz")
+                    .font(.caption.weight(.semibold))
+            }
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                // Stands in for a photo, so it doesn't follow the theme.
+                .fill(LinearGradient(
+                    colors: [Color(hue: 0.07, saturation: 0.75, brightness: 0.95), Color(hue: 0.93, saturation: 0.6, brightness: 0.55)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+                .frame(height: 92)
+                .overlay(alignment: .bottomLeading) {
+                    Text("Late Late Show \u{00B7} Thursday")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(10)
+                }
+            HStack(spacing: 18) {
+                Image(systemName: "heart")
+                Image(systemName: "bubble.right")
+                Spacer()
+                Image(systemName: "square.and.arrow.up")
+                    .padding(7)
+                    .background(AppBackground.accent.opacity(step == 0 ? 0.25 : 0), in: .circle)
+                    .scaleEffect(step == 0 ? 1.15 : 1)
+            }
+            .font(.subheadline)
+        }
+        .padding(14)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var sheet: some View {
+        VStack(spacing: 10) {
+            Capsule()
+                .fill(AppBackground.ink.opacity(0.25))
+                .frame(width: 34, height: 4)
+            HStack(alignment: .top, spacing: 10) {
+                tile("Messages") { symbol("message.fill", on: .green) }
+                tile("Mail") { symbol("envelope.fill", on: .blue) }
+                tile("Notes") { symbol("note.text", on: .orange) }
+                tile("Can We Go?", on: true) {
+                    Image(icon).resizable().scaledToFill()
+                }
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
+        .background(.thickMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 20, topTrailingRadius: 20))
+    }
+
+    private var saved: some View {
+        HStack(spacing: 10) {
+            Image(icon)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 32, height: 32)
+                .clipShape(.rect(cornerRadius: 7.5, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Saved")
+                    .font(.caption.weight(.semibold))
+                Text("Late Late Show, Thursday")
+                    .font(.footnote)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(AppBackground.accent)
+        }
+        .padding(12)
+        .background(.thickMaterial, in: .rect(cornerRadius: 16))
+        .padding(.horizontal, 18)
+    }
+
+    private func symbol(_ name: String, on color: Color) -> some View {
+        color.overlay {
+            Image(systemName: name)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func tile<Icon: View>(_ label: String, on: Bool = false, @ViewBuilder icon: () -> Icon) -> some View {
+        VStack(spacing: 5) {
+            icon()
+                .frame(width: 44, height: 44)
+                .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    if on {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(AppBackground.accent, lineWidth: 2)
+                            .padding(-4)
+                    }
+                }
+            Text(label)
+                .font(.caption2.weight(on ? .semibold : .regular))
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .frame(width: 62)
+    }
 }

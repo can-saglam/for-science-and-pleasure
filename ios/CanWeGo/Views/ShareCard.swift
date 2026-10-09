@@ -196,10 +196,15 @@ struct ShareCard: View {
 struct ActivitySheet: UIViewControllerRepresentable {
     let items: [Any]
     var excluded: [UIActivity.ActivityType] = []
+    /// Called with true once something was actually sent or saved.
+    var completed: ((Bool) -> Void)? = nil
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
         controller.excludedActivityTypes = excluded
+        if let completed {
+            controller.completionWithItemsHandler = { _, done, _, _ in completed(done) }
+        }
         return controller
     }
 

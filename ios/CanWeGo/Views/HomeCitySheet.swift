@@ -138,8 +138,11 @@ struct HomeCitySheet: View {
         var homes: [HomeStore.Home] = []
         for item in items {
             guard let home = HomeStore.from(item.placemark) else { continue }
-            let key = "\(home.locality)|\(home.country)"
-            if seen.insert(key).inserted { homes.append(home) }
+            // A ward (Nakano) is listed under its city (Tokyo).
+            for option in [HomeStore.widerCity(for: home), home].compactMap(\.self) {
+                let key = "\(option.locality)|\(option.country)"
+                if seen.insert(key).inserted { homes.append(option) }
+            }
         }
         matches = Array(homes.prefix(5))
     }

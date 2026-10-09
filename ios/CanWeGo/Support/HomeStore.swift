@@ -24,6 +24,9 @@ final class HomeStore {
         var timezone: String
         var lat: Double?
         var lng: Double?
+        /// The city a ward or district belongs to ("Tokyo" for Nakano),
+        /// when Apple names the ward as the town. Only set at lookup.
+        var partOf: String?
 
         static let london = Home(
             locality: "London", country: "United Kingdom",
@@ -82,24 +85,36 @@ final class HomeStore {
                 skipAdmin.contains($0) ? nil : $0.trimmingCharacters(in: .whitespaces).nilIfEmpty
             }
         guard let locality else { return nil }
+        // Greater London's boroughs carry "London" a level down, which
+        // keeps Watford (Hertfordshire) and Dartford (Kent) out.
+        let area = placemark.isoCountryCode == "GB" ? placemark.subAdministrativeArea : placemark.administrativeArea
+        let wardCities = placemark.isoCountryCode.flatMap { Self.wardCities[$0] } ?? []
         return Home(
             locality: locality,
             country: placemark.country?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "",
             timezone: placemark.timeZone?.identifier ?? TimeZone.current.identifier,
             lat: placemark.location?.coordinate.latitude,
-            lng: placemark.location?.coordinate.longitude
+            lng: placemark.location?.coordinate.longitude,
+            partOf: area.flatMap { wardCities.contains($0) && $0 != locality ? $0 : nil }
         )
     }
 
-    /// Boroughs inside Greater London (Hackney, Camden) should be offered
-    /// as London — that's the city the library is about, not the ward.
-    /// Manchester or Edinburgh keep their own name.
+    /// Where Apple names a ward or district as the town, the cities whose
+    /// wards those are, by country: London's boroughs, Tokyo's 23 wards,
+    /// the districts of the big Turkish cities. Antalya stays out (Alanya
+    /// is its own town); Seoul and Busan already come back as the city.
+    private static let wardCities: [String: Set<String>] = [
+        "GB": ["London"],
+        "JP": ["Tokyo"],
+        "TR": ["Istanbul", "İzmir", "Ankara", "Bursa"],
+    ]
+
+    /// The city a ward belongs to: Hackney's is London, Nakano's Tokyo,
+    /// Kadıköy's Istanbul. Manchester or Edinburgh have none.
     static func widerCity(for home: Home) -> Home? {
-        guard let lat = home.lat, let lng = home.lng,
-              (51.28...51.70).contains(lat), (-0.52...0.33).contains(lng),
-              home.locality.compare("London", options: .caseInsensitive) != .orderedSame
-        else { return nil }
-        return .london
+        guard let city = home.partOf else { return nil }
+        if city == Home.london.locality { return .london }
+        return Home(locality: city, country: home.country, timezone: home.timezone, lat: home.lat, lng: home.lng)
     }
 
     /// Whatever the last refresh left in the App Group; nil on a fresh install.
