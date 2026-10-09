@@ -131,6 +131,9 @@ struct ShowingsLine: View {
                 }
             }
             .scrollClipDisabled()
+            // Chips run on past the trailing edge, but stop at the leading
+            // one rather than slide over the row's glyph.
+            .mask { Rectangle().padding(.trailing, -1_000).padding(.vertical, -8) }
         }
     }
 

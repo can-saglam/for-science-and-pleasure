@@ -284,14 +284,11 @@ struct SettingsView: View {
     /// What's set, like the Plus and Account rows: "Directions in Citymapper
     /// · Plans in Home". The Lock Screen is only mentioned once it's off.
     private var preferencesSummary: String {
-        let maps = (TransportApp(rawValue: transportApp) ?? .google).name
-        var parts = ["Directions in \(maps)"]
-        #if !APP_EXTENSION
-        let calendar = calendars.first { $0.id == calendarID }?.name
-        parts.append(calendar.map { "Plans in \($0)" } ?? "Plans in your calendar")
-        if !liveActivities { parts.append("Lock Screen off") }
+        #if APP_EXTENSION
+        "Maps"
+        #else
+        "Maps, calendar and Lock Screen"
         #endif
-        return parts.joined(separator: " · ")
     }
 
     /// A way one level in: a plain glyph, the name, and what's behind it.
