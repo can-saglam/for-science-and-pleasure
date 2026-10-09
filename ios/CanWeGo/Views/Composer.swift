@@ -23,6 +23,9 @@ struct Composer: View {
     /// skipping the parser. Nil hides it (the first-run page has no
     /// manual path).
     var onManual: (() -> Void)? = nil
+    /// The add sheet opens with the keyboard up; the first-run page
+    /// doesn't, so its own lede and picks stay in view.
+    var focusOnAppear = false
     var onSend: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -65,6 +68,12 @@ struct Composer: View {
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task { await loadPhoto(item) }
+        }
+        .task {
+            guard focusOnAppear else { return }
+            // Focus set while the sheet is still sliding up can be dropped.
+            try? await Task.sleep(for: .milliseconds(350))
+            focused = true
         }
         .photosPicker(isPresented: $photoOpen, selection: $photoItem, matching: .images)
         .fullScreenCover(isPresented: $cameraOpen) {
@@ -165,8 +174,7 @@ struct Composer: View {
             RoundedRectangle(cornerRadius: Self.control / 2, style: .continuous)
                 .strokeBorder(AppBackground.ink.opacity(focused ? 0.24 : 0.12), lineWidth: 1)
         )
-        // Anywhere on the bar counts as the field. No auto-focus on
-        // appear: the keyboard would cover what the page offers.
+        // Anywhere on the bar counts as the field.
         .contentShape(.rect(cornerRadius: Self.control / 2, style: .continuous))
         .onTapGesture { focused = true }
         .animation(.snappy, value: focused)

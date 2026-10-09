@@ -303,7 +303,8 @@ struct CaptureView: View {
     private var composerBar: some View {
         Composer(
             text: $text, imageJPEG: $imageJPEG,
-            busy: busy || savingOffline, offline: offlineMode, onManual: startManual
+            busy: busy || savingOffline, offline: offlineMode, onManual: startManual,
+            focusOnAppear: true
         ) {
             if offlineMode {
                 Task { await saveOffline() }
