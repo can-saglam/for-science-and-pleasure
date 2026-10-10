@@ -18,8 +18,10 @@ struct Recommendations: View {
         if let city, !picks.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Or try one of these")
-                    .font(.footnote)
-                    .foregroundStyle(AppBackground.secondaryInk)
+                    .font(.caption.weight(.semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                    .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 CentredFlow(spacing: 8, leading: true) {
                     ForEach(picks) { pick in
                         PickChip(

@@ -994,8 +994,10 @@ struct LibraryView: View {
             if !picks.isEmpty {
                 VStack(spacing: 10) {
                     Text("Or start with one of these")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
+                        .font(.caption.weight(.semibold))
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                     SuggestionChips(picks: picks)
                 }
                 .padding(.top, 12)
