@@ -391,7 +391,7 @@ struct GroupHeroCard: View {
             }
             // Alone, your own name over your own library reads oddly; the
             // card says what it is instead, and the button what's next.
-            Text(solo ? "Just you, for now" : card.name)
+            Text(solo ? "Your library" : card.name)
                 .font(.displaySmallBold(30, relativeTo: .title2))
                 .foregroundStyle(AppBackground.ink)
                 .multilineTextAlignment(.center)
