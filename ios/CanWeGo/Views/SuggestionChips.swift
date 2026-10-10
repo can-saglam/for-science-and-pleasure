@@ -36,9 +36,11 @@ struct SuggestionChips: View {
     }
 }
 
-/// Rows that wrap and centre, each child no wider than the row.
+/// Rows that wrap and centre (or start at the left), each child no wider
+/// than the row.
 struct CentredFlow: Layout {
     var spacing: CGFloat = 8
+    var leading = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? .infinity
@@ -51,7 +53,7 @@ struct CentredFlow: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var y = bounds.minY
         for row in rows(width: bounds.width, subviews: subviews) {
-            var x = bounds.minX + (bounds.width - row.width) / 2
+            var x = bounds.minX + (leading ? 0 : (bounds.width - row.width) / 2)
             for (index, size) in row.items {
                 subviews[index].place(
                     at: CGPoint(x: x, y: y + (row.height - size.height) / 2),

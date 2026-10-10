@@ -1825,7 +1825,7 @@ struct OnboardingView: View {
     /// blank wait), nothing if we have no home and no fallback.
     private var starterChips: [ParseClient.Suggestion] {
         if let home = chosenHome {
-            let pool = suggestions.mixed(for: home, count: 5)
+            let pool = suggestions.mixed(for: home, count: 8)
             if !pool.isEmpty { return pool }
         }
         return Self.fallbackStarters(for: chosenHome)
@@ -1885,7 +1885,7 @@ struct OnboardingView: View {
                 themeSwatches
             } else {
                 headline("What would you\ngo to first?")
-                lede("Paste a link or name it: a gig, a show, somewhere to eat. We look it up and make the card. Or tick a few from your city.")
+                lede("Paste a link or name it: a gig, a show, somewhere to eat. We look it up and make the card. Or tap a few from your city.")
 
                 if parsing {
                     formingCard
