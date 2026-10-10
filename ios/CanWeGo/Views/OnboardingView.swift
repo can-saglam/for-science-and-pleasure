@@ -138,6 +138,8 @@ struct OnboardingView: View {
     @State private var tickedPicks: [ParseClient.Suggestion] = []
     /// The ticked picks once saved, shown as cards before moving on.
     @State private var savedPicks: [Item] = []
+    /// Saved picks whose pages are still being read.
+    @State private var reading: Set<UUID> = []
 
     // Invite (only for someone starting a shared library)
     @State private var invite: GroupStore.InviteResult?
@@ -1854,7 +1856,18 @@ struct OnboardingView: View {
             if !savedPicks.isEmpty {
                 headline(savedPicks.count == 1 ? "There it is." : "There they are.")
                 lede("Real saves. Everything you add lands in the library looking like this. The details fill in as we read each page.")
-                ForEach(savedPicks) { ItemCard(item: $0) }
+                ForEach(savedPicks) { item in
+                    ItemCard(item: item)
+                        .overlay {
+                            if reading.contains(item.id) {
+                                Shimmer(highlight: .white.opacity(themes.current.isLight ? 0.55 : 0.14))
+                                    .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                                    .allowsHitTesting(false)
+                                    .transition(.opacity)
+                            }
+                        }
+                        .animation(ease, value: reading.contains(item.id))
+                }
                 themeSwatches
             } else if let parsed {
                 headline("There it is.")
@@ -2019,11 +2032,7 @@ struct OnboardingView: View {
     /// knows, shown as cards, and filled in from their pages meanwhile.
     private func commitPicks() {
         let picks = tickedPicks.map(Item.init(suggestion:))
-        if preview {
-            savedPicks = picks
-            return
-        }
-        guard insert(picks) else { return }
+        guard preview || insert(picks) else { return }
         savedPicks = picks
         enrich(picks)
     }
@@ -2050,16 +2059,21 @@ struct OnboardingView: View {
     /// A pick's full card (summary, address, colour, picture), read from
     /// its page after it's saved. A page that can't be read leaves the
     /// pool's version, which is already a fine save. Not tied to the page,
-    /// so moving on doesn't stop it.
+    /// so moving on doesn't stop it. The preview reads them too (unsaved),
+    /// so it shows what a real run shows.
     private func enrich(_ items: [Item]) {
         let context = context
+        let preview = preview
         for item in items {
             guard let url = item.url else { continue }
+            reading.insert(item.id)
             Task { @MainActor in
+                defer { reading.remove(item.id) }
                 guard let card = try? await ParseClient.parse(text: url, imageJPEG: nil),
-                      !item.isDeleted, item.modelContext != nil
+                      !item.isDeleted
                 else { return }
                 item.take(card)
+                guard !preview, item.modelContext != nil else { return }
                 item.updatedAt = .now
                 try? context.save()
                 SupabaseSync.schedule(context: context)
