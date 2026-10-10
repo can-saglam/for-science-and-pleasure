@@ -6,6 +6,7 @@ import SwiftUI
 /// drawer's and the capture preview's.
 struct FloatingActions<Content: View>: View {
     private let content: Content
+    @State private var keyboardUp = false
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -23,8 +24,15 @@ struct FloatingActions<Content: View>: View {
         .padding(.horizontal, 20)
         .padding(.top, 28)
         // Into the home-indicator margin, the way the system's own
-        // floating controls sit, while keeping clear of the corner.
-        .padding(.bottom, -8)
+        // floating controls sit, while keeping clear of the corner. Over
+        // the keyboard there's no margin to borrow, so they stand off it.
+        .padding(.bottom, keyboardUp ? 12 : -8)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            withAnimation(.snappy) { keyboardUp = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.snappy) { keyboardUp = false }
+        }
         .background(alignment: .bottomTrailing) {
             RadialGradient(
                 colors: [AppBackground.sheet.opacity(0.92), AppBackground.sheet.opacity(0)],

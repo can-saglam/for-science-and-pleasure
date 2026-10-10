@@ -450,7 +450,7 @@ struct CaptureView: View {
                 // A blank card is always in edit mode and the × already
                 // throws it away, so the one side action is the way back
                 // to the composer.
-                FloatingCircleButton("Look it up instead", systemImage: "sparkle.magnifyingglass") {
+                FloatingCircleButton("Back", systemImage: "chevron.backward") {
                     leaveManual()
                 }
             } else if !saved {
