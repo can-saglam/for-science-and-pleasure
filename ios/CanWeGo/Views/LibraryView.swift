@@ -777,8 +777,8 @@ struct LibraryView: View {
                 EmptyState(
                     title: "Nothing coming up",
                     message: kind == Item.Kind.place
-                        ? "Everywhere you saved, you've been. Add the next one with +."
-                        : "Everything you saved has been and gone. Add the next one with +."
+                        ? "You\u{2019}ve been everywhere you saved. Where next?"
+                        : "Everything you saved has been and gone. What\u{2019}s next?"
                 ) {
                     suggestionChips
                 }
@@ -979,9 +979,9 @@ struct LibraryView: View {
 
     private var firstPrompt: String {
         let how = kind == Item.Kind.place
-            ? "Share a restaurant from Google Maps or Instagram, or name it with +."
-            : "Share a link from any app, paste one with +, or just name it."
-        return sharedLibrary ? "\(how) It lands here\(forWhom)." : how
+            ? "Share it from Maps or Instagram, or tap + and type the name."
+            : "Share a link from anywhere, or tap + and type it."
+        return how + seenBy
     }
 
     /// A few things from the home city's pool under an empty tab. None
@@ -991,9 +991,9 @@ struct LibraryView: View {
         let home = HomeStore.shared.isSet ? HomeStore.shared.home : nil
         let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: library) } ?? []
         VStack(spacing: 0) {
-            if let home, !picks.isEmpty {
+            if !picks.isEmpty {
                 VStack(spacing: 10) {
-                    Text(kind == Item.Kind.place ? "A few places in \(home.locality)" : "A few things on in \(home.locality)")
+                    Text("Or start with one of these")
                         .font(.footnote)
                         .foregroundStyle(AppBackground.secondaryInk)
                     SuggestionChips(picks: picks)
@@ -1028,36 +1028,32 @@ struct LibraryView: View {
     private var emptyPrompt: String {
         if let category {
             switch category.lowercased() {
-            case "gig": return "Share a DICE or Ticketmaster link and it lands here."
-            case "restaurant": return "Share a restaurant from Google Maps or Instagram."
-            case "exhibition", "gallery": return "Share a show from a gallery\u{2019}s page."
-            case "film": return "Share a screening and it lands here."
-            case "theatre": return "Share a play or a listing page."
-            case "cafe": return "Share a café from Maps or Instagram."
-            case "park", "outdoors": return "Share a park or a walk from Maps."
-            case "museum": return "Share a museum from its site or Maps."
-            case "festival": return "Share a festival lineup or ticket page."
-            default: return "Share a link and it lands here\(forWhom)."
+            case "gig": return "Got tickets on DICE or Ticketmaster? Share the link."
+            case "restaurant": return "Share one from Maps or Instagram."
+            case "exhibition", "gallery": return "Share the show\u{2019}s page from the gallery\u{2019}s site."
+            case "film": return "Share the cinema\u{2019}s listing."
+            case "theatre": return "Share the play\u{2019}s page."
+            case "cafe": return "Share one from Maps or Instagram."
+            case "park", "outdoors": return "Share it from Maps."
+            case "museum": return "Share it from Maps or the museum\u{2019}s site."
+            case "festival": return "Share the lineup or the ticket page."
+            default: return "Share a link, or tap + and type it."
             }
         }
-        // The first week reads differently alone and together: alone, the
-        // way in is the + and the share sheet, and the invite is the next
-        // step; together, whatever either of you saves shows up here.
+        // Alone, the invite is the next step; together, it's that the
+        // others see it too.
         let how = kind == Item.Kind.place
-            ? "Share a restaurant, a gallery or a park from Safari, Google Maps or Instagram, or paste a link with +."
-            : "Share a gig from DICE, an exhibition from a gallery's page, or paste any link with +."
-        if sharedLibrary {
-            return "\(how) It lands here\(forWhom)."
-        }
-        return "\(how) Invite someone from Settings and you'll share one library."
+            ? "Share it from Maps or Instagram, or tap + and type the name."
+            : "Share a link from anywhere, or tap + and type it."
+        return how + (sharedLibrary ? seenBy : " Invite someone from Settings to plan together.")
     }
 
     /// More than one member on the card: saves are for everyone in it.
     private var sharedLibrary: Bool { (GroupStore.shared.card?.members.count ?? 1) > 1 }
 
-    private var forWhom: String {
+    private var seenBy: String {
         guard sharedLibrary else { return "" }
-        return (GroupStore.shared.card?.members.count ?? 0) > 2 ? " for everyone" : " for both of you"
+        return (GroupStore.shared.card?.members.count ?? 0) > 2 ? " Everyone sees it." : " You\u{2019}ll both see it."
     }
 
     /// Just joined, first pull still running: the library isn't empty, it
