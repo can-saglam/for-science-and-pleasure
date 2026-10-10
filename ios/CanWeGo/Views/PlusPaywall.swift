@@ -846,7 +846,7 @@ struct PlusSection: View {
             if let renewal = PlusStore.shared.renewal {
                 return "Active until \(renewal.day)"
             }
-            return "Active for the whole group"
+            return card.members.count == 1 ? "Active" : "Active for the whole group"
         }
         if let first = holders.first { return "Active for the whole group, through \(first.name)\u{2019}s subscription" }
         return "Active for the whole group"

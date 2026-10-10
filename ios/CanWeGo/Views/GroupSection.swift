@@ -126,7 +126,7 @@ struct GroupSection: View {
     var body: some View {
         if SupabaseAuth.shared.signedIn {
             Group {
-                if let card = group.card {
+                if let card = group.card?.forScreenshots {
                     sections(card)
                 } else if group.loaded {
                     Section {
@@ -170,7 +170,7 @@ struct GroupSection: View {
                 Haptics.tap()
                 ui.showJoin = true
             } label: {
-                SettingsRow(title: "Join another group")
+                SettingsRow(title: card.members.count == 1 ? "Join someone\u{2019}s library" : "Join another group")
             }
             .accessibilityHint("Enter an invite code")
         } footer: {
@@ -356,9 +356,9 @@ struct GroupSection: View {
         Group {
             if let note = ui.note {
                 Text(note).foregroundStyle(AppBackground.warning)
-            } else if let card = group.card, card.members.count == 1 {
+            } else if let card = group.card?.forScreenshots, card.members.count == 1 {
                 Text("Invite someone to share your library. You can both see and edit everything.")
-            } else if let card = group.card, card.isFull, !card.needsPlusToGrow {
+            } else if let card = group.card?.forScreenshots, card.isFull, !card.needsPlusToGrow {
                 Text("Everyone here shares one library. A group holds up to four people.")
             } else {
                 Text("Everyone here shares one library. Anyone can invite. You can leave, but you can\u{2019}t remove anyone.")
@@ -377,6 +377,7 @@ struct GroupHeroCard: View {
     let manage: () -> Void
 
     private var me: UUID? { SupabaseAuth.shared.userId }
+    private var solo: Bool { card.members.count == 1 }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -388,7 +389,9 @@ struct GroupHeroCard: View {
                     inviteSeat
                 }
             }
-            Text(card.name)
+            // Alone, your own name over your own library reads oddly; the
+            // card says what it is instead, and the button what's next.
+            Text(solo ? "Just you, for now" : card.name)
                 .font(.displaySmallBold(30, relativeTo: .title2))
                 .foregroundStyle(AppBackground.ink)
                 .multilineTextAlignment(.center)
@@ -397,7 +400,7 @@ struct GroupHeroCard: View {
                 Haptics.tap()
                 manage()
             } label: {
-                Text("Manage group")
+                Text(solo ? "Invite or join someone" : "Manage group")
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
             }
@@ -470,7 +473,7 @@ struct GroupPresentations: ViewModifier {
     @Bindable var ui: GroupUI
     @State private var group = GroupStore.shared
 
-    private var card: GroupCard? { group.card }
+    private var card: GroupCard? { group.card?.forScreenshots }
 
     func body(content: Content) -> some View {
         content

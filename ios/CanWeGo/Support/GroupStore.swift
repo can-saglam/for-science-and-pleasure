@@ -38,6 +38,28 @@ struct GroupCard: Codable, Equatable {
     var members: [Member]
     var invites: [Invite]
 
+    /// `CWG_GROUP_MEMBERS=Can,Joyce,Sam` (test runs only) draws the group
+    /// with those people, the first as you, named the way the server names
+    /// groups. Otherwise the card as it is.
+    var forScreenshots: GroupCard {
+        guard let raw = ProcessInfo.processInfo.environment["CWG_GROUP_MEMBERS"] else { return self }
+        let names = raw.split(separator: ",").map(String.init)
+        let colours = ["coral", "mint", "sky", "amber"]
+        var fake = self
+        fake.members = names.enumerated().map { i, name in
+            Member(
+                userId: i == 0 ? (SupabaseAuth.shared.userId ?? UUID()) : UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", i))!,
+                displayName: name,
+                avatarColour: colours[i % colours.count],
+                isPlus: isPlus,
+                joinedAt: .now
+            )
+        }
+        fake.name = names.count == 1 ? "\(names[0])'s saves"
+            : names.dropLast().joined(separator: ", ") + " & " + (names.last ?? "")
+        return fake
+    }
+
     var isFull: Bool { members.count >= capacity }
     /// A full free group can still grow — with Plus.
     var needsPlusToGrow: Bool { isFull && !isPlus && members.count < 4 }

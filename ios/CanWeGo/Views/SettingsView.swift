@@ -98,7 +98,7 @@ struct SettingsView: View {
                         path.append(.preferences)
                     }
                     if auth.signedIn {
-                        door("Plus", icon: "star", subtitle: PlusSection.status(for: group.card)) {
+                        door("Plus", icon: "star", subtitle: PlusSection.status(for: group.card?.forScreenshots)) {
                             showPlus = true
                         }
                         door(
@@ -245,7 +245,7 @@ struct SettingsView: View {
     /// Who shares the library, before anything else.
     @ViewBuilder private var groupCard: some View {
         Section {
-            if let card = group.card {
+            if let card = group.card?.forScreenshots {
                 GroupHeroCard(card: card, ui: groupUI) { path.append(.group) }
             } else if group.loaded {
                 Button {
@@ -384,7 +384,8 @@ struct SettingsView: View {
         List {
             GroupSection(ui: groupUI)
         }
-        .settingsPage("Group")
+        // Alone, there's no group yet: it's your library, waiting for someone.
+        .settingsPage(group.card?.forScreenshots.members.count == 1 ? "Your library" : "Group")
     }
 
     private var preferencesPage: some View {
