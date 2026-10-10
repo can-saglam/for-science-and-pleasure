@@ -114,6 +114,16 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Self.rowBackground)
 
+                #if !APP_EXTENSION
+                // Temporary, for testing builds. Remove before release.
+                Section {
+                    door("Replay onboarding", icon: "arrow.counterclockwise", subtitle: "Every page, nothing saved") {
+                        showOnboardingPreview = true
+                    }
+                }
+                .listRowBackground(Self.rowBackground)
+                #endif
+
                 footer
             }
             .listSectionSpacing(.compact)
