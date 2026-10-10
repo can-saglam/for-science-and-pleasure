@@ -701,6 +701,26 @@ struct OnboardingView: View {
         return picked.map { ($0.0, $0.1 * 0.5, ($0.2 - mid) * spread) }
     }
 
+    /// "+2" on the front card's corner: saves beyond the ones a fan shows.
+    /// Lands after the last card does.
+    @ViewBuilder
+    private func moreBadge(_ count: Int, dealt: Bool) -> some View {
+        if count > 0 {
+            Text("+\(count)")
+                .font(.footnote.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(AppBackground.base)
+                .frame(width: 34, height: 34)
+                .background(AppBackground.ink, in: .circle)
+                .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                .offset(x: 0, y: -5)
+                .scaleEffect(dealt ? 1 : 0.4)
+                .opacity(dealt ? 1 : 0)
+                .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.4).delay(0.5), value: dealt)
+                .accessibilityLabel("and \(count) more")
+        }
+    }
+
     /// Cards dealt into a loose stack, then drifting a little: welcome's
     /// made-up saves, and the joined page's real ones. Real `ItemCard`s,
     /// so the look is exactly the library's — countdown badge, melt and
@@ -1424,6 +1444,7 @@ struct OnboardingView: View {
                 cardFan(shown.reversed(), seats: seats, dealt: joinedDealt, key: 100, width: 320)
                     .frame(maxWidth: .infinity)
                     .frame(height: 120 + CGFloat((seats.map(\.2).max() ?? 0) - (seats.map(\.2).min() ?? 0)))
+                    .overlay(alignment: .bottomTrailing) { moreBadge(groupCards.count - shown.count, dealt: joinedDealt) }
                     .padding(.vertical, 8)
                     .zIndex(1)
                     .accessibilityElement(children: .ignore)
@@ -1436,12 +1457,6 @@ struct OnboardingView: View {
                             joinedDealt = true
                         }
                     }
-                if groupCards.count > 3 {
-                    Text("…and \(groupCards.count - 3) more in the library.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                        .frame(maxWidth: .infinity)
-                }
             }
             themeSwatches
         }
@@ -1847,6 +1862,7 @@ struct OnboardingView: View {
                 cardFan(shown.reversed(), seats: seats, dealt: savedDealt, key: 200, width: 320, reading: reading)
                     .frame(maxWidth: .infinity)
                     .frame(height: 120 + CGFloat((seats.map(\.2).max() ?? 0) - (seats.map(\.2).min() ?? 0)))
+                    .overlay(alignment: .bottomTrailing) { moreBadge(savedPicks.count - shown.count, dealt: savedDealt) }
                     .padding(.vertical, 8)
                     .zIndex(1)
                     .accessibilityElement(children: .ignore)
@@ -1859,11 +1875,6 @@ struct OnboardingView: View {
                             savedDealt = true
                         }
                     }
-                if savedPicks.count > 3 {
-                    Text("…and \(savedPicks.count - 3) more in the library.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                }
                 themeSwatches
             } else if let parsed {
                 headline("There it is.")
@@ -2172,11 +2183,12 @@ struct OnboardingView: View {
     // MARK: Done
 
     /// The close: the three ways things get in from now on, the share
-    /// sheet first because it's the one people don't find on their own.
+    /// sheet first because it's the one people don't find on their own,
+    /// then the day-of Live Activity, which needs no permission to mention.
     private var donePage: some View {
         VStack(alignment: .leading, spacing: 18) {
             headline("You're set.")
-            lede("Three ways in, whenever something catches your eye.")
+            lede("A few things worth knowing.")
 
             ShareClip(icon: themes.current.iconPreviewName, still: reduceMotion)
                 .padding(.vertical, 4)
@@ -2188,6 +2200,8 @@ struct OnboardingView: View {
                     "Hold the Home Screen, tap Edit, then Add Widget.")
                 row("waveform", "Ask Siri",
                     "\u{201C}Add something to Can We Go?\u{201D} or \u{201C}What's closing soon in Can We Go?\u{201D}")
+                row("calendar", "Plan a day",
+                    "Pick a day on any save and it sits on your Lock Screen when it comes.")
             }
         }
     }
@@ -2204,8 +2218,8 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             headline("Want a nudge before\nit closes?")
             lede(partnerName == nil
-                 ? "Ask for a reminder on anything you save and one heads-up arrives before it ends. On the day itself, it stays on your Lock Screen. Never a nag. Change it any time in iOS Settings."
-                 : "Ask for a reminder on anything you save and one heads-up arrives before it ends. On the day itself, it stays on your Lock Screen. You\u{2019}ll also hear when \(partnerName ?? "someone") adds something. Change it any time in iOS Settings.")
+                 ? "Ask for a reminder on anything you save and one heads-up arrives before it ends. Never a nag. Change it any time in iOS Settings."
+                 : "Ask for a reminder on anything you save and one heads-up arrives before it ends. You\u{2019}ll also hear when \(partnerName ?? "someone") adds something. Change it any time in iOS Settings.")
 
             mockBanner
 
