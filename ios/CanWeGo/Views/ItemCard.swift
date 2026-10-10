@@ -13,6 +13,9 @@ struct ItemCard: View {
     var meta: String? = nil
     /// Cards stacked so only their top shows (the Plus drawer's fan).
     var oneLineTitle = false
+    /// "2,600 km from London" on saves far from home. Off in onboarding,
+    /// where home is being chosen (and a replay never saves it).
+    var awayHint = true
 
     private var subtitle: String {
         if let meta { return meta }
@@ -95,7 +98,7 @@ struct ItemCard: View {
         if item.isEvent && item.startsOn == nil && item.endsOn == nil {
             return ["no date found"]
         }
-        if let away = awayFromHome { return [away] }
+        if awayHint, let away = awayFromHome { return [away] }
         return []
     }
 

@@ -117,11 +117,8 @@ struct OnboardingView: View {
     @State private var cityDraft = ""
     @State private var matches: [HomeStore.Home] = []
     @State private var picked: HomeStore.Home?
-    @State private var wider: HomeStore.Home?
-    /// A lookup that named a ward shows its city instead; the ward is
-    /// kept here, by the city shown, so it can still be chosen.
-    @State private var wards: [HomeStore.Home: HomeStore.Home] = [:]
-    @State private var narrower: HomeStore.Home?
+    /// Cities shown in place of the ward a lookup named, framed wider.
+    @State private var wholeCities: Set<HomeStore.Home> = []
     @State private var locating = false
     @State private var camera: MapCameraPosition = .region(OnboardingView.worldRegion)
 
@@ -160,6 +157,7 @@ struct OnboardingView: View {
     @State private var dealt = false
     /// The joined page's fan of the group's own saves, dealt on arrival.
     @State private var joinedDealt = false
+    @State private var savedDealt = false
     /// A finger on one of the fan's cards: how far it's been pulled from
     /// its seat, and which one is up off the table.
     @State private var pulled: [Int: CGSize] = [:]
@@ -589,7 +587,7 @@ struct OnboardingView: View {
         .disabled(frozen)
     }
 
-    /// A small glass chip: clipboard offers, location, wider-city hint.
+    /// A small glass chip: clipboard offers, location.
     private func chip(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button {
             Haptics.tap()
@@ -697,10 +695,10 @@ struct OnboardingView: View {
     /// welcome cascade's front three, re-centred on however many there are.
     /// Real titles run long, so the cards are wider (less sideways room)
     /// and further apart (a wrapped title still shows above the next card).
-    private static func joinedSeats(_ count: Int) -> [(Double, Double, Double)] {
+    private static func joinedSeats(_ count: Int, spread: Double = 1.4) -> [(Double, Double, Double)] {
         let picked = Array(seats.suffix(count))
         let mid = picked.map(\.2).reduce(0, +) / Double(max(picked.count, 1))
-        return picked.map { ($0.0, $0.1 * 0.5, ($0.2 - mid) * 1.4) }
+        return picked.map { ($0.0, $0.1 * 0.5, ($0.2 - mid) * spread) }
     }
 
     /// Cards dealt into a loose stack, then drifting a little: welcome's
@@ -708,9 +706,10 @@ struct OnboardingView: View {
     /// so the look is exactly the library's — countdown badge, melt and
     /// all. Each one can be picked up and pulled about; it springs back to
     /// its seat. `items` and `seats` run back to front; `key` keeps each
-    /// fan's pulls apart.
+    /// fan's pulls apart; cards in `reading` shimmer until their page is in.
     private func cardFan(
-        _ items: [Item], seats: [(Double, Double, Double)], dealt: Bool, key: Int, width: CGFloat = 280
+        _ items: [Item], seats: [(Double, Double, Double)], dealt: Bool, key: Int, width: CGFloat = 280,
+        reading: Set<UUID> = []
     ) -> some View {
         ZStack {
             ForEach(Array(items.prefix(seats.count).enumerated()), id: \.offset) { index, item in
@@ -720,7 +719,16 @@ struct OnboardingView: View {
                 let sway = front ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
                 let pull = pulled[i] ?? .zero
                 let held = lifted == i
-                ItemCard(item: item)
+                ItemCard(item: item, awayHint: false)
+                    .overlay {
+                        if reading.contains(item.id) {
+                            Shimmer(highlight: .white.opacity(themes.current.isLight ? 0.55 : 0.14))
+                                .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(ease, value: reading.contains(item.id))
                     .frame(width: width)
                     // A held card tilts with the pull, like a card on a
                     // table dragged from one edge.
@@ -1462,12 +1470,9 @@ struct OnboardingView: View {
                 ProgressView().controlSize(.small).padding(.vertical, 8)
 
             case .confirm:
-                widerHint
                 quiet("Somewhere else") {
                     manualHome = true
                     picked = nil
-                    wider = nil
-                    narrower = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { focus = .city }
                 }
 
@@ -1531,8 +1536,6 @@ struct OnboardingView: View {
                     }
                 }
 
-                widerHint
-
                 HStack(spacing: 8) {
                     if !LocationStore.shared.denied, matches.isEmpty {
                         chip(locating ? "Locating…" : "Use my location", icon: "location") {
@@ -1561,28 +1564,10 @@ struct OnboardingView: View {
         advance()
     }
 
-    @ViewBuilder
-    private var widerHint: some View {
-        if let narrower {
-            // The city was taken for them; the ward stays one tap away.
-            chip("Just \(narrower.locality)? Use that instead", icon: "arrow.down.right.and.arrow.up.left") {
-                pick(narrower)
-            }
-        } else if let wider, let picked, wider != picked {
-            chip("\(picked.locality) is part of \(wider.locality). Use \(wider.locality) instead", icon: "arrow.up.left.and.arrow.down.right") {
-                pick(wider)
-            }
-        }
-    }
-
     private func pick(_ home: HomeStore.Home) {
-        let widened = home == wider || wards[home] != nil
         picked = home
-        narrower = wards[home]
-        wider = narrower == nil ? HomeStore.widerCity(for: home) : nil
-        if let wider { wards[wider] = home }
         note = nil
-        frame(home, wide: widened)
+        frame(home, wide: wholeCities.contains(home))
         focus = nil
         // Start the city search now, not on "Set as home" — a cold miss
         // is a model call and the name page is the wait.
@@ -1705,8 +1690,6 @@ struct OnboardingView: View {
         note = nil
         matches = []
         picked = nil
-        wider = nil
-        narrower = nil
         do {
             guard let request = MKGeocodingRequest(addressString: query) else {
                 note = "Couldn't look that up."
@@ -1735,7 +1718,7 @@ struct OnboardingView: View {
             let home = city ?? found
             let key = "\(home.locality)|\(home.country)"
             guard seen.insert(key).inserted else { continue }
-            if let city { wards[city] = found }
+            if let city { wholeCities.insert(city) }
             homes.append(home)
         }
         matches = Array(homes.prefix(5))
@@ -1856,17 +1839,30 @@ struct OnboardingView: View {
             if !savedPicks.isEmpty {
                 headline(savedPicks.count == 1 ? "There it is." : "There they are.")
                 lede("Real saves. Everything you add lands in the library looking like this. The details fill in as we read each page.")
-                ForEach(savedPicks) { item in
-                    ItemCard(item: item)
-                        .overlay {
-                            if reading.contains(item.id) {
-                                Shimmer(highlight: .white.opacity(themes.current.isLight ? 0.55 : 0.14))
-                                    .clipShape(.rect(cornerRadius: 18, style: .continuous))
-                                    .allowsHitTesting(false)
-                                    .transition(.opacity)
-                            }
+                let shown = Array(savedPicks.prefix(3))
+                // City picks' titles often wrap: room for two lines above
+                // the next card.
+                let seats = Self.joinedSeats(shown.count, spread: 1.9)
+                // First pick in front: the fan runs back to front.
+                cardFan(shown.reversed(), seats: seats, dealt: savedDealt, key: 200, width: 320, reading: reading)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120 + CGFloat((seats.map(\.2).max() ?? 0) - (seats.map(\.2).min() ?? 0)))
+                    .padding(.vertical, 8)
+                    .zIndex(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(shown.map(\.title).joined(separator: ", "))
+                    .onAppear {
+                        guard !savedDealt else { return }
+                        if reduceMotion { savedDealt = true; return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(0.25))
+                            savedDealt = true
                         }
-                        .animation(ease, value: reading.contains(item.id))
+                    }
+                if savedPicks.count > 3 {
+                    Text("…and \(savedPicks.count - 3) more in the library.")
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 themeSwatches
             } else if let parsed {
@@ -1874,7 +1870,7 @@ struct OnboardingView: View {
                 lede(tickedPicks.isEmpty
                      ? "A real save. Everything you add lands in the library looking like this."
                      : "A real save, and the \(tickedPicks.count == 1 ? "one" : "\(tickedPicks.count)") you ticked go in with it. Everything you add lands in the library looking like this.")
-                ItemCard(item: parsed)
+                ItemCard(item: parsed, awayHint: false)
                 quiet("Try another") {
                     self.parsed = nil
                     linkDraft = ""
@@ -1931,6 +1927,16 @@ struct OnboardingView: View {
         .animation(ease, value: parsed?.id)
         .animation(ease, value: savedPicks.count)
         .animation(ease, value: starterChips)
+        // Preview only: `CWG_ONBOARDING_PICKS=3` ticks and saves that many
+        // city picks once they've loaded, for checking the saved cards.
+        .task {
+            guard preview, savedPicks.isEmpty,
+                  let n = ProcessInfo.processInfo.environment["CWG_ONBOARDING_PICKS"].flatMap(Int.init)
+            else { return }
+            try? await Task.sleep(for: .seconds(3))
+            tickedPicks = Array(starterChips.prefix(n))
+            commitPicks()
+        }
         .animation(ease, value: suggestions.loading)
         .onAppear {
             if let home = chosenHome { fetchStarters(for: home) }
@@ -2094,7 +2100,7 @@ struct OnboardingView: View {
             lede("Send this to whoever you go out with. It opens the app on their phone and puts them straight into your library.")
 
             if let firstSave {
-                ItemCard(item: firstSave)
+                ItemCard(item: firstSave, awayHint: false)
                     .allowsHitTesting(false)
             }
 
@@ -2238,13 +2244,28 @@ struct OnboardingView: View {
     /// The example ping is a reminder, the one kind everyone can get on
     /// their own: the save's title as the notification title, the
     /// server's own wording as the body (`reminderBody`, "Closes in a
-    /// week"). Their real first save stands in when it's an event with
-    /// an end; a believable exhibition otherwise.
-    private var bannerTitle: String {
-        if let parsed, parsed.isEvent, parsed.endsOn != nil { return parsed.title }
-        return "Anish Kapoor at Hayward Gallery"
+    /// week"). One of their own saves stands in when it's a dated event,
+    /// one that runs for a while first; a believable exhibition otherwise.
+    private var bannerSave: Item? {
+        let events = ([parsed].compactMap(\.self) + savedPicks).filter {
+            $0.isEvent && ($0.endsOn ?? $0.startsOn) != nil
+        }
+        return events.first { $0.endsOn != nil && $0.endsOn != $0.startsOn } ?? events.first
     }
-    private var bannerLine: String { "Closes in a week" }
+
+    private var bannerTitle: String {
+        bannerSave?.title ?? "Anish Kapoor at Hayward Gallery"
+    }
+
+    /// The reminder goes a week ahead, or sooner when it's sooner.
+    private var bannerLine: String {
+        guard let save = bannerSave, let day = save.endsOn ?? save.startsOn else { return "Closes in a week" }
+        let left = (DayString.dayNumber(day) ?? 0) - (DayString.dayNumber(DayString.today()) ?? 0)
+        let runs = save.endsOn != nil && save.endsOn != save.startsOn
+        let when = left >= 7 ? "in a week" : left >= 3 ? "in 3 days" : left >= 1 ? "tomorrow" : "today"
+        guard runs else { return when == "today" ? "Today" : "\(when.prefix(1).uppercased())\(when.dropFirst())" }
+        return when == "today" ? "Closes today" : "Closes \(when)"
+    }
 
     /// What the ping will look like, laid out the way iOS lays one out: the
     /// app icon, the title in bold with the time opposite, and the body.
