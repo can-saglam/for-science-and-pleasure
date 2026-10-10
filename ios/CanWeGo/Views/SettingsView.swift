@@ -98,12 +98,12 @@ struct SettingsView: View {
                         path.append(.preferences)
                     }
                     if auth.signedIn {
-                        door("Plus", icon: "star", subtitle: PlusSection.status(for: group.card?.forScreenshots)) {
+                        door("Plus", icon: "star.fill", subtitle: PlusSection.status(for: group.card?.forScreenshots)) {
                             showPlus = true
                         }
                         door(
                             "Account",
-                            icon: "person.crop.circle",
+                            icon: "person.fill",
                             subtitle: syncStatus.problem != nil ? "Sync issue" : (auth.email ?? "Signed in"),
                             warning: syncStatus.problem != nil,
                             isAddress: syncStatus.problem == nil
@@ -313,10 +313,13 @@ struct SettingsView: View {
             action()
         } label: {
             HStack(spacing: 14) {
+                // Modern-settings style: a small squircle in the theme's
+                // badge colour, the glyph in its contrasting ink.
                 Image(systemName: icon)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(AppBackground.ink)
-                    .frame(width: 26)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppBackground.badgeGlyph)
+                    .frame(width: 28, height: 28)
+                    .background(AppBackground.badge.gradient, in: .rect(cornerRadius: 7, style: .continuous))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
