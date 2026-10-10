@@ -1903,9 +1903,9 @@ struct OnboardingView: View {
                         startParse()
                     }
 
-                    if linkDraft.isEmpty, linkImage == nil {
-                        // The add page's list, so the first save looks like
-                        // every one after it.
+                    if linkImage == nil {
+                        // The add page's chips, so the first save looks like
+                        // every one after it. They stay while typing.
                         Recommendations(
                             city: starterChips.isEmpty ? chosenHome?.locality : starterCity,
                             picks: starterChips,

@@ -2,8 +2,7 @@ import SwiftUI
 
 /// The home city's few under the add page's question (and the first-save
 /// page's): things on soon and places, from the same pool as the empty
-/// library tabs, as glass chips in the display type that wrap from the
-/// left. On the add page a tap looks it up straight away; on the
+/// library tabs, as glass chips that wrap from the left. On the add page a tap looks it up straight away; on the
 /// first-save page (`ticked` set) a tap ticks it (the chip turns solid)
 /// to save with the rest. Nothing at all without a city, or with an
 /// empty pool that isn't loading.
@@ -18,7 +17,7 @@ struct Recommendations: View {
     var body: some View {
         if let city, !picks.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text(ticked == nil ? "Or tap one in \(city)" : "Or tap a few in \(city)")
+                Text("Worth going to in \(city)")
                     .font(.footnote)
                     .foregroundStyle(AppBackground.secondaryInk)
                 CentredFlow(spacing: 8, leading: true) {
@@ -53,7 +52,7 @@ struct Recommendations: View {
                     .font(.caption.weight(.semibold))
                     .contentTransition(.symbolEffect(.replace))
                 Text(pick.title)
-                    .font(.displaySmallBold(17, relativeTo: .subheadline))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 if let when = Suggestions.when(pick) {
                     Text(when)

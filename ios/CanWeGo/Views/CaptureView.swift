@@ -72,9 +72,10 @@ struct CaptureView: View {
 
     private var home: HomeStore.Home? { HomeStore.shared.isSet ? HomeStore.shared.home : nil }
 
-    /// Only on an empty page: anything typed or attached is the thing.
+    /// Stay while typing (a tap reads the pick, not the field); an
+    /// attached picture is the thing.
     private var recommendations: [ParseClient.Suggestion] {
-        guard text.isEmpty, imageJPEG == nil, !offlineMode, let home else { return [] }
+        guard imageJPEG == nil, !offlineMode, let home else { return [] }
         return suggestions.mixed(for: home, excluding: library)
     }
 
@@ -291,7 +292,7 @@ struct CaptureView: View {
         Recommendations(
             city: home?.locality,
             picks: recommendations,
-            loading: suggestions.loading && text.isEmpty && imageJPEG == nil && !offlineMode,
+            loading: suggestions.loading && imageJPEG == nil && !offlineMode,
             onPick: pick
         )
         .padding(.top, 6)
