@@ -2,9 +2,9 @@ import SwiftUI
 
 /// The home city's few under the add page's question (and the first-save
 /// page's): things on soon and places, from the same pool as the empty
-/// library tabs, as glass chips that wrap from the left. On the add page a tap looks it up straight away; on the
-/// first-save page (`ticked` set) a tap ticks it (the chip turns solid)
-/// to save with the rest. Nothing at all without a city, or with an
+/// library tabs, as glass chips that wrap from the left. On the add page
+/// a tap looks it up straight away; on the first-save page (`ticked` set)
+/// a tap ticks it (the chip turns solid) to save with the rest. Nothing at all without a city, or with an
 /// empty pool that isn't loading.
 struct Recommendations: View {
     let city: String?
@@ -21,7 +21,13 @@ struct Recommendations: View {
                     .font(.footnote)
                     .foregroundStyle(AppBackground.secondaryInk)
                 CentredFlow(spacing: 8, leading: true) {
-                    ForEach(picks) { chip($0) }
+                    ForEach(picks) { pick in
+                        PickChip(
+                            pick: pick,
+                            on: ticked?.contains(pick.id) == true,
+                            hint: ticked == nil ? "Looks it up and makes the card" : "Saves it with your first saves"
+                        ) { onPick(pick) }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -37,49 +43,6 @@ struct Recommendations: View {
         }
     }
 
-    /// Glass until ticked, then solid ink with the page colour for text.
-    /// Events keep their dates on the chip; the venue only goes to
-    /// VoiceOver, to keep chips one line.
-    private func chip(_ pick: ParseClient.Suggestion) -> some View {
-        let on = ticked?.contains(pick.id) == true
-        let icon = on ? "checkmark" : pick.kind == Item.Kind.event ? "ticket" : "mappin.and.ellipse"
-        return Button {
-            Haptics.tap()
-            onPick(pick)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.caption.weight(.semibold))
-                    .contentTransition(.symbolEffect(.replace))
-                Text(pick.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                if let when = Suggestions.when(pick) {
-                    Text(when)
-                        .font(.caption2)
-                        .opacity(0.72)
-                        .fixedSize()
-                }
-            }
-            .foregroundStyle(on ? AppBackground.base : AppBackground.ink)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
-            .background(on ? AppBackground.ink : .clear, in: .capsule)
-            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
-            .contentShape(.capsule)
-        }
-        .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.2), value: on)
-        .accessibilityLabel(Self.spoken(pick))
-        .accessibilityAddTraits(on ? .isSelected : [])
-        .accessibilityHint(ticked == nil ? "Looks it up and makes the card" : "Saves it with your first saves")
-    }
-
-    /// "BFI Southbank, until 18 Oct".
-    private static func spoken(_ pick: ParseClient.Suggestion) -> String {
-        let venue = pick.venue.flatMap { $0 == pick.title || $0.isEmpty ? nil : $0 }
-        return [pick.title, venue, Suggestions.when(pick)].compactMap(\.self).joined(separator: ", ")
-    }
 }
 
 extension Item {

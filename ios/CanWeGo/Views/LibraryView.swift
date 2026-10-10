@@ -84,8 +84,14 @@ struct LibraryView: View {
 
     // MARK: - Filtering
 
+    /// `CWG_EMPTY` (test runs only) shows every tab empty, for screenshots
+    /// of the first-run state on an account that has saves.
+    private var library: [Item] {
+        ProcessInfo.processInfo.environment["CWG_EMPTY"] != nil ? [] : items
+    }
+
     private var base: [Item] {
-        items.filter { $0.kind == kind && !$0.isDeleted && !$0.isDone && !$0.isMissed }
+        library.filter { $0.kind == kind && !$0.isDeleted && !$0.isDone && !$0.isMissed }
     }
 
     /// One chip/search filter shared by the active list and the journal.
@@ -307,13 +313,13 @@ struct LibraryView: View {
     // MARK: - The journal (the old We Did Go, folded in)
 
     private var been: [Item] {
-        items
+        library
             .filter { $0.kind == kind && !$0.isDeleted && $0.isDone && matches($0) }
             .sorted { $0.wentDate != $1.wentDate ? $0.wentDate > $1.wentDate : newerFirst($0, $1) }
     }
 
     private var missed: [Item] {
-        items
+        library
             .filter { $0.kind == kind && !$0.isDeleted && $0.isMissed && $0.endsOn != nil && matches($0) }
             .sorted {
                 ($0.endsOn ?? "") != ($1.endsOn ?? "")
@@ -798,7 +804,7 @@ struct LibraryView: View {
                 if base.isEmpty && !filtered {
                     // Nothing in this tab: the first-time version when the
                     // whole library is new, with things to start from.
-                    let firstTime = !items.contains { !$0.isDeleted }
+                    let firstTime = !library.contains { !$0.isDeleted }
                     EmptyState(
                         title: firstTime ? firstTitle : emptyTitle,
                         message: firstTime ? firstPrompt : emptyPrompt
@@ -983,7 +989,7 @@ struct LibraryView: View {
     @ViewBuilder
     private var suggestionChips: some View {
         let home = HomeStore.shared.isSet ? HomeStore.shared.home : nil
-        let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: items) } ?? []
+        let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: library) } ?? []
         VStack(spacing: 0) {
             if let home, !picks.isEmpty {
                 VStack(spacing: 10) {

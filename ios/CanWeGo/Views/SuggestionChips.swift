@@ -9,30 +9,63 @@ struct SuggestionChips: View {
     var body: some View {
         CentredFlow(spacing: 8) {
             ForEach(picks) { s in
-                Button {
-                    Self.open(s)
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(s.title)
-                            .lineLimit(1)
-                        if let when = Suggestions.when(s) {
-                            Text(when)
-                                .foregroundStyle(AppBackground.secondaryInk)
-                                .fixedSize()
-                        }
-                    }
-                    .font(.footnote.weight(.medium))
-                }
-                .buttonStyle(.glass)
-                .accessibilityHint("Adds it to your library")
+                PickChip(pick: s, hint: "Adds it to your library") { Self.open(s) }
             }
         }
     }
 
     static func open(_ s: ParseClient.Suggestion) {
-        Haptics.tap()
         CaptureGate.pendingLink = s.url
         NotificationCenter.default.post(name: .cwgCaptureImage, object: nil)
+    }
+}
+
+/// One city pick as a glass chip: a ticket or pin, the title, and an
+/// event's dates. Ticked, it turns solid ink with the page colour for
+/// text. The venue only goes to VoiceOver, to keep chips one line.
+struct PickChip: View {
+    let pick: ParseClient.Suggestion
+    var on = false
+    let hint: String
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: on ? "checkmark" : pick.kind == Item.Kind.event ? "ticket" : "mappin.and.ellipse")
+                    .font(.caption.weight(.semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                Text(pick.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if let when = Suggestions.when(pick) {
+                    Text(when)
+                        .font(.caption2)
+                        .opacity(0.72)
+                        .fixedSize()
+                }
+            }
+            .foregroundStyle(on ? AppBackground.base : AppBackground.ink)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(on ? AppBackground.ink : .clear, in: .capsule)
+            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.2), value: on)
+        .accessibilityLabel(spoken)
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityHint(hint)
+    }
+
+    /// "BFI Southbank, until 18 Oct".
+    private var spoken: String {
+        let venue = pick.venue.flatMap { $0 == pick.title || $0.isEmpty ? nil : $0 }
+        return [pick.title, venue, Suggestions.when(pick)].compactMap(\.self).joined(separator: ", ")
     }
 }
 
