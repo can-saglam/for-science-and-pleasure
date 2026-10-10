@@ -17,7 +17,7 @@ struct Recommendations: View {
     var body: some View {
         if let city, !picks.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Worth going to in \(city)")
+                Text("Or try one of these")
                     .font(.footnote)
                     .foregroundStyle(AppBackground.secondaryInk)
                 CentredFlow(spacing: 8, leading: true) {
