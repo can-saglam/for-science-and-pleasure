@@ -119,6 +119,7 @@ final class GroupUI {
 struct GroupSection: View {
     @Bindable var ui: GroupUI
     @State private var group = GroupStore.shared
+    @State private var confirmJoinOther = false
     @Environment(\.modelContext) private var context
 
     private var me: UUID? { SupabaseAuth.shared.userId }
@@ -168,11 +169,23 @@ struct GroupSection: View {
             }
             Button {
                 Haptics.tap()
-                ui.showJoin = true
+                // Sharing already: say what joining costs before the code,
+                // not after it.
+                if card.members.count > 1 {
+                    confirmJoinOther = true
+                } else {
+                    ui.showJoin = true
+                }
             } label: {
                 SettingsRow(title: card.members.count == 1 ? "Join someone\u{2019}s library" : "Join another group")
             }
             .accessibilityHint("Enter an invite code")
+            .alert("One group at a time", isPresented: $confirmJoinOther) {
+                Button("Stay here", role: .cancel) {}
+                Button("Continue") { ui.showJoin = true }
+            } message: {
+                Text("Joining another group means leaving \(card.name). They keep all the saves, and you can take a copy with you.")
+            }
         } footer: {
             footer
         }
