@@ -255,11 +255,7 @@ struct SettingsView: View {
             if let card = group.card?.forScreenshots {
                 GroupHeroCard(card: card, ui: groupUI) { path.append(.group) }
             } else if group.loaded {
-                Button {
-                    Task { await group.refresh() }
-                } label: {
-                    SettingsRow(title: "Couldn\u{2019}t load your group. Tap to retry")
-                }
+                GroupLoadFailed()
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 200)
@@ -287,10 +283,6 @@ struct SettingsView: View {
                 }
                 .prominentGlass()
                 .controlSize(.large)
-                Text("Sign in to sync your shared library across phones.")
-                    .font(.footnote)
-                    .foregroundStyle(AppBackground.secondaryInk)
-                    .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)

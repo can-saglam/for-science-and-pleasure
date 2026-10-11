@@ -232,7 +232,7 @@ struct CaptureDrawer<Actions: View>: View {
                     Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
                 if let category = draft.category {
-                    Text(category.capitalized).foregroundStyle(AppBackground.secondaryInk)
+                    Text(Item.categoryLabel(category)).foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .font(.subheadline.weight(.medium))

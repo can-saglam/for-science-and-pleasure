@@ -164,9 +164,9 @@ struct ItemDetailView: View {
                                 Label("Delete", systemImage: "trash")
                             }
                         } label: {
-                            Image(systemName: "square.and.arrow.up")
+                            Image(systemName: "ellipsis")
                         }
-                        .accessibilityLabel("Share")
+                        .accessibilityLabel("More")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -439,7 +439,7 @@ struct ItemDetailView: View {
                 }
                 if let category = item.category {
                     // Title case, matching the filter chips.
-                    Text(category.capitalized).foregroundStyle(AppBackground.secondaryInk)
+                    Text(Item.categoryLabel(category)).foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .font(.subheadline.weight(.medium))

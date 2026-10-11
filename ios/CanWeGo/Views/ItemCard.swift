@@ -229,6 +229,9 @@ struct ItemCard: View {
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(cardBorder, lineWidth: 1)
         )
+        // Flat before anything fades it: the press dim and the long-press
+        // lift apply opacity, which per layer shows the melt as a box.
+        .compositingGroup()
         .contentShape(.rect(cornerRadius: radius, style: .continuous))
         // One sentence per card for VoiceOver, in reading order, instead of
         // three separate stops with the countdown detached from its title.
@@ -576,6 +579,7 @@ struct ItemCardRow: View {
             }
             .tint(AppBackground.swipeDelete)
         }
+        .contentShape(.contextMenuPreview, .rect(cornerRadius: compact ? 14 : 18, style: .continuous))
         .contextMenu {
             if item.isDone {
                 Button {

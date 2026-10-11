@@ -24,7 +24,7 @@ struct ItemForm: View {
 
             section("The basics") {
                 field(item.isPlace ? "Name of the place" : "What\u{2019}s on", icon: "pencil.line", text: $item.title)
-                field("Category", icon: "tag", text: optional($item.category))
+                field("Category", icon: "tag", text: categoryText)
             }
 
             section("Picture") {
@@ -142,6 +142,14 @@ struct ItemForm: View {
         }
         .padding(12)
         .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Shown as a label ("Exhibition"), kept as the key ("exhibition").
+    private var categoryText: Binding<String> {
+        Binding(
+            get: { item.category.map(Item.categoryLabel) ?? "" },
+            set: { item.category = $0.isEmpty ? nil : Item.categoryKey($0) }
+        )
     }
 
     private func optional(_ source: Binding<String?>) -> Binding<String> {

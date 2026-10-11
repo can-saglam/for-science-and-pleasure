@@ -358,6 +358,13 @@ extension Item {
         }
     }
 
+    /// What's stored for a category typed as a label: lowercase, the form
+    /// the parser writes and `OpeningHours` and the caps match on.
+    static func categoryKey(_ label: String) -> String {
+        let key = label.lowercased()
+        return key.trimmingCharacters(in: .whitespaces) == "café" ? "cafe" : key
+    }
+
     static func glyph(kind: String, category: String?) -> String {
         switch category?.trimmingCharacters(in: .whitespaces).lowercased() {
         case "restaurant": return "fork.knife"

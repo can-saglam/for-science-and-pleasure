@@ -131,11 +131,7 @@ struct GroupSection: View {
                     sections(card)
                 } else if group.loaded {
                     Section {
-                        Button {
-                            Task { await group.refresh() }
-                        } label: {
-                            SettingsRow(title: "Couldn\u{2019}t load your group. Tap to retry")
-                        }
+                        GroupLoadFailed()
                     }
                     .listRowBackground(SettingsView.rowBackground)
                 } else {
@@ -379,6 +375,49 @@ struct GroupSection: View {
         }
         .font(.footnote)
         .foregroundStyle(AppBackground.secondaryInk)
+    }
+}
+
+/// The first load failed with nothing cached. About the group card's
+/// height, so Settings doesn't jump when the group arrives.
+struct GroupLoadFailed: View {
+    @State private var retrying = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.title2)
+                .foregroundStyle(AppBackground.secondaryInk)
+                .accessibilityHidden(true)
+            Text("Couldn\u{2019}t load your group")
+                .font(.headline)
+                .foregroundStyle(AppBackground.ink)
+            Text("Check your connection, then try again.")
+                .font(.footnote)
+                .foregroundStyle(AppBackground.secondaryInk)
+                .multilineTextAlignment(.center)
+            Button {
+                Haptics.tap()
+                Task {
+                    retrying = true
+                    _ = await GroupStore.shared.refresh()
+                    retrying = false
+                }
+            } label: {
+                ZStack {
+                    Text("Try again").opacity(retrying ? 0 : 1)
+                    if retrying { ProgressView() }
+                }
+                .fontWeight(.semibold)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .disabled(retrying)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, minHeight: 200)
+        .padding(.vertical, 6)
     }
 }
 
