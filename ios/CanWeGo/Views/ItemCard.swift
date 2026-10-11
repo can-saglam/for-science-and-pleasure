@@ -85,7 +85,9 @@ struct ItemCard: View {
     /// The badge slot: an event's time label, or "Nearby" for a place.
     private var slotLabel: String? {
         if meta != nil { return nil }
-        if compact, item.isDone, let went = item.wentLabel { return went }
+        // In the journal "Ended" says nothing: the day you went, or nothing.
+        if compact, item.isDone { return item.wentLabel }
+        if compact, item.isMissed, let ended = item.endedLabel { return ended }
         if isNearby { return "Nearby" }
         return item.timeLabel
     }

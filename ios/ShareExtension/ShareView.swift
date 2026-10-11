@@ -15,7 +15,10 @@ struct ShareView: View {
         case signedOut
         case parsing
         case preview(Item)
-        case failed(String, retryText: String?)
+        /// `canRetry` for a lookup that failed; `retryText` when there are
+        /// words to keep as they are. An image alone can't be kept: the
+        /// inbox carries no pictures.
+        case failed(String, retryText: String? = nil, canRetry: Bool = false)
     }
 
     @State private var stage: Stage = .reading
@@ -146,13 +149,27 @@ struct ShareView: View {
         case .preview(let draft):
             preview(draft)
 
-        case .failed(let message, let retryText):
+        case .failed(let message, let retryText, let canRetry):
             Label(message, systemImage: "exclamationmark.triangle")
                 .font(.subheadline)
                 .foregroundStyle(AppBackground.warning)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 12, style: .continuous))
+
+            if canRetry, !saved {
+                Button {
+                    Haptics.tap()
+                    Task { await parse() }
+                } label: {
+                    Label("Try again", systemImage: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.ink)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+            }
 
             if let retryText {
                 // Parse failed (offline, blocked page…): keep the raw share
@@ -194,7 +211,7 @@ struct ShareView: View {
 
                 Button {
                     draft.status = Item.Status.done
-                    draft.wentOn = DayString.today()
+                    draft.wentOn = draft.defaultWentOn
                     save(draft)
                 } label: {
                     Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
@@ -270,7 +287,7 @@ struct ShareView: View {
         }
         await loadAttachments()
         guard payloadText != nil || payloadImage != nil else {
-            stage = .failed("Nothing shareable found.", retryText: nil)
+            stage = .failed("Nothing shareable found.")
             return
         }
         // Straight to the lookup: the whole point of sharing is to get a
@@ -307,7 +324,11 @@ struct ShareView: View {
             withAnimation(.snappy) {
                 peek = nil
                 early = nil
-                stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: payloadText)
+                stage = .failed(
+                    (error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message,
+                    retryText: payloadText,
+                    canRetry: true
+                )
             }
         }
     }
@@ -445,7 +466,7 @@ struct ShareView: View {
                 complete()
             }
         } catch {
-            stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message, retryText: nil)
+            stage = .failed((error as? ParseClient.ParseError)?.errorDescription ?? SyncProblem(error).message)
         }
     }
 }

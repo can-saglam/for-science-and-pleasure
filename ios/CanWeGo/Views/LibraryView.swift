@@ -49,7 +49,9 @@ struct LibraryView: View {
     /// search still reads the same.
     @State private var asked: String?
     @State private var archiveOpen = false
-    @State private var archiveSide: ArchiveSide = .all
+    @State private var archiveSide: ArchiveSide = .been
+    /// Journal years opened or folded against the default (newest open).
+    @State private var flippedYears: Set<Int> = []
     /// Brief drop-in after a pull-to-refresh: "Updated just now", or why not.
     @State private var refreshNotice: (text: String, icon: String)?
     @State private var syncStatus = SyncStatus.shared
@@ -72,7 +74,7 @@ struct LibraryView: View {
     @State private var listHeight: CGFloat = 0
 
     private enum ArchiveSide: CaseIterable {
-        case all, been
+        case been, all
 
         @MainActor var label: String {
             switch self {
@@ -164,6 +166,30 @@ struct LibraryView: View {
             }
             .prefix(8)
             .map(\.label)
+    }
+
+    /// One or two chips filter next to nothing and leave the row looking
+    /// bare, so a group shows from three. A chip that's on keeps its group,
+    /// or a filter could outlive the row that clears it.
+    private static let minChips = 3
+
+    private var chipCategories: [String] {
+        categories.count >= Self.minChips || category != nil ? categories : []
+    }
+
+    private var chipAreas: [String] {
+        areas.count >= Self.minChips || area != nil ? areas : []
+    }
+
+    /// Only when something could move: a pinned place for Near me, known
+    /// hours for Open now. Either stays while it's on, so it can be undone.
+    private var showsNearMe: Bool {
+        kind == Item.Kind.place && LocationStore.shared.location != nil
+            && (nearMe || base.contains { $0.coordinate != nil })
+    }
+
+    private var showsOpenNow: Bool {
+        kind == Item.Kind.place && (openNow || base.contains(where: \.showsHours))
     }
 
     private var visible: [Item] {
@@ -466,17 +492,22 @@ struct LibraryView: View {
                         .accessibilityLabel("Search")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        withAnimation(.snappy) {
-                            mode.showMap.toggle()
-                            searchOpen = false
+                // Nothing to pin, no map; on the map, always the way back.
+                if mode.showMap || visible.contains(where: { $0.coordinate != nil }) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Haptics.tap()
+                            withAnimation(.snappy) {
+                                mode.showMap.toggle()
+                                // A hidden search would go on filtering.
+                                searchOpen = false
+                                query = ""
+                            }
+                        } label: {
+                            headerIcon(mode.showMap ? "list.bullet" : "map")
                         }
-                    } label: {
-                        headerIcon(mode.showMap ? "list.bullet" : "map")
+                        .accessibilityLabel(mode.showMap ? "Show list" : "Show map")
                     }
-                    .accessibilityLabel(mode.showMap ? "Show list" : "Show map")
                 }
                 // Settings holds the far end: the gear is the one control
                 // that isn't about the list in front of you.
@@ -560,7 +591,7 @@ struct LibraryView: View {
             .padding(.trailing, -11)
         }
         .padding(.horizontal, 14)
-        .frame(height: 44)
+        .frame(minHeight: 44)
         .glassEffect(.regular, in: .capsule)
         .padding(.horizontal, 20)
         .padding(.top, 2)
@@ -748,7 +779,7 @@ struct LibraryView: View {
             }
             #endif
 
-            if categories.count > 1 || areas.count > 1 {
+            if !chipCategories.isEmpty || !chipAreas.isEmpty || showsNearMe || showsOpenNow {
                 // Not cardListRow(): its insets would win over these, and
                 // the row above and below the chips wants to be tighter.
                 // Places get a touch more below — their cards follow the
@@ -773,7 +804,7 @@ struct LibraryView: View {
                 placeList
             }
 
-            if visible.isEmpty && !been.isEmpty && query.isEmpty && category == nil && area == nil {
+            if visible.isEmpty && !been.isEmpty && query.isEmpty && category == nil && area == nil && !openNow {
                 EmptyState(
                     title: "Nothing coming up",
                     message: kind == Item.Kind.place
@@ -799,7 +830,7 @@ struct LibraryView: View {
                 }
                 .padding(.top, 40)
                 .cardListRow()
-            } else if visible.isEmpty && been.isEmpty && missed.isEmpty {
+            } else if visible.isEmpty && ((been.isEmpty && missed.isEmpty) || openNow) {
                 let filtered = category != nil || area != nil || openNow || !query.isEmpty
                 if base.isEmpty && !filtered {
                     // Nothing in this tab: the first-time version when the
@@ -818,7 +849,11 @@ struct LibraryView: View {
                 } else if askQuestion == nil {
                     EmptyState(
                         title: base.isEmpty ? emptyTitle : (openNowOnly ? (checkingHours ? "Checking hours…" : "Nothing open right now") : "Nothing matches"),
-                        message: base.isEmpty ? emptyPrompt : (openNowOnly ? "Out of the \(Self.openNowLookups) places nearest you." : "Try a different word, or clear the filters."),
+                        message: base.isEmpty ? emptyPrompt : (openNowOnly
+                            ? (base.count > Self.openNowLookups
+                                ? "Out of the \(Self.openNowLookups) places nearest you."
+                                : "None of your saved places are open right now.")
+                            : "Try a different word, or clear the filters."),
                         glyph: category != nil ? emptyGlyph : nil
                     ) {
                         if filtered {
@@ -993,7 +1028,7 @@ struct LibraryView: View {
         VStack(spacing: 0) {
             if !picks.isEmpty {
                 VStack(spacing: 10) {
-                    Text("Or start with one of these")
+                    Text(been.isEmpty ? "Or start with one of these" : "Or try one of these")
                         .font(.caption.weight(.semibold))
                         .textCase(.uppercase)
                         .tracking(0.6)
@@ -1107,19 +1142,60 @@ struct LibraryView: View {
                 .frame(minHeight: 44)
                 .cardListRow()
             if query.isEmpty {
-                JournalTally(items: been)
-                    .cardListRow()
+                journalYears(been) { $0.wentDate }
+            } else {
+                ForEach(been) { item in
+                    ItemCardRow(item: item, compact: true) {
+                        selected = item
+                    }
+                }
             }
-            ForEach(been) { item in
+        }
+    }
+
+    /// Saves by year, then month. The newest year starts open and the rest
+    /// folded, so the journal stays about a year long however long it gets.
+    @ViewBuilder
+    private func journalYears(_ items: [Item], by date: @escaping (Item) -> Date) -> some View {
+        let years = JournalYear.group(items, by: date)
+        let newest = years.first?.year
+        let places = kind == Item.Kind.place
+        // One month needs no year or month over it.
+        let headed = years.count > 1 || (years.first?.months.count ?? 0) > 1
+        if !headed {
+            ForEach(items) { item in
                 ItemCardRow(item: item, compact: true) {
                     selected = item
+                }
+            }
+        }
+        ForEach(headed ? years : []) { year in
+            let open = (year.year == newest) != flippedYears.contains(year.year)
+            let noun = places ? (year.count == 1 ? "place" : "places") : (year.count == 1 ? "event" : "events")
+            JournalYearHeader(year: year.year, count: "\(year.count) \(noun)", open: open) {
+                Haptics.tap()
+                let flip = {
+                    if flippedYears.contains(year.year) { flippedYears.remove(year.year) } else { flippedYears.insert(year.year) }
+                }
+                if reduceMotion { flip() } else { withAnimation(.snappy) { flip() } }
+            }
+            .cardListRow()
+            if open {
+                ForEach(year.months) { month in
+                    JournalMonthLabel(name: month.name)
+                        .cardListRow()
+                    ForEach(month.items) { item in
+                        ItemCardRow(item: item, compact: true) {
+                            selected = item
+                        }
+                    }
                 }
             }
         }
     }
 
     /// One quiet drawer for everything that's over — collapsed by default,
-    /// with an All / We Did Go split inside (missed things only show in All).
+    /// with a We Did Go / All split inside (missed things only show in All).
     @ViewBuilder
     private var eventArchive: some View {
         if !archiveAll.isEmpty {
@@ -1157,24 +1233,24 @@ struct LibraryView: View {
             .cardListRow()
 
             if archiveOpen {
-                Picker("Archive filter", selection: $archiveSide.animation(.snappy)) {
-                    ForEach(ArchiveSide.allCases, id: \.self) { Text($0.label) }
-                }
-                .pickerStyle(.segmented)
-                .sensoryFeedback(.selection, trigger: archiveSide)
-                .padding(.top, 4)
-                .frame(minHeight: 44)
-                .cardListRow()
-
-                if archiveSide == .been {
-                    JournalTally(items: been)
-                        .cardListRow()
-                }
-                let rows = archiveSide == .all ? archiveAll : been
-                ForEach(rows) { item in
-                    ItemCardRow(item: item, compact: true) {
-                        selected = item
+                // With nothing missed, or nothing gone to, both sides are
+                // the same list: no switch, just that list.
+                let split = !been.isEmpty && !missed.isEmpty
+                if split {
+                    Picker("Archive filter", selection: $archiveSide.animation(.snappy)) {
+                        ForEach(ArchiveSide.allCases, id: \.self) { Text($0.label) }
                     }
+                    .pickerStyle(.segmented)
+                    .sensoryFeedback(.selection, trigger: archiveSide)
+                    .padding(.top, 4)
+                    .frame(minHeight: 44)
+                    .cardListRow()
+                }
+
+                if split ? archiveSide == .been : !been.isEmpty {
+                    journalYears(been) { $0.wentDate }
+                } else {
+                    journalYears(archiveAll) { archiveDate($0) }
                 }
             }
         }
@@ -1182,13 +1258,13 @@ struct LibraryView: View {
 
     private var chipRow: some View {
         ChipRow(
-            categories: categories,
+            categories: chipCategories,
             capCounts: CategoryCap.applies ? CategoryCap.tally(items) : [:],
-            areas: areas,
+            areas: chipAreas,
             category: $category,
             area: $area,
-            showsNearMe: kind == Item.Kind.place && LocationStore.shared.location != nil,
-            showsOpenNow: kind == Item.Kind.place,
+            showsNearMe: showsNearMe,
+            showsOpenNow: showsOpenNow,
             nearMe: $nearMe,
             openNow: $openNow,
             checkingHours: checkingHours
@@ -1229,24 +1305,24 @@ private struct ChipRow: View {
                 if showsOpenNow {
                     chip("Open now", symbol: "clock", isOn: openNow, busy: checkingHours) { openNow.toggle() }
                 }
-                if (showsNearMe || showsOpenNow) && (categories.count > 1 || areas.count > 1) {
+                if (showsNearMe || showsOpenNow) && (!categories.isEmpty || !areas.isEmpty) {
                     Rectangle()
                         .fill(AppBackground.ink.opacity(0.25))
                         .frame(width: 1, height: 16)
                 }
-                if categories.count > 1 {
+                if !categories.isEmpty {
                     ForEach(categories, id: \.self) { c in
                         chip(Item.categoryLabel(c), isOn: category == c, cap: capCounts[CategoryCap.key(c)]) {
                             category = category == c ? nil : c
                         }
                     }
                 }
-                if categories.count > 1 && areas.count > 1 {
+                if !categories.isEmpty && !areas.isEmpty {
                     Rectangle()
                         .fill(AppBackground.ink.opacity(0.25))
                         .frame(width: 1, height: 16)
                 }
-                if areas.count > 1 {
+                if !areas.isEmpty {
                     ForEach(areas, id: \.self) { a in
                         chip(a, isOn: area?.lowercased() == a.lowercased()) {
                             area = area?.lowercased() == a.lowercased() ? nil : a

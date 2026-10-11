@@ -23,9 +23,19 @@ extension Item {
         Task { @MainActor in SupabaseSync.setDeleted(id, true) }
     }
 
+    /// The day We Did Go records: a plan's day once it's come, else today,
+    /// unless the event is already over, when it can only have been gone
+    /// to by its last day.
+    var defaultWentOn: String {
+        let today = DayString.today()
+        if let planOn, planOn <= today { return planOn }
+        guard isEvent, timeBucket == .past, let last = endsOn ?? startsOn, last <= today else { return today }
+        return last
+    }
+
     func markDone() {
         status = Item.Status.done
-        wentOn = DayString.today()
+        wentOn = defaultWentOn
         clearReminder()
         updatedAt = .now
         stampAuthor()

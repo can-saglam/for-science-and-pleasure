@@ -34,6 +34,8 @@ struct Composer: View {
     @State private var photoOpen = false
     @State private var cameraOpen = false
     @State private var tickerIndex = 0
+    /// A library pick that couldn't be read, said over the bar.
+    @State private var photoNote: String?
 
     /// What the empty field suggests. Kept under ~30 characters so each
     /// fits on one line.
@@ -57,18 +59,29 @@ struct Composer: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            moreMenu
-            field
+        VStack(alignment: .leading, spacing: 6) {
+            if let photoNote {
+                Text(photoNote)
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.warning)
+                    .padding(.leading, Self.control + 24)
+                    .transition(.opacity)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                moreMenu
+                field
+            }
         }
         .animation(.snappy, value: busy)
         .animation(.snappy, value: offline)
+        .animation(.snappy, value: photoNote)
         // Sending puts the keyboard away so the result has the room.
         .onChange(of: busy) { _, now in if now { focused = false } }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task { await loadPhoto(item) }
         }
+        .onChange(of: imageJPEG) { _, image in if image != nil { photoNote = nil } }
         .task {
             guard focusOnAppear else { return }
             // Focus set while the sheet is still sliding up can be dropped.
@@ -131,7 +144,18 @@ struct Composer: View {
                     .foregroundStyle(AppBackground.ink)
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
+                    .submitLabel(.send)
                     .focused($focused)
+                    // A vertical field takes Return as a new line and never
+                    // submits, so a typed one is caught here and sends.
+                    // Pasted lines stay.
+                    .onChange(of: text) { old, new in
+                        guard new.count == old.count + 1,
+                              new.count(where: \.isNewline) == old.count(where: \.isNewline) + 1
+                        else { return }
+                        text = old
+                        if canSend && !busy { send() }
+                    }
                     .accessibilityLabel("Link or name")
                     .background(alignment: .topLeading) {
                         if text.isEmpty {
@@ -180,11 +204,14 @@ struct Composer: View {
         .animation(.snappy, value: focused)
     }
 
+    private func send() {
+        Haptics.tap()
+        photoNote = nil
+        onSend()
+    }
+
     private var sendButton: some View {
-        Button {
-            Haptics.tap()
-            onSend()
-        } label: {
+        Button(action: send) {
             Group {
                 if offline {
                     // The spinner sits over the hidden label, so the pill
@@ -224,7 +251,10 @@ struct Composer: View {
                         canSend && AppBackground.theme.isLight ? 0.22 : 0),
                     lineWidth: 1)
             )
-            .contentShape(.capsule)
+            // A 44pt target around the 30pt disc, same look.
+            .padding(7)
+            .contentShape(.rect)
+            .padding(-7)
         }
         .buttonStyle(.plain)
         .disabled(busy || !canSend)
@@ -276,9 +306,14 @@ struct Composer: View {
     }
 
     private func loadPhoto(_ item: PhotosPickerItem) async {
+        photoNote = nil
         guard let data = try? await item.loadTransferable(type: Data.self),
               let jpeg = data.compressedImageForUpload()
-        else { return }
+        else {
+            photoItem = nil
+            photoNote = "Couldn\u{2019}t read that photo."
+            return
+        }
         withAnimation(.snappy) {
             imageJPEG = jpeg
         }

@@ -229,7 +229,7 @@ struct GroupSection: View {
             ui.startInvite(for: card)
         } label: {
             HStack {
-                SettingsRow(title: "Invite people")
+                SettingsRow(title: card.members.count == 1 ? "Invite someone" : "Invite people")
                     .fontWeight(.semibold)
                 Spacer()
                 if ui.inviting {
@@ -475,7 +475,7 @@ struct GroupHeroCard: View {
         }
         .buttonStyle(.plain)
         .disabled(ui.inviting)
-        .accessibilityLabel("Invite people")
+        .accessibilityLabel(solo ? "Invite someone" : "Invite people")
         .accessibilityHint(card.needsPlusToGrow ? "Opens Plus, which adds two more seats" : "Shares an invite code")
     }
 }

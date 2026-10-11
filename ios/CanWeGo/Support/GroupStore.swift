@@ -233,7 +233,7 @@ final class GroupStore {
             case "ok":
                 return "You\u{2019}ll share one library. Everyone sees and edits everything."
             case "own":
-                return "That\u{2019}s your own group\u{2019}s code."
+                return "That\u{2019}s your own invite."
             case "unknown":
                 return "That code doesn\u{2019}t match any invite."
             case "expired":
@@ -382,12 +382,12 @@ final class GroupStore {
         switch code {
         case "plus_required": return "Free groups have two seats. Plus opens two more."
         case "full": return "This group already has four people, the most a group can hold."
-        case "already_solo": return "You\u{2019}re the only one left in this group. It\u{2019}s already yours, so there\u{2019}s nothing to leave."
+        case "already_solo": return "You\u{2019}re the only one left. The library is already yours, so there\u{2019}s nothing to leave."
         case "no_group": return "Couldn\u{2019}t find your group. Try again in a moment."
         case "unknown": return "That code doesn\u{2019}t match any invite."
         case "expired": return "This invite has expired. Ask for a new one."
         case "revoked": return "This invite was cancelled. Ask for a new one."
-        case "own": return "That\u{2019}s your own group\u{2019}s code."
+        case "own": return "That\u{2019}s your own invite."
         default: return "Something went wrong. Please try again."
         }
     }

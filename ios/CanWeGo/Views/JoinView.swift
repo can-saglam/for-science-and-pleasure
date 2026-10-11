@@ -56,7 +56,7 @@ struct JoinSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .appBackground(AppBackground.sheet)
-            .sheetTitle("Join a group") {
+            .sheetTitle("Join a library") {
                 dismiss()
             }
             .disabled(joining)
@@ -98,7 +98,7 @@ struct JoinSheet: View {
 
     private var field: some View {
         VStack(spacing: 12) {
-            Text("Ask anyone in the group for their invite code. It\u{2019}s under Invite people in their Settings.")
+            Text("Ask anyone who shares the library for their invite code. It\u{2019}s under Invite in their Settings.")
                 .font(.subheadline)
                 .foregroundStyle(AppBackground.ink.opacity(0.72))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,7 +228,7 @@ struct JoinSheet: View {
                     Haptics.tap()
                     dismiss()
                 } label: {
-                    Text("Back to your group")
+                    Text("Back to your library")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glass)

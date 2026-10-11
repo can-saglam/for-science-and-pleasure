@@ -566,7 +566,7 @@ struct PlusPaywall: View {
         guard let chosen else { return " " }
         let price = "\(chosen.price) a \(chosen.unit)"
         let lead = trial.map { "Free for \($0) days, then \(price)." } ?? "\(price)."
-        return "\(lead) Renews automatically until you cancel, any time, in Settings."
+        return "\(lead) Renews automatically. Cancel any time in your Apple Account subscriptions."
     }
 
     private var bottomBar: some View {

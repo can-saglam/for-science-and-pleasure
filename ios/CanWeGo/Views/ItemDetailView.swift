@@ -154,16 +154,14 @@ struct ItemDetailView: View {
                             ShareMenuItems(item: item) {
                                 Task { shareCard = await ShareCard.render(item) }
                             }
-                            if item.isDone {
-                                Divider()
-                                Button(role: .destructive) {
-                                    Haptics.tap()
-                                    UndoBin.shared.stash(item.snapshot)
-                                    item.softDelete()
-                                    dismiss()
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+                            Divider()
+                            Button(role: .destructive) {
+                                Haptics.tap()
+                                UndoBin.shared.stash(item.snapshot)
+                                item.softDelete()
+                                dismiss()
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         } label: {
                             Image(systemName: "square.and.arrow.up")
@@ -432,11 +430,11 @@ struct ItemDetailView: View {
                 .font(.displaySmallBold(28, relativeTo: .title2))
                 .fixedSize(horizontal: false, vertical: true)
             layout {
-                if let label = item.timeLabel {
+                if let label = item.headerTimeLabel {
                     Text(label)
-                        .foregroundStyle(item.timeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
+                        .foregroundStyle(item.headerTimeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
                 }
-                if !stacked && item.timeLabel != nil && item.category != nil {
+                if !stacked && item.headerTimeLabel != nil && item.category != nil {
                     Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
                 if let category = item.category {
@@ -706,6 +704,12 @@ extension Item {
             return nil
         }
     }
+
+    /// Once they've been, the day they went: "Ended" or a countdown is
+    /// about the event, not about them. Nothing when the day isn't known.
+    var headerTimeLabel: String? { isDone ? wentLabel : timeLabel }
+
+    var headerTimeLabelIsUrgent: Bool { !isDone && timeLabelIsUrgent }
 
     /// "Nunhead" under a "Nunhead" venue, or "Barbican" under "Barbican
     /// Centre", says nothing new.

@@ -42,8 +42,8 @@ struct ItemForm: View {
             if item.isEvent || item.hasCustomReminder {
                 section("When") {
                     if item.isEvent {
-                        OptionalDateRow(label: "Opens", icon: "calendar", value: $item.startsOn)
-                        OptionalDateRow(label: "Closes", icon: "calendar.badge.checkmark", value: $item.endsOn)
+                        OptionalDateRow(label: "Opens", icon: "calendar", value: $item.startsOn, latest: item.endsOn)
+                        OptionalDateRow(label: "Closes", icon: "calendar.badge.checkmark", value: $item.endsOn, earliest: item.startsOn)
                     }
                     RemindRow(item: item)
                 }
@@ -172,10 +172,19 @@ private struct FieldIcon: View {
 }
 
 /// "Add date" → date picker + clear, for the optional yyyy-MM-dd fields.
+/// Opens and Closes bound each other, so a run can't close before it opens.
 private struct OptionalDateRow: View {
     let label: String
     let icon: String
     @Binding var value: String?
+    var earliest: String? = nil
+    var latest: String? = nil
+
+    private var range: ClosedRange<Date> {
+        let lower = earliest.flatMap(DayString.date) ?? .distantPast
+        let upper = latest.flatMap(DayString.date) ?? .distantFuture
+        return lower...max(lower, upper)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -191,9 +200,11 @@ private struct OptionalDateRow: View {
                         get: { date },
                         set: { self.value = DayString.formatter.string(from: $0) }
                     ),
+                    in: range,
                     displayedComponents: .date
                 )
                 .labelsHidden()
+                .environment(\.timeZone, DayString.timeZone)
                 Button {
                     Haptics.tap()
                     self.value = nil
@@ -206,7 +217,9 @@ private struct OptionalDateRow: View {
             } else {
                 Button {
                     Haptics.tap()
-                    value = DayString.today()
+                    // The other end's day when it's set: today could fall
+                    // outside the run.
+                    value = earliest ?? latest ?? DayString.today()
                 } label: {
                     Label("Add date", systemImage: "calendar.badge.plus")
                         .font(.subheadline.weight(.medium))

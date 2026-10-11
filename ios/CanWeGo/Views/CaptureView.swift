@@ -425,7 +425,7 @@ struct CaptureView: View {
 
                 Button {
                     draft.status = Item.Status.done
-                    draft.wentOn = DayString.today()
+                    draft.wentOn = draft.defaultWentOn
                     save(draft)
                 } label: {
                     Label(Voice.didGoBang, systemImage: "checkmark.seal.fill")
@@ -743,7 +743,7 @@ private struct NudgeNote: View {
         switch nudge {
         case .search: "Name one place or show, or paste a link to it."
         case .stillSearching: "Found somewhere you like? Paste its link, share a screenshot, or type its name."
-        case .tomorrow: "You can still fill the card in yourself with Add manually."
+        case .tomorrow: "You can still fill the card in yourself from the + menu."
         }
     }
 

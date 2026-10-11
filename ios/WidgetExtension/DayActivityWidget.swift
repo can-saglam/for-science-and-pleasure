@@ -99,7 +99,7 @@ struct DayActivityWidget: Widget {
             } compactLeading: {
                 Thumb(look: look, side: 24, corner: 6)
             } compactTrailing: {
-                Text(context.state.label)
+                Text(DayLook.compactLabel(context.state.label))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(look.islandAccent)
                     .lineLimit(1)
@@ -147,6 +147,22 @@ struct DayLook {
     /// "Closed today", "Temporarily closed": worth the eye before setting off.
     static func isClosedLine(_ hours: String) -> Bool {
         hours.hasPrefix("Closed") || hours == "Temporarily closed"
+    }
+
+    /// The compact island's trailing slot fits about ten characters, so
+    /// the server's labels lose their lead-in there: "Closes in 5 days"
+    /// is "5 days", "On until 10 Jan" is "10 Jan", "Going 17:00" is
+    /// "17:00". Short ones ("Last day", "Today") pass through.
+    static func compactLabel(_ label: String) -> String {
+        switch label {
+        case "Opens tomorrow", "Closes tomorrow": return "Tomorrow"
+        case "Planned for today": return "Today"
+        default: break
+        }
+        for lead in ["Closes in ", "Opens in ", "On until ", "Going at ", "Going "] where label.hasPrefix(lead) {
+            return String(label.dropFirst(lead.count))
+        }
+        return label
     }
 
     var link: URL {

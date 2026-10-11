@@ -101,7 +101,7 @@ struct ShareCard: View {
                         .foregroundStyle(typeColor.opacity(0.75))
                         .lineLimit(2)
                 }
-                if let when = item.timeLabel {
+                if let when = item.headerTimeLabel {
                     Text(when)
                         .font(.headline)
                         .foregroundStyle(typeColor.opacity(0.6))

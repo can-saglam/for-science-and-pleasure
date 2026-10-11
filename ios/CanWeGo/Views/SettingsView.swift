@@ -1,3 +1,6 @@
+#if !APP_EXTENSION
+import ActivityKit
+#endif
 import AuthenticationServices
 import EventKit
 import SwiftData
@@ -64,6 +67,8 @@ struct SettingsView: View {
     @State private var calendarAccess = EKEventStore.authorizationStatus(for: .event)
     @State private var calendars: [CalendarChoice.Option] = []
     @State private var calendarRefused = false
+    /// iOS's own Live Activities switch for this app, in the Settings app.
+    @State private var activitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     #endif
@@ -162,7 +167,9 @@ struct SettingsView: View {
             .task { refreshCalendars() }
             // Back from the Settings app, where access may have changed.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { refreshCalendars() }
+                guard phase == .active else { return }
+                refreshCalendars()
+                activitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
             }
             .alert("Choose a calendar in Settings", isPresented: $calendarRefused) {
                 Button("Open Settings") {
@@ -297,7 +304,19 @@ struct SettingsView: View {
         #if APP_EXTENSION
         "Maps"
         #else
-        "Maps, calendar and Lock Screen"
+        var parts: [String] = []
+        if let app = TransportApp(rawValue: transportApp) {
+            parts.append("Directions in \(app.name)")
+        }
+        // Without the account: "Home · iCloud" would read as two parts.
+        if let calendar = calendars.first(where: { $0.id == calendarID }),
+           let name = calendar.name.components(separatedBy: " · ").first {
+            parts.append("Plans in \(name)")
+        }
+        if !liveActivities || !activitiesAllowed {
+            parts.append("Lock Screen off")
+        }
+        return parts.isEmpty ? "Maps, calendar and Lock Screen" : parts.joined(separator: " · ")
         #endif
     }
 
@@ -412,9 +431,13 @@ struct SettingsView: View {
 
             #if !APP_EXTENSION
             Section {
-                Toggle(isOn: $liveActivities) {
+                Toggle(isOn: Binding(
+                    get: { liveActivities && activitiesAllowed },
+                    set: { liveActivities = $0 }
+                )) {
                     SettingsRow(title: "Live Activity")
                 }
+                .disabled(!activitiesAllowed)
                 .tint(themes.current.ink.opacity(0.85))
                 .sensoryFeedback(.selection, trigger: liveActivities)
                 .onChange(of: liveActivities) { _, on in
@@ -429,9 +452,23 @@ struct SettingsView: View {
                 // body-sized text, an extra line, and everything below
                 // jumps ~33pt for one frame. With the font explicit both
                 // passes agree and nothing moves.
-                Text("On the day of a reminder or a plan, the save stays on your Lock Screen instead of sending a notification.")
-                    .font(.footnote)
-                    .foregroundStyle(AppBackground.secondaryInk)
+                if activitiesAllowed {
+                    Text("On the day of a reminder or a plan, the save stays on your Lock Screen instead of sending a notification.")
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.secondaryInk)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Live Activities are off for Can We Go in iPhone Settings.")
+                            .font(.footnote)
+                            .foregroundStyle(AppBackground.secondaryInk)
+                        Button("Open Settings") {
+                            Haptics.tap()
+                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(themes.current.ink)
+                    }
+                }
             }
             .listRowBackground(Self.rowBackground)
             #endif
@@ -521,6 +558,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(title: "Sign out", destructive: true)
                     }
+                    .disabled(deleteBusy)
                     .confirmationDialog(
                         "Sign out?",
                         isPresented: $confirmSignOut,
@@ -547,8 +585,13 @@ struct SettingsView: View {
                         deleteError = nil
                         confirmDelete = true
                     } label: {
-                        SettingsRow(title: "Delete account", destructive: true)
+                        HStack {
+                            SettingsRow(title: "Delete account", destructive: true)
+                            Spacer()
+                            if deleteBusy { ProgressView() }
+                        }
                     }
+                    .disabled(deleteBusy)
                     .confirmationDialog(
                         "Delete your account?",
                         isPresented: $confirmDelete,

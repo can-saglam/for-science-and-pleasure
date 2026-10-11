@@ -37,17 +37,25 @@ struct ExportSheet: View {
             // Pinned, so the button is on screen at half height and at big
             // text sizes alike.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Button {
-                    Haptics.tap()
-                    files = LibraryExport.write(items)
-                } label: {
-                    Label(count == 1 ? "Export 1 save" : "Export \(count) saves", systemImage: "square.and.arrow.up")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
+                Group {
+                    if count == 0 {
+                        Text("Nothing to export yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(AppBackground.ink.opacity(0.72))
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Button {
+                            Haptics.tap()
+                            files = LibraryExport.write(items)
+                        } label: {
+                            Label(count == 1 ? "Export 1 save" : "Export \(count) saves", systemImage: "square.and.arrow.up")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .prominentGlass()
+                        .controlSize(.large)
+                    }
                 }
-                .prominentGlass()
-                .controlSize(.large)
-                .disabled(count == 0)
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
                 .padding(.bottom, 8)

@@ -330,7 +330,7 @@ struct MapPinsView: View {
                     .contentTransition(.symbolEffect(.replace))
                 Text(showsUpcoming.wrappedValue
                      ? "\(items.count) on the map"
-                     : "\(items.count) open · \(upcoming) not yet")
+                     : items.isEmpty ? "\(upcoming) not open yet" : "\(items.count) open · \(upcoming) not yet")
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .contentTransition(.numericText())

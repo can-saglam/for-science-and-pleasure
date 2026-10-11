@@ -5,6 +5,7 @@ import SwiftUI
 /// already on that Apple ID. Shown once — the session persists and
 /// refreshes itself from then on.
 struct AuthView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var errorMessage: String?
     /// One nonce per Apple attempt; regenerated when the sheet is requested.
@@ -52,8 +53,28 @@ struct AuthView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
+        .overlay(alignment: .topTrailing) { closeButton }
         .background { ThemeFill(color: AppBackground.base) }
         .appColorScheme()
+    }
+
+    private var closeButton: some View {
+        Button {
+            Haptics.tap()
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppBackground.ink)
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .accessibilityLabel("Close")
+        .padding(.top, 12)
+        .padding(.trailing, 20)
+        .disabled(busy)
     }
 
     private func finishApple(_ result: Result<ASAuthorization, Error>) async {

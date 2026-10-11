@@ -350,7 +350,7 @@ struct RandomSaveView: View {
             Image(systemName: "sparkles")
                 .font(.title3)
                 .foregroundStyle(entry.theme.ink.opacity(0.8))
-            Text("Save something to see it here")
+            Text("Save an event to see it here")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(entry.theme.ink.opacity(0.75))
                 .multilineTextAlignment(.center)

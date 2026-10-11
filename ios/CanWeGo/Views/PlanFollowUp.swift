@@ -17,6 +17,7 @@ struct PlanFollowUpSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var index = 0
     @State private var askingAgain = false
     @State private var replanning: Item?
@@ -140,13 +141,24 @@ struct PlanFollowUpSheet: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             if let url = item.imageUrl.flatMap(URL.init(string:)) {
-                HeroPhoto(url: url, placeholder: item.accentColor)
-                    .accessibilityHidden(true)
-                    .overlay(alignment: .bottomLeading) {
-                        heading
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 6)
-                    }
+                // At accessibility sizes the question can outgrow the melt,
+                // so it moves below the picture.
+                if typeSize.isAccessibilitySize {
+                    HeroPhoto(url: url, placeholder: item.accentColor)
+                        .accessibilityHidden(true)
+                    heading
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
+                        .padding(.bottom, 6)
+                } else {
+                    HeroPhoto(url: url, placeholder: item.accentColor)
+                        .accessibilityHidden(true)
+                        .overlay(alignment: .bottomLeading) {
+                            heading
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 6)
+                        }
+                }
             } else {
                 heading
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,11 +204,14 @@ struct PlanFollowUpSheet: View {
     private func wentThere(_ item: Item) {
         Haptics.success()
         answered.insert(item.id)
-        item.clearPlan()
         if item.isEvent {
+            // Done first: the went day is read from the plan.
             item.markDone()
+            item.clearPlan()
+            try? context.save()
             UndoBin.shared.stashDone(item)
         } else {
+            item.clearPlan()
             item.updatedAt = .now
             try? context.save()
         }

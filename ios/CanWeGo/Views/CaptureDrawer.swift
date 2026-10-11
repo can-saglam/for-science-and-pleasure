@@ -107,11 +107,21 @@ struct CaptureDrawer<Actions: View>: View {
                 }
                 .accessibilityHidden(true)
                 .overlay(alignment: .bottomLeading) {
-                    heading
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 6)
+                    if !typeSize.isAccessibilitySize {
+                        heading
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 6)
+                    }
                 }
                 .transition(.opacity)
+                // At accessibility sizes the title can outgrow the melt and
+                // climb under the close button, so it moves below the picture.
+                if typeSize.isAccessibilitySize {
+                    heading
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
+                        .padding(.bottom, 6)
+                }
             } else {
                 // Clears the floating close button, like the detail
                 // drawer's header under its toolbar.
@@ -212,13 +222,13 @@ struct CaptureDrawer<Actions: View>: View {
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
             : AnyLayout(HStackLayout(spacing: 8))
-        if draft.timeLabel != nil || draft.category != nil {
+        if draft.headerTimeLabel != nil || draft.category != nil {
             layout {
-                if let label = draft.timeLabel {
+                if let label = draft.headerTimeLabel {
                     Text(label)
-                        .foregroundStyle(draft.timeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
+                        .foregroundStyle(draft.headerTimeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
                 }
-                if !stacked && draft.timeLabel != nil && draft.category != nil {
+                if !stacked && draft.headerTimeLabel != nil && draft.category != nil {
                     Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
                 if let category = draft.category {

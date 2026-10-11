@@ -17,8 +17,15 @@ struct DetailActionCluster: View {
 
     private var link: URL? { item.url.flatMap(URL.init(string:)) }
 
+    private var directions: URL? { item.isPlace ? item.directionsURL : nil }
+
+    /// A place's side slot is Directions; Calendar joins it only for a
+    /// plan. An event that's over has nothing left to put in a calendar.
     private var showsCalendar: Bool {
-        (item.startsOn != nil || item.upcomingPlan != nil) && (!item.isDone || done)
+        guard !item.isDone || done else { return false }
+        if item.upcomingPlan != nil { return true }
+        if directions != nil { return false }
+        return item.startsOn != nil && item.timeBucket != .past
     }
 
     /// Anything to show at all.
@@ -29,14 +36,25 @@ struct DetailActionCluster: View {
     }
 
     var body: some View {
+        // Directions, Calendar, the link and the main button can outgrow a
+        // small phone at large text; Directions gives way first.
+        ViewThatFits(in: .horizontal) {
+            actions(showingDirections: true)
+            actions(showingDirections: false)
+        }
+        .animation(reduceMotion ? nil : .snappy, value: calendarAdded)
+    }
+
+    private func actions(showingDirections: Bool) -> some View {
         FloatingActions {
             if item.isDone && !done {
                 if let link { FloatingCircleButton("Open link", systemImage: "safari") { openURL(link) } }
                 FloatingMainButton("Put back", systemImage: "arrow.uturn.backward", action: putBack)
             } else {
-                if item.isPlace, let maps = item.directionsURL {
-                    FloatingCircleButton("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(maps) }
-                } else if showsCalendar {
+                if showingDirections || !showsCalendar || link == nil, let directions {
+                    FloatingCircleButton("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(directions) }
+                }
+                if showsCalendar {
                     FloatingCircleButton(
                         calendarAdded ? "In calendar" : "Add to calendar",
                         systemImage: calendarAdded ? "checkmark" : "calendar.badge.plus",
@@ -44,7 +62,9 @@ struct DetailActionCluster: View {
                     )
                     .contentTransition(.symbolEffect(.replace))
                 }
-                if let link { FloatingCircleButton("Open link", systemImage: "safari") { openURL(link) } }
+                if let link {
+                    FloatingCircleButton("Open link", systemImage: "safari") { openURL(link) }
+                }
                 if item.canMarkDone || done {
                     FloatingMainButton(
                         done ? "Done" : (item.isMissed ? Voice.didGoAfterAll : Voice.didGoBang),
@@ -55,6 +75,5 @@ struct DetailActionCluster: View {
                 }
             }
         }
-        .animation(reduceMotion ? nil : .snappy, value: calendarAdded)
     }
 }
