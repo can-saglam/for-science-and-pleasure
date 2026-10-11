@@ -430,7 +430,7 @@ struct SettingsView: View {
                     SettingsRow(title: "Live Activity")
                 }
                 .disabled(!activitiesAllowed)
-                .tint(themes.current.ink.opacity(0.85))
+                .tint(AppBackground.toggleTint)
                 .sensoryFeedback(.selection, trigger: liveActivities)
                 .onChange(of: liveActivities) { _, on in
                     Task { await LiveDay.set(on) }

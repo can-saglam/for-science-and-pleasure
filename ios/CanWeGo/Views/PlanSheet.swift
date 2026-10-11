@@ -356,8 +356,6 @@ struct PlanSheet: View {
 
     private var today: String { DayString.today() }
 
-    private var pageDays: [String] { pages[page].days }
-
     /// From the page with the first day that can be picked to the last.
     private var pageRange: ClosedRange<Int> {
         let first = Self.index(of: max(today, range?.lowerBound ?? today), in: pages)
@@ -367,10 +365,6 @@ struct PlanSheet: View {
     private var range: ClosedRange<String>? { item.plannableDays }
 
     private func pickable(_ day: String) -> Bool { range?.contains(day) ?? false }
-
-    private var showsClosedLegend: Bool {
-        pageDays.contains { pickable($0) && !showingDays.contains($0) && ranges($0)?.isEmpty == true }
-    }
 
     private var showingDays: Set<String> { Set(showings.map(\.date)) }
 
@@ -625,7 +619,7 @@ struct PlanSheet: View {
                         .environment(\.timeZone, DayString.timeZone)
                 }
             }
-            .tint(AppBackground.accent)
+            .tint(AppBackground.toggleTint)
             .padding(12)
             .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
         }
@@ -704,18 +698,6 @@ struct PlanSheet: View {
         .tint(AppBackground.ink)
     }
 
-    /// What the closed dot means. Showing dots explain themselves: picking
-    /// one lists its times.
-    private var legend: some View {
-        HStack(spacing: 5) {
-            Circle().fill(AppBackground.warning).frame(width: 4, height: 4)
-            Text("Usually closed")
-        }
-        .font(.caption)
-        .foregroundStyle(AppBackground.secondaryInk)
-        .accessibilityHidden(true)
-    }
-
     // MARK: - Days
 
     /// "October 2026  ‹ ›" over the weekdays and the page's days. Swipes
@@ -755,13 +737,6 @@ struct PlanSheet: View {
                 .transition(.push(from: forward ? .trailing : .leading))
             }
             .clipped()
-
-            if showsClosedLegend {
-                legend
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 6)
-                    .padding(.top, 2)
-            }
         }
         .contentShape(.rect)
         .simultaneousGesture(

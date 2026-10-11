@@ -412,6 +412,11 @@ enum AppBackground {
     /// Control accent for the current theme.
     static var accent: Color { theme.accent }
 
+    /// A switch's track when on. The knob is always white, so the dark
+    /// themes' pale accents (white itself on ink) would swallow it: they
+    /// sink the accent halfway into the page, keeping its hue.
+    static var toggleTint: Color { theme.isLight ? ink : accent.mix(with: base, by: 0.45) }
+
     /// Logo and primary marks — cream on midnight and forest, dark on the papers, white elsewhere.
     static var ink: Color { theme.ink }
 
