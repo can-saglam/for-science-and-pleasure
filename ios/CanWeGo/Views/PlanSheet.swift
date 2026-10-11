@@ -374,8 +374,6 @@ struct PlanSheet: View {
 
     private var showingDays: Set<String> { Set(showings.map(\.date)) }
 
-    private var showsShowingLegend: Bool { pageDays.contains { pickable($0) && showingDays.contains($0) } }
-
     private var clock: String { DayString.time(time) }
 
     private var venueName: String {
@@ -706,22 +704,16 @@ struct PlanSheet: View {
         .tint(AppBackground.ink)
     }
 
-    /// What the page's dots mean, when it has any.
+    /// What the closed dot means. Showing dots explain themselves: picking
+    /// one lists its times.
     private var legend: some View {
-        HStack(spacing: 12) {
-            if showsShowingLegend { legendDot(AppBackground.ink, "Showing") }
-            if showsClosedLegend { legendDot(AppBackground.warning, "Usually closed") }
+        HStack(spacing: 5) {
+            Circle().fill(AppBackground.warning).frame(width: 4, height: 4)
+            Text("Usually closed")
         }
         .font(.caption)
         .foregroundStyle(AppBackground.secondaryInk)
         .accessibilityHidden(true)
-    }
-
-    private func legendDot(_ color: Color, _ text: String) -> some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 4, height: 4)
-            Text(text)
-        }
     }
 
     // MARK: - Days
@@ -764,7 +756,7 @@ struct PlanSheet: View {
             }
             .clipped()
 
-            if showsShowingLegend || showsClosedLegend {
+            if showsClosedLegend {
                 legend
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 6)
