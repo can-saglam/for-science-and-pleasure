@@ -1529,15 +1529,9 @@ struct OnboardingView: View {
                         if locating {
                             ProgressView().controlSize(.small)
                         } else {
-                            Button {
-                                Haptics.tap()
+                            CitySearchButton(enabled: !cityDraft.trimmingCharacters(in: .whitespaces).isEmpty) {
                                 Task { await lookupCity() }
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.body.weight(.semibold))
                             }
-                            .disabled(cityDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .accessibilityLabel("Look up")
                         }
                     }
                     .padding(.horizontal, 18)

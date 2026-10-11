@@ -1,6 +1,38 @@
 import MapKit
 import SwiftUI
 
+/// The city field's lookup button, lit like the composer's send once
+/// there's a name to look up: a bare glyph didn't read as the next step.
+struct CitySearchButton: View {
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
+            Text("Search")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .foregroundStyle(enabled ? AppBackground.onProminent : AppBackground.ink.opacity(0.45))
+                .background(Capsule().fill(enabled ? Color.white.opacity(0.92) : AppBackground.wash(0.16)))
+                .overlay(
+                    Capsule().strokeBorder(
+                        AppBackground.ink.opacity(enabled && AppBackground.theme.isLight ? 0.22 : 0),
+                        lineWidth: 1)
+                )
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        // Taller than the text beside it; the field keeps its height.
+        .padding(.vertical, -5)
+        .animation(.snappy, value: enabled)
+    }
+}
+
 /// Set or change the group's home city from Settings. Same lookup as
 /// onboarding, so skipping the city there isn't a dead end.
 struct HomeCitySheet: View {
@@ -44,16 +76,9 @@ struct HomeCitySheet: View {
                         if looking || saving {
                             ProgressView().controlSize(.small)
                         } else {
-                            Button {
-                                Haptics.tap()
+                            CitySearchButton(enabled: !query.trimmingCharacters(in: .whitespaces).isEmpty) {
                                 Task { await lookup() }
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(AppBackground.ink)
                             }
-                            .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
-                            .accessibilityLabel("Look up")
                         }
                     }
                     .padding(.horizontal, 18)

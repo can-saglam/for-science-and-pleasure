@@ -117,7 +117,7 @@ struct ShowingsLine: View {
     var choose: ((Showing) -> Void)? = nil
 
     /// Past this many, a list of showings is too long to scan: the details
-    /// give a count and the plan sheet opens on its grid.
+    /// give a count and the plan sheet opens on its calendar.
     static let chipLimit = 6
 
     var body: some View {
@@ -178,12 +178,12 @@ struct ShowingsLine: View {
     }
 }
 
-/// Picks the day, and maybe the time, the group means to go: the next two
-/// weeks as a grid (days outside the event's run can't be picked; days the
-/// venue is usually closed are marked but can), a calendar for later, and
-/// an optional time. A save with a few showings opens on those instead,
-/// the grid one tap away; in the grid, showing days are marked and picking
-/// one offers its times. Says when it'll be on the Lock Screen, and warns
+/// Picks the day, and maybe the time, the group means to go: a calendar a
+/// month to a page, from this week (days outside the event's run can't be
+/// picked; days the venue is usually closed are marked but can), and an
+/// optional time. A save with a few showings opens on those instead, the
+/// calendar one tap away; in it, showing days are marked and picking one
+/// offers its times. Says when it'll be on the Lock Screen, and warns
 /// when the time falls outside the venue's hours. Everything is on the
 /// home clock, like reminders.
 struct PlanSheet: View {
@@ -194,23 +194,28 @@ struct PlanSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var day: String?
     @State private var timed: Bool
     @State private var time: Date
-    @State private var later: Bool
+    /// The calendar page showing, and which way it last turned.
+    @State private var page: Int
+    @State private var forward = true
     @State private var hours: OpeningHours?
     /// The time put forward for them; nil once they've picked their own.
     @State private var suggested: String?
-    /// Half height for the grid; the calendar for a later date needs the rest.
+    /// Half height for the showings list; the calendar needs the rest.
     @State private var detent: PresentationDetent
-    /// The showings list in place of the grid.
+    /// The showings list in place of the calendar.
     @State private var listing: Bool
     /// They want a time of their own on a showing day, not one of its times.
     @State private var ownTime: Bool
 
     private let showings: [Showing]
+    private let pages: [DayPage]
 
-    private static let gridDays = 14
+    /// A first day this close is picked for them; further off, they choose.
+    private static let soonDays = 14
     private static let defaultTime = "14:00"
 
     /// `showing`: the one they tapped in the details, picked from the start.
@@ -229,18 +234,72 @@ struct PlanSheet: View {
             && (chosen != nil || planned == nil || plannedIsShowing)
         _listing = State(initialValue: listing)
         _ownTime = State(initialValue: chosen == nil && !plannedShowings.isEmpty && !plannedIsShowing)
-        let first = showing?.date ?? item.plannableDays?.lowerBound ?? today
-        let grid = DayString.addingDays(Self.gridDays - 1, to: today) ?? today
-        let day = showing?.date ?? planned ?? (first <= grid ? first : nil)
+        let first = max(today, showing?.date ?? item.plannableDays?.lowerBound ?? today)
+        let soon = DayString.addingDays(Self.soonDays - 1, to: today) ?? today
+        let day = showing?.date ?? planned ?? (first <= soon ? first : nil)
         _day = State(initialValue: day)
+        let pages = Self.pages(from: today, through: item.plannableDays?.upperBound ?? today)
+        self.pages = pages
+        _page = State(initialValue: Self.index(of: day ?? first, in: pages))
         let own = showing != nil ? showing?.time : planned != nil ? item.planTime : nil
         _timed = State(initialValue: own != nil)
         let clock = own ?? Self.suggestedTime(day: day, ranges: nil)
         _time = State(initialValue: DayString.instant(day: today, time: clock) ?? .now)
         _suggested = State(initialValue: own == nil ? clock : nil)
-        let later = (day ?? first) > grid
-        _later = State(initialValue: later)
-        _detent = State(initialValue: later && !listing ? .large : .medium)
+        _detent = State(initialValue: listing ? .medium : .large)
+    }
+
+    /// Whole weeks from `start` to `end`, and what to call them.
+    struct DayPage: Equatable {
+        let start: String
+        let end: String
+        let title: String
+
+        var days: [String] {
+            let count = (DayString.daysBetween(start, end) ?? 0) + 1
+            return (0..<count).compactMap { DayString.addingDays($0, to: start) }
+        }
+    }
+
+    /// The calendar's pages through `last`. The first starts this week, so
+    /// it never opens on a month of days gone, and runs to the month's end
+    /// but at least two weeks; each after is the next month, in whole
+    /// weeks, none shown twice.
+    static func pages(from today: String, through last: String) -> [DayPage] {
+        let firstWeekday = Locale.current.calendar.firstWeekday
+        func weekStart(_ d: String) -> String {
+            guard let n = DayString.dayNumber(d) else { return d }
+            let weekday = ((n + 4) % 7 + 7) % 7 + 1 // 1970-01-01 was a Thursday
+            return DayString.addingDays(-((weekday - firstWeekday + 7) % 7), to: d) ?? d
+        }
+        func monthEnd(_ d: String) -> String {
+            let y = Int(d.prefix(4)) ?? 1970, m = Int(d.dropFirst(5).prefix(2)) ?? 1
+            let next = m == 12 ? String(format: "%04d-01-01", y + 1) : String(format: "%04d-%02d-01", y, m + 1)
+            return DayString.addingDays(-1, to: next) ?? d
+        }
+        func month(_ d: String, year: Bool = true) -> String {
+            DayString.text(d, year ? .dateTime.month(.wide).year() : .dateTime.month(.wide)) ?? d
+        }
+
+        let soon = DayString.addingDays(soonDays - 1, to: today) ?? today
+        var lastDay = max(monthEnd(today), soon)
+        var title = soon.prefix(7) == today.prefix(7) ? month(today)
+            : "\(month(today, year: soon.prefix(4) != today.prefix(4))) – \(month(soon))"
+        var start = weekStart(today)
+        var pages: [DayPage] = []
+        repeat {
+            let end = DayString.addingDays(6, to: weekStart(lastDay)) ?? lastDay
+            pages.append(DayPage(start: start, end: end, title: title))
+            start = DayString.addingDays(1, to: end) ?? end
+            let anchor = DayString.addingDays(6, to: start) ?? start
+            lastDay = monthEnd(anchor)
+            title = month(anchor)
+        } while start <= last && pages.count < 60
+        return pages
+    }
+
+    static func index(of day: String, in pages: [DayPage]) -> Int {
+        pages.firstIndex { day <= $0.end } ?? max(0, pages.count - 1)
     }
 
     /// The listed showings that can still be planned: in the run, and not
@@ -297,27 +356,25 @@ struct PlanSheet: View {
 
     private var today: String { DayString.today() }
 
-    private var gridDays: [String] {
-        (0..<Self.gridDays).compactMap { DayString.addingDays($0, to: today) }
+    private var pageDays: [String] { pages[page].days }
+
+    /// From the page with the first day that can be picked to the last.
+    private var pageRange: ClosedRange<Int> {
+        let first = Self.index(of: max(today, range?.lowerBound ?? today), in: pages)
+        return min(first, page)...(pages.count - 1)
     }
 
     private var range: ClosedRange<String>? { item.plannableDays }
 
     private func pickable(_ day: String) -> Bool { range?.contains(day) ?? false }
 
-    /// Some plannable day lies past the grid.
-    private var offersLater: Bool {
-        guard let range, let lastInGrid = gridDays.last else { return false }
-        return range.upperBound > lastInGrid
-    }
-
     private var showsClosedLegend: Bool {
-        gridDays.contains { pickable($0) && !showingDays.contains($0) && ranges($0)?.isEmpty == true }
+        pageDays.contains { pickable($0) && !showingDays.contains($0) && ranges($0)?.isEmpty == true }
     }
 
     private var showingDays: Set<String> { Set(showings.map(\.date)) }
 
-    private var showsShowingLegend: Bool { gridDays.contains(where: showingDays.contains) }
+    private var showsShowingLegend: Bool { pageDays.contains { pickable($0) && showingDays.contains($0) } }
 
     private var clock: String { DayString.time(time) }
 
@@ -349,17 +406,19 @@ struct PlanSheet: View {
                     if listing {
                         showingsList
                     } else {
-                        if later {
-                            laterPicker
-                        } else {
-                            grid
-                            if offersLater || canList || showsClosedLegend || showsShowingLegend {
-                                gridFooter
-                            }
-                        }
+                        // The answer first, then the ways to change it.
+                        dayLine(day)
 
-                        if let day {
-                            dayLine(day)
+                        calendar
+                            .padding(8)
+                            .background(AppBackground.wash(0.035), in: .rect(cornerRadius: 18, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .strokeBorder(AppBackground.ink.opacity(0.08), lineWidth: 1)
+                            )
+
+                        if canList {
+                            showingsLink
                         }
 
                         timeSection
@@ -418,9 +477,6 @@ struct PlanSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
         .onAppear { if typeSize.isAccessibilitySize { detent = .large } }
-        .onChange(of: later) { _, later in
-            if later { detent = .large }
-        }
         .onChange(of: day) { _, day in
             resuggest()
             settle(on: day)
@@ -434,7 +490,7 @@ struct PlanSheet: View {
 
     // MARK: - Showings
 
-    /// Few enough to list instead of the grid.
+    /// Few enough to list instead of the calendar.
     private var canList: Bool { !showings.isEmpty && showings.count <= ShowingsLine.chipLimit }
 
     private func showings(on day: String) -> [Showing] { showings.filter { $0.date == day } }
@@ -458,9 +514,9 @@ struct PlanSheet: View {
                 Haptics.tap()
                 withAnimation(.snappy) {
                     listing = false
-                    later = day.map { !gridDays.contains($0) } ?? false
+                    if let day { page = Self.index(of: day, in: pages) }
                 }
-                if later { detent = .large }
+                detent = .large
             } label: {
                 Label("Another day", systemImage: "calendar")
                     .font(.subheadline)
@@ -516,7 +572,7 @@ struct PlanSheet: View {
         ].compactMap(\.self).joined(separator: ", ")
     }
 
-    /// A day picked in the grid that has showings starts on its first one,
+    /// A day picked in the calendar that has showings starts on its first one,
     /// so what's highlighted is what gets saved.
     private func settle(on day: String?) {
         ownTime = false
@@ -542,7 +598,7 @@ struct PlanSheet: View {
             } else {
                 timed = false
             }
-            if !listing, !gridDays.contains(showing.date) { later = true }
+            show(showing.date)
         }
     }
 
@@ -632,54 +688,33 @@ struct PlanSheet: View {
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 
-    /// The links out of the grid, and what its dots mean.
-    private var gridFooter: some View {
-        let links = HStack(spacing: 18) {
-            if canList {
-                Button {
-                    Haptics.tap()
-                    withAnimation(.snappy) {
-                        listing = true
-                        if !showings.contains(where: isChosen),
-                           let back = showings.first(where: { $0.date == day }) ?? showings.first {
-                            choose(back)
-                        }
-                    }
-                } label: {
-                    Label("Showings", systemImage: "list.bullet")
+    /// Back to the showings list from the calendar.
+    private var showingsLink: some View {
+        Button {
+            Haptics.tap()
+            withAnimation(.snappy) {
+                listing = true
+                if !showings.contains(where: isChosen),
+                   let back = showings.first(where: { $0.date == day }) ?? showings.first {
+                    choose(back)
                 }
             }
-            if offersLater {
-                Button {
-                    Haptics.tap()
-                    withAnimation(.snappy) { later = true }
-                } label: {
-                    Label("A later date", systemImage: "calendar")
-                }
-            }
+        } label: {
+            Label("Showings", systemImage: "list.bullet")
         }
         .font(.subheadline)
         .tint(AppBackground.ink)
+    }
 
-        let legend = HStack(spacing: 12) {
+    /// What the page's dots mean, when it has any.
+    private var legend: some View {
+        HStack(spacing: 12) {
             if showsShowingLegend { legendDot(AppBackground.ink, "Showing") }
             if showsClosedLegend { legendDot(AppBackground.warning, "Usually closed") }
         }
         .font(.caption)
         .foregroundStyle(AppBackground.secondaryInk)
         .accessibilityHidden(true)
-
-        return ViewThatFits(in: .horizontal) {
-            HStack {
-                links
-                Spacer(minLength: 12)
-                legend
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                links
-                legend
-            }
-        }
     }
 
     private func legendDot(_ color: Color, _ text: String) -> some View {
@@ -691,15 +726,96 @@ struct PlanSheet: View {
 
     // MARK: - Days
 
-    private var grid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
-            ForEach(gridDays, id: \.self) { d in
-                dayCell(d)
+    /// "October 2026  ‹ ›" over the weekdays and the page's days. Swipes
+    /// turn the page too.
+    private var calendar: some View {
+        let current = pages[page]
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+        return VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                Text(current.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink)
+                    .contentTransition(.opacity)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                turnButton(-1)
+                turnButton(1)
+            }
+            .padding(.leading, 6)
+
+            LazyVGrid(columns: columns, spacing: 6) {
+                ForEach(current.days.prefix(7), id: \.self) { d in
+                    Text(DayString.text(d, .dateTime.weekday(.abbreviated)) ?? "")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(AppBackground.secondaryInk)
+                        .lineLimit(1)
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                }
+            }
+            .accessibilityHidden(true)
+
+            ZStack(alignment: .top) {
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(current.days, id: \.self) { dayCell($0) }
+                }
+                .id(page)
+                .transition(.push(from: forward ? .trailing : .leading))
+            }
+            .clipped()
+
+            if showsShowingLegend || showsClosedLegend {
+                legend
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 6)
+                    .padding(.top, 2)
             }
         }
+        .contentShape(.rect)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24).onEnded { drag in
+                // Toward the leading edge is forward, whichever way the
+                // language reads.
+                let dx = drag.translation.width * (layoutDirection == .rightToLeft ? -1 : 1)
+                guard abs(dx) > 50, abs(dx) > abs(drag.translation.height) * 1.5 else { return }
+                turn(dx < 0 ? 1 : -1)
+            }
+        )
+    }
+
+    private func turnButton(_ by: Int) -> some View {
+        let enabled = pageRange.contains(page + by)
+        return Button {
+            turn(by)
+        } label: {
+            Image(systemName: by < 0 ? "chevron.backward" : "chevron.forward")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(AppBackground.ink.opacity(enabled ? 1 : 0.25))
+                .frame(width: 44, height: 36)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(by < 0 ? "Previous month" : "Next month")
+    }
+
+    private func turn(_ by: Int) {
+        guard pageRange.contains(page + by) else { return }
+        Haptics.selection()
+        forward = by > 0
+        withAnimation(.snappy) { page += by }
+    }
+
+    /// Turns to the page with `d` on it.
+    private func show(_ d: String) {
+        let target = Self.index(of: d, in: pages)
+        guard target != page else { return }
+        forward = target > page
+        page = target
     }
 
     private func dayCell(_ d: String) -> some View {
+        let past = d < today
         let open = pickable(d)
         let selected = d == day
         let shows = open && showingDays.contains(d)
@@ -713,26 +829,32 @@ struct PlanSheet: View {
             withAnimation(.snappy) { day = d }
         } label: {
             VStack(spacing: 2) {
-                Text(DayString.text(d, .dateTime.weekday(.abbreviated)) ?? "")
+                // Where a new month starts, its name; elsewhere the same
+                // space, so every row lines up.
+                Text(d.hasSuffix("-01") ? DayString.text(d, .dateTime.month(.abbreviated)) ?? "" : " ")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(selected ? AppBackground.base.opacity(0.8) : AppBackground.secondaryInk)
                 Text(DayString.text(d, .dateTime.day()) ?? "")
                     .font(.body.weight(selected ? .semibold : .regular))
                     .monospacedDigit()
-                    .strikethrough(!open)
-                    .foregroundStyle(selected ? AppBackground.base : open ? AppBackground.ink : AppBackground.secondaryInk.opacity(0.5))
+                    .strikethrough(!open && !past)
+                    .foregroundStyle(
+                        selected ? AppBackground.base
+                            : open ? AppBackground.ink
+                            : AppBackground.secondaryInk.opacity(past ? 0.35 : 0.5)
+                    )
                 Circle()
                     .fill(dot)
                     .frame(width: 4, height: 4)
             }
             // Seven to a row: past this size the date breaks over two lines
-            // and the weekday clips.
+            // and the month clips.
             .lineLimit(1)
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? AppBackground.ink : AppBackground.wash(open ? 0.06 : 0.02))
+                    .fill(selected ? AppBackground.ink : past ? .clear : AppBackground.wash(open ? 0.06 : 0.02))
             }
             .overlay {
                 if d == today && !selected {
@@ -747,53 +869,32 @@ struct PlanSheet: View {
         .accessibilityLabel(
             (d == today ? "Today, " : "") + (DayString.text(d, .dateTime.weekday(.wide).day().month(.wide)) ?? d)
         )
-        .accessibilityValue(shows ? "Showing" : closed && open ? "Usually closed" : open ? "" : "Not on")
+        .accessibilityValue(shows ? "Showing" : closed && open ? "Usually closed" : open || past ? "" : "Not on")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHidden(past)
     }
 
-    private var laterPicker: some View {
-        let lower = range.flatMap { DayString.date($0.lowerBound) } ?? .now
-        let upper = range.flatMap { DayString.date($0.upperBound) } ?? lower
-        return VStack(alignment: .leading, spacing: 8) {
-            DatePicker(
-                "Day",
-                selection: Binding(
-                    get: { day.flatMap(DayString.date) ?? lower },
-                    set: { day = DayString.dayAndTime($0).day }
-                ),
-                in: lower...max(lower, upper),
-                displayedComponents: .date
-            )
-            .datePickerStyle(.graphical)
-            .environment(\.timeZone, DayString.timeZone)
-            .tint(AppBackground.ink)
-
-            Button {
-                Haptics.tap()
-                withAnimation(.snappy) {
-                    later = false
-                    if let d = day, !gridDays.contains(d) { day = gridDays.first(where: pickable) }
-                }
-            } label: {
-                Label("The next two weeks", systemImage: "square.grid.3x2")
-                    .font(.subheadline)
-            }
-            .tint(AppBackground.ink)
-        }
-    }
-
-    /// "Tuesday 6 October · Open 10:00–18:00".
-    private func dayLine(_ d: String) -> some View {
-        let name = DayString.text(d, .dateTime.weekday(.wide).day().month(.wide)) ?? d
+    /// "Tuesday 6 October" over "Open 10:00–18:00"; a prompt until a day
+    /// is picked, so the picker below doesn't move when one is.
+    private func dayLine(_ d: String?) -> some View {
+        let name = d.map { DayString.text($0, .dateTime.weekday(.wide).day().month(.wide)) ?? $0 }
         var open = ""
-        if let hours, let r = hours.ranges(on: d) {
+        if let d, let hours, let r = hours.ranges(on: d) {
             let exact = hours.knowsExactly(d)
-            open = r.isEmpty ? (exact ? "Closed" : "Usually closed") : OpeningHours.rangesText(r)
+            open = r.isEmpty ? (exact ? "Closed" : "Usually closed") : "Open \(OpeningHours.rangesText(r))"
         }
-        let title = Text(name).font(.body.weight(.semibold)).foregroundStyle(AppBackground.ink)
-        let detail = Text(open.isEmpty ? "" : "  ·  \(open)").font(.subheadline).foregroundStyle(AppBackground.secondaryInk)
-        return Text("\(title)\(detail)")
-            .contentTransition(.opacity)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(name ?? "Pick a day")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(name == nil ? AppBackground.secondaryInk : AppBackground.ink)
+            if !open.isEmpty {
+                Text(open)
+                    .font(.subheadline)
+                    .foregroundStyle(AppBackground.secondaryInk)
+            }
+        }
+        .contentTransition(.opacity)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - What it means
