@@ -8,7 +8,7 @@ import UIKit
 
 /// Detail sheet — a soft wash of the item's color at the top, quiet
 /// metadata, the map, and its actions floating in glass, bottom right.
-/// A pencil in the toolbar flips the whole sheet into an edit form.
+/// Edit, in the toolbar's More menu, flips the whole sheet into an edit form.
 struct ItemDetailView: View {
     @Bindable var item: Item
     @Environment(\.dismiss) private var dismiss
@@ -118,23 +118,17 @@ struct ItemDetailView: View {
             #endif
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Haptics.tap()
-                        if editing {
+                if editing {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            Haptics.tap()
                             applyEdits()
-                        } else {
-                            scratch = editableCopy()
-                        }
-                        withAnimation(.snappy) { editing.toggle() }
-                    } label: {
-                        if editing {
+                            withAnimation(.snappy) { editing = false }
+                        } label: {
                             Text("Done").font(.subheadline.weight(.semibold))
-                        } else {
-                            Image(systemName: "pencil")
                         }
+                        .accessibilityLabel("Finish editing")
                     }
-                    .accessibilityLabel(editing ? "Finish editing" : "Edit")
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     if editing {
@@ -149,8 +143,16 @@ struct ItemDetailView: View {
                         }
                         .accessibilityLabel("Cancel editing")
                     } else {
-                        // The same actions the long-press menu offers.
+                        // Edit, then the same actions the long-press menu offers.
                         Menu {
+                            Button {
+                                Haptics.tap()
+                                scratch = editableCopy()
+                                withAnimation(.snappy) { editing = true }
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            Divider()
                             ShareMenuItems(item: item) {
                                 Task { shareCard = await ShareCard.render(item) }
                             }

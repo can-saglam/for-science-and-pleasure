@@ -60,41 +60,31 @@ struct DayActivityWidget: Widget {
         } dynamicIsland: { context in
             let look = DayLook(context.attributes)
             return DynamicIsland {
+                // The label and today's hours flank the camera; the save
+                // itself sits below as a small copy of its list card.
                 DynamicIslandExpandedRegion(.leading) {
-                    Thumb(look: look, side: 52, corner: 12)
-                        .padding(.leading, 2)
-                        .padding(.top, 2)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
                     Text(context.state.label)
-                        .font(.caption.weight(.semibold))
+                        .font(.footnote.weight(.semibold))
                         .foregroundStyle(look.islandAccent)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .padding(.trailing, 4)
+                        .minimumScaleFactor(0.75)
+                        .padding(.leading, 12)
                         .padding(.top, 4)
                 }
-                DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(context.attributes.title)
-                            .font(.custom("PPNeueGstaad-CondensedRegular", size: 22, relativeTo: .headline))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-                        if let place = context.attributes.place {
-                            Text(place)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.65))
-                                .lineLimit(1)
-                        }
-                        if let hours = context.state.hours {
-                            Text(hours)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(DayLook.isClosedLine(hours) ? look.islandAccent : .white.opacity(0.65))
-                                .lineLimit(1)
-                        }
+                DynamicIslandExpandedRegion(.trailing) {
+                    if let hours = context.state.hours {
+                        Text(hours)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(DayLook.isClosedLine(hours) ? look.islandAccent : .white.opacity(0.6))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.trailing, 10)
+                            .padding(.top, 5)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    IslandCard(look: look, title: context.attributes.title, place: context.attributes.place)
+                        .padding(.top, 6)
                 }
             } compactLeading: {
                 Thumb(look: look, side: 24, corner: 6)
@@ -108,6 +98,7 @@ struct DayActivityWidget: Widget {
             } minimal: {
                 Thumb(look: look, side: 24, corner: 12)
             }
+            .contentMargins(.all, 8, for: .expanded)
             .widgetURL(look.link)
             .keylineTint(look.islandAccent)
         }
@@ -139,8 +130,19 @@ struct DayLook {
 
     var ink: Color { theme.ink }
 
-    /// The Dynamic Island is always black: the save's colour, lifted.
-    var islandAccent: Color { accent.mix(with: .white, by: 0.4) }
+    /// The Dynamic Island is always black: the save's colour, lifted, and
+    /// lifted further the darker it starts, so a near-black save's label
+    /// still reads.
+    var islandAccent: Color {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+        UIColor(accent).getRed(&r, green: &g, blue: &b, alpha: nil)
+        return accent.mix(with: .white, by: max(0.4, 0.75 - (r + g + b) / 3))
+    }
+
+    /// The island's card, whatever the app theme: the save's colour folded
+    /// into a dark grey, so even a near-black colour stands off the black
+    /// frame around it.
+    var islandCard: Color { Color(red: 0.11, green: 0.11, blue: 0.118).mix(with: accent, by: 0.4) }
 
     var glyph: String { attributes.kind == "place" ? "mappin.and.ellipse" : "ticket.fill" }
 
@@ -365,6 +367,40 @@ private struct Melt: View {
         .frame(width: 150)
         .frame(maxHeight: .infinity)
         .clipped()
+    }
+}
+
+/// The expanded island's save: the list card in small, title and place on
+/// the save's colour with the photo melting in from the right.
+private struct IslandCard: View {
+    let look: DayLook
+    let title: String
+    let place: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.custom("PPNeueGstaad-CondensedRegular", size: 24, relativeTo: .title3))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+            if let place {
+                Text(place)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
+        .padding(.trailing, look.photo == nil ? 0 : 84)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .trailing) {
+            if let photo = look.photo {
+                Melt(photo: photo, card: look.islandCard, ink: .white, isLight: false)
+            }
+        }
+        .background(look.islandCard)
+        .clipShape(.rect(cornerRadius: 32, style: .continuous))
     }
 }
 

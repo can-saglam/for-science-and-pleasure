@@ -1871,7 +1871,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 18) {
             if !savedPicks.isEmpty {
                 headline(savedPicks.count == 1 ? "There it is." : "There they are.")
-                lede("Real saves. Everything you add lands in the library looking like this. The details fill in as we read each page.")
+                lede("Everything you add lands in the library looking like this. The details fill in as we read each page.")
                 let shown = Array(savedPicks.prefix(3))
                 // First pick in front: the fan runs back to front.
                 cardFan(shown.reversed(), seats: Self.joinedSeats(shown.count), dealt: savedDealt, key: 200, width: 320,
@@ -2238,10 +2238,17 @@ struct OnboardingView: View {
     }
 
     /// A reminder is about a date: their first dated event, the one that
-    /// runs for a while first, or the plan's save when it's Salman Toor.
+    /// runs for a while first. Places can't be reminded, so with none,
+    /// an event on in their city from the suggestions; Salman Toor only
+    /// when there are none of those either.
     private var remindExample: ShowcaseSave {
         let events = firstSaves.filter { $0.isEvent && ($0.endsOn ?? $0.startsOn) != nil }
-        let pick = events.first { $0.endsOn != nil && $0.endsOn != $0.startsOn } ?? events.first
+        if let pick = events.first(where: { $0.endsOn != nil && $0.endsOn != $0.startsOn }) ?? events.first {
+            return ShowcaseSave(pick)
+        }
+        let today = DayString.today()
+        let local = suggestions.events.filter { ($0.endsOn ?? $0.startsOn).map { $0 >= today } ?? false }
+        let pick = local.first { $0.endsOn != nil && $0.endsOn != $0.startsOn } ?? local.first
         return pick.map(ShowcaseSave.init) ?? .toor
     }
 
@@ -2547,7 +2554,8 @@ struct OnboardingView: View {
 }
 
 /// A save as the notifications page shows it: one of theirs from the step
-/// before, or Salman Toor at the Courtauld (photo bundled, hours known).
+/// before, an event on in their city, or Salman Toor at the Courtauld
+/// (photo bundled, hours known).
 private struct ShowcaseSave {
     var title: String
     var place: String?
@@ -2586,18 +2594,25 @@ private struct ShowcaseSave {
             photoURL: item.imageUrl.flatMap(URL.init(string:)),
             colorHex: item.colorHex
         )
-        reminder = Self.reminder(for: item)
+        reminder = Self.reminder(startsOn: item.startsOn, endsOn: item.endsOn)
+    }
+
+    /// One of the city's events they were offered; only the notification
+    /// shows it, which needs no photo.
+    init(_ pick: ParseClient.Suggestion) {
+        self.init(title: pick.title, place: pick.venue, colorHex: nil)
+        reminder = Self.reminder(startsOn: pick.startsOn, endsOn: pick.endsOn)
     }
 
     /// A week ahead, or sooner when it's sooner. A run that hasn't started
     /// is reminded of its opening, one that has of its closing; a one-day
     /// event of the day.
-    private static func reminder(for item: Item) -> String {
+    private static func reminder(startsOn: String?, endsOn: String?) -> String {
         let today = DayString.dayNumber(DayString.today()) ?? 0
         let days = { (day: String?) in day.flatMap(DayString.dayNumber).map { $0 - today } }
-        let runs = item.endsOn != nil && item.endsOn != item.startsOn
-        let opens = days(item.startsOn).map { $0 > 0 } ?? false
-        guard let left = runs && !opens ? days(item.endsOn) : days(item.startsOn ?? item.endsOn) else {
+        let runs = endsOn != nil && endsOn != startsOn
+        let opens = days(startsOn).map { $0 > 0 } ?? false
+        guard let left = runs && !opens ? days(endsOn) : days(startsOn ?? endsOn) else {
             return "Closes in a week"
         }
         let when = left >= 7 ? "in a week" : left >= 3 ? "in 3 days" : left >= 1 ? "tomorrow" : "today"
