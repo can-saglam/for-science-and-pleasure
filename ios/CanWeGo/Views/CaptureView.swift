@@ -54,6 +54,9 @@ struct CaptureView: View {
     /// each parse, not per render: the card's check runs on every keystroke.
     @State private var library: [Item] = []
     @State private var suggestions = Suggestions.shared
+    /// The chips wait for the sheet and keyboard to settle: laid out
+    /// mid-rise, they're squeezed thin and then jump into place.
+    @State private var picksShown = false
     /// A tapped recommendation's name, venue and dates, shown in the
     /// drawer while the parser reads its page.
     @State private var pickedLook: Item?
@@ -84,7 +87,7 @@ struct CaptureView: View {
     /// Stay while typing (a tap reads the pick, not the field); an
     /// attached picture is the thing.
     private var recommendations: [ParseClient.Suggestion] {
-        guard imageJPEG == nil, !offlineMode, let home else { return [] }
+        guard picksShown, imageJPEG == nil, !offlineMode, let home else { return [] }
         return suggestions.mixed(for: home, excluding: library)
     }
 
@@ -197,7 +200,12 @@ struct CaptureView: View {
         }
         .onAppear {
             loadLibrary()
-            if let home { suggestions.load(for: home) }            // A picture from Visual Intelligence is read straight away.
+            if let home { suggestions.load(for: home) }
+            Task {
+                try? await Task.sleep(for: .seconds(reduceMotion ? 0.3 : 0.9))
+                picksShown = true
+            }
+            // A picture from Visual Intelligence is read straight away.
             if imageJPEG == nil, draft == nil, let picture = CaptureGate.take() {
                 imageJPEG = picture
                 startParse()
@@ -313,11 +321,12 @@ struct CaptureView: View {
         Recommendations(
             city: home?.locality,
             picks: recommendations,
-            loading: suggestions.loading && imageJPEG == nil && !offlineMode,
+            loading: picksShown && suggestions.loading && imageJPEG == nil && !offlineMode,
             onPick: pick
         )
         .padding(.top, 6)
-        .animation(.easeInOut(duration: 0.3), value: recommendations)
+        .animation(.easeOut(duration: 0.45), value: recommendations)
+        .animation(.easeOut(duration: 0.3), value: picksShown)
     }
 
     /// The shared composer (also the first-run's save page), docked on

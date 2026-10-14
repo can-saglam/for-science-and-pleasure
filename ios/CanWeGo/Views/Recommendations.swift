@@ -13,8 +13,16 @@ struct Recommendations: View {
     /// The ticked picks' ids, when chips tick instead of opening.
     var ticked: Set<String>? = nil
     let onPick: (ParseClient.Suggestion) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// One spot for the wait and the chips, so the chips don't land below
+    /// the outgoing line and jump up.
     var body: some View {
+        ZStack(alignment: .topLeading) { content }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let city, !picks.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Or try one of these")
@@ -33,7 +41,7 @@ struct Recommendations: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .transition(.opacity)
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 10)))
         } else if loading, let city {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
