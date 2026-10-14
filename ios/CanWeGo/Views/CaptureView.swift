@@ -28,6 +28,7 @@ struct CaptureView: View {
     @State private var manual = false
     @State private var saved = false
     @State private var confirmDiscard = false
+    @State private var confirmClose = false
     /// Set when Save meets a full category or a full day: the card stays,
     /// Plus is offered.
     @State private var paywall: PlusReason?
@@ -71,6 +72,14 @@ struct CaptureView: View {
     private var showsDrawer: Bool { (reading != nil || draft != nil) && !editing && !manual }
 
     private var home: HomeStore.Home? { HomeStore.shared.isSet ? HomeStore.shared.home : nil }
+
+    /// What closing would throw away: a card (a blank one once it has a
+    /// title), or a read still under way.
+    private var hasWork: Bool {
+        guard !saved else { return false }
+        if let draft { return !manual || !draft.title.trimmingCharacters(in: .whitespaces).isEmpty }
+        return busy
+    }
 
     /// Stay while typing (a tap reads the pick, not the field); an
     /// attached picture is the thing.
@@ -141,7 +150,17 @@ struct CaptureView: View {
             .sheetTitle(
                 showsDrawer || draft == nil ? nil : (manual ? "Add your own" : "Looks right?")
             ) {
-                dismiss()
+                if hasWork { confirmClose = true } else { dismiss() }
+            }
+            .confirmationDialog(
+                draft == nil ? "Stop reading this?" : "Discard this save?",
+                isPresented: $confirmClose,
+                titleVisibility: .visible
+            ) {
+                Button(draft == nil ? "Stop and close" : "Discard", role: .destructive) { dismiss() }
+                Button(draft == nil ? "Keep reading" : "Keep it", role: .cancel) {}
+            } message: {
+                Text(draft == nil ? "It's still being looked up. Closing stops it." : "The card goes away. Nothing is saved.")
             }
             // The wash at the top: a faint breath of ink while the parser
             // reads, which turns into the card's own colour as it lands —
@@ -168,6 +187,9 @@ struct CaptureView: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
+        // A swipe can't ask first, so with a card or a read under way only
+        // the × closes, and it asks.
+        .interactiveDismissDisabled(hasWork)
         // Closing mid-read stops the parse and the link preview with it.
         .onDisappear {
             parseTask?.cancel()
@@ -175,8 +197,7 @@ struct CaptureView: View {
         }
         .onAppear {
             loadLibrary()
-            if let home { suggestions.load(for: home) }
-            // A picture from Visual Intelligence is read straight away.
+            if let home { suggestions.load(for: home) }            // A picture from Visual Intelligence is read straight away.
             if imageJPEG == nil, draft == nil, let picture = CaptureGate.take() {
                 imageJPEG = picture
                 startParse()
@@ -700,6 +721,17 @@ struct CaptureView: View {
     }
 
     private func commit(_ item: Item) {
+        // CWG_NO_SAVE is only set by marketing recordings: the card says
+        // "Saved" and goes, but nothing is written or announced.
+        if ProcessInfo.processInfo.environment["CWG_NO_SAVE"] != nil {
+            Haptics.success()
+            withAnimation(.easeInOut(duration: 0.25)) { saved = true }
+            Task {
+                try? await Task.sleep(for: .seconds(0.6))
+                dismiss()
+            }
+            return
+        }
         item.createdAt = .now
         item.updatedAt = .now
         item.stampAuthor()

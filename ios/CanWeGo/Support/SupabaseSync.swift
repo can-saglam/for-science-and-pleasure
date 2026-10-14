@@ -62,15 +62,17 @@ enum SupabaseSync {
 
     /// Sign-out's last chance for this account's unsynced edits: once
     /// another account signs in here, the store is replaced. A few seconds
-    /// at most, so the button never hangs on a bad connection.
-    static func flushBeforeSignOut(context: ModelContext) async {
+    /// at most, so the button never hangs on a bad connection. False when
+    /// something may not have landed, so sign-out can say so first.
+    static func flushBeforeSignOut(context: ModelContext) async -> Bool {
         let flushing = Task { await flush(context: context) }
         let limit = Task {
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: .seconds(6))
             flushing.cancel()
         }
-        _ = await flushing.value
+        let landed = await flushing.value
         limit.cancel()
+        return landed
     }
 
     /// Runs a sync that replaces the library whatever the ownership record
@@ -627,6 +629,16 @@ enum SupabaseSync {
     /// A brand-new save: put it on the server right away, then ask
     /// notify-save to ping the other member's devices (never our own).
     static func announceSave(_ item: Item) async {
+        await announce(item, topic: "save")
+    }
+
+    /// Same for a day just planned: the row goes up first, so the server
+    /// reads the new day and who set it.
+    static func announcePlan(_ item: Item) async {
+        await announce(item, topic: "plan")
+    }
+
+    private static func announce(_ item: Item, topic: String) async {
         guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
         // Undone before the request left: don't put it back.
         if item.isDeleted { return }
@@ -646,6 +658,7 @@ enum SupabaseSync {
             request.httpMethod = "POST"
             request.httpBody = try JSONSerialization.data(withJSONObject: [
                 "item_id": id.uuidString.lowercased(),
+                "topic": topic,
             ])
             _ = try await URLSession.shared.data(for: request)
         } catch {

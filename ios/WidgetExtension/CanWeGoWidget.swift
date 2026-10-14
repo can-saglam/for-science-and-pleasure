@@ -2,8 +2,9 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// The home-screen widget: one saved event at a time, photo-first, rotating
-/// through the library hour by hour. Tapping it opens that event in the app.
+/// The home-screen widget: one save at a time, photo-first. What's up next
+/// (the Lock Screen's pick: a plan, a last day) leads; otherwise it rotates
+/// through the library hour by hour. Tapping it opens that save in the app.
 @main
 struct CanWeGoWidgets: WidgetBundle {
     var body: some Widget {
@@ -21,7 +22,7 @@ struct RandomSaveWidget: Widget {
             RandomSaveView(entry: entry)
         }
         .configurationDisplayName("Can We Go?")
-        .description("A save from your list, rotating through the day.")
+        .description("What's up next, or a save from your list, rotating through the day.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -197,11 +198,8 @@ struct Provider: TimelineProvider {
         let all = Snapshot.load()
         let theme = ThemeSnapshot.load()
         guard !all.isEmpty else { return SaveEntry(date: date, item: nil, photo: nil, theme: theme) }
-        // Seeded by the hour so every size of the widget shows the same
-        // pick, scrambled so consecutive hours jump around the list.
-        let hour = Int(date.timeIntervalSince1970 / 3600)
-        let index = (abs(hour &* 2654435761 % all.count) + Snapshot.skip) % all.count
-        let item = all[index]
+        let order = Self.order(all, at: date)
+        let item = order[Snapshot.skip % order.count]
         // Decode at the widget's real pixel size: displaySize is in points,
         // and current iPhones are 3x displays.
         let side = max(context.displaySize.width, context.displaySize.height) * 3
@@ -209,6 +207,22 @@ struct Provider: TimelineProvider {
             ? Snapshot.image(for: item.id, maxSide: side)?.jpegData(compressionQuality: 0.85)
             : nil
         return SaveEntry(date: date, item: item, photo: photo, theme: theme, canSkip: all.count > 1)
+    }
+
+    /// The next button's order. Up next leads, labelled the Lock Screen's
+    /// way; the rest start at a spot seeded by the hour, so every size of
+    /// the widget shows the same save and consecutive hours jump around.
+    static func order(_ all: [SnapshotItem], at date: Date) -> [SnapshotItem] {
+        let hour = Int(date.timeIntervalSince1970 / 3600)
+        let start = abs(hour &* 2654435761 % all.count)
+        var order = Array(all[start...] + all[..<start])
+        if let pick = UpNext.pick(UpNextProvider.load(), on: UpNext.day(date)),
+           let at = order.firstIndex(where: { $0.id == pick.item.id }) {
+            var lead = order.remove(at: at)
+            lead.timeLabel = pick.label
+            order.insert(lead, at: 0)
+        }
+        return order
     }
 }
 
@@ -350,7 +364,7 @@ struct RandomSaveView: View {
             Image(systemName: "sparkles")
                 .font(.title3)
                 .foregroundStyle(entry.theme.ink.opacity(0.8))
-            Text("Save an event to see it here")
+            Text("Save something to see it here")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(entry.theme.ink.opacity(0.75))
                 .multilineTextAlignment(.center)

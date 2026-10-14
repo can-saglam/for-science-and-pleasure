@@ -21,7 +21,10 @@ struct ItemDetailView: View {
     /// sheet on every keystroke — that was the intermittent typing lag.
     @State private var scratch: Item?
     @State private var calendarState: CalendarState = .idle
-    @State private var detent: PresentationDetent = .medium
+    @State private var confirmCalendarAgain = false
+    // CWG_DETENT is only set by automated screenshot runs.
+    @State private var detent: PresentationDetent =
+        ProcessInfo.processInfo.environment["CWG_DETENT"] == "large" ? .large : .medium
     @State private var fetching = false
     @State private var fetchNote: String?
     /// A rendered postcard of this save, on its way to the share sheet.
@@ -93,11 +96,21 @@ struct ItemDetailView: View {
                     DetailActionCluster(
                         item: item,
                         done: done,
-                        calendarAdded: calendarState == .added,
+                        calendarAdded: calendarState == .added || item.isInCalendar,
                         addToCalendar: addToCalendar,
                         went: confirmWent,
                         putBack: putBack
                     )
+                    .confirmationDialog(
+                        "Already in your calendar",
+                        isPresented: $confirmCalendarAgain,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Add again") { addToCalendarNow() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("It was added from this phone for these dates. Add it again if you\u{2019}ve removed it from Calendar.")
+                    }
                 }
             }
             // Without a photo, the item's color breathes at the top instead.
@@ -510,9 +523,17 @@ struct ItemDetailView: View {
         }
     }
 
-    /// The icon confirms with a check, then comes back. Deleting the event
-    /// in Calendar has to be able to add it again, so it never stays done.
+    /// Once added, the icon stays a check. A second tap asks first: the
+    /// event may have been deleted in Calendar, or this would be a twin.
     private func addToCalendar() {
+        if item.isInCalendar, calendarState != .added {
+            confirmCalendarAgain = true
+            return
+        }
+        addToCalendarNow()
+    }
+
+    private func addToCalendarNow() {
         Task {
             do {
                 try await item.addToCalendar()

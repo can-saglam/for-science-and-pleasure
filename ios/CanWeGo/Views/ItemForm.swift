@@ -24,7 +24,7 @@ struct ItemForm: View {
 
             section("The basics") {
                 field(item.isPlace ? "Name of the place" : "What\u{2019}s on", icon: "pencil.line", text: $item.title)
-                field("Category", icon: "tag", text: categoryText)
+                categoryField
             }
 
             section("Picture") {
@@ -144,12 +144,43 @@ struct ItemForm: View {
         .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
     }
 
-    /// Shown as a label ("Exhibition"), kept as the key ("exhibition").
-    private var categoryText: Binding<String> {
-        Binding(
-            get: { item.category.map(Item.categoryLabel) ?? "" },
-            set: { item.category = $0.isEmpty ? nil : Item.categoryKey($0) }
-        )
+    /// Picked from this kind's list, so a typo can't start a category of
+    /// its own. One that's off the list (typed before, or kept from the
+    /// other kind) stays offered until it's changed.
+    private var categoryField: some View {
+        let current = item.category.map { Item.categoryKey($0.trimmingCharacters(in: .whitespaces)) }
+        var keys = item.isPlace ? Item.placeCategories : Item.eventCategories
+        if let current, !current.isEmpty, !keys.contains(current) { keys.insert(current, at: 0) }
+        return Menu {
+            Picker("Category", selection: $item.category) {
+                Text("None").tag(String?.none)
+                ForEach(keys, id: \.self) { key in
+                    Label(Item.categoryLabel(key), systemImage: Item.glyph(kind: item.kind, category: key))
+                        .tag(String?.some(key))
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                fieldIcon("tag")
+                Group {
+                    if let current, !current.isEmpty {
+                        Text(Item.categoryLabel(current)).foregroundStyle(AppBackground.ink)
+                    } else {
+                        AppBackground.fieldPrompt("Category")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink.opacity(0.35))
+            }
+            .padding(12)
+            .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Category")
+        .accessibilityValue(current.map(Item.categoryLabel) ?? "None")
     }
 
     private func optional(_ source: Binding<String?>) -> Binding<String> {

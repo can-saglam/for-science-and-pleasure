@@ -504,6 +504,7 @@ struct ItemCardRow: View {
     @Environment(\.modelContext) private var context
     @State private var celebrate = 0
     @State private var paywall: PlusReason?
+    @State private var planning = false
     /// A rendered postcard of this save, on its way to the share sheet.
     @State private var shareCard: ShareCard.Rendered?
     @State private var undoBin = UndoBin.shared
@@ -545,6 +546,9 @@ struct ItemCardRow: View {
                     item.markDone()
                     UndoBin.shared.stashDone(item)
                 }
+            }
+            if canPlan {
+                Button(item.upcomingPlan == nil ? "Plan a day" : "Change plan") { planning = true }
             }
         }
         .accessibilityAction(named: "Delete") { delete() }
@@ -597,6 +601,14 @@ struct ItemCardRow: View {
                     Label(Voice.didGoBang, systemImage: "checkmark")
                 }
             }
+            if canPlan {
+                Button {
+                    Haptics.tap()
+                    planning = true
+                } label: {
+                    Label(item.upcomingPlan == nil ? "Plan a day" : "Change plan", systemImage: "calendar")
+                }
+            }
             if let maps = item.directionsURL {
                 Link(destination: maps) {
                     Label("Open in \(TransportApp.current.name)", systemImage: "map")
@@ -624,7 +636,10 @@ struct ItemCardRow: View {
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }
+        .sheet(isPresented: $planning) { PlanSheet(item: item) }
     }
+
+    private var canPlan: Bool { !item.isDone && (item.canPlan || item.upcomingPlan != nil) }
 
     /// Back from the journal counts as a new save against a full category.
     private func putBack() {

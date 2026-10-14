@@ -349,6 +349,12 @@ extension Item {
         Self.glyph(kind: kind, category: category)
     }
 
+    /// The parser's vocabularies (`_shared/categories.ts`), one per kind.
+    static let eventCategories = [
+        "exhibition", "gig", "theatre", "film", "market", "festival", "talk", "workshop", "outdoors", "other",
+    ]
+    static let placeCategories = ["restaurant", "cafe", "drink", "gallery", "museum", "park", "shop", "venue", "other"]
+
     /// Chip text for a category: the stored word, capitalised, with the one
     /// accent the parser's ASCII vocabulary can't carry.
     static func categoryLabel(_ category: String) -> String {

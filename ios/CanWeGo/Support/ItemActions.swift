@@ -154,5 +154,21 @@ extension Item {
         event.notes = [summary, url].compactMap(\.self).joined(separator: "\n\n")
         event.calendar = CalendarChoice.calendar(in: store) ?? store.defaultCalendarForNewEvents
         try store.save(event, span: .thisEvent)
+        Self.calendarLog[id.uuidString] = calendarKey
+    }
+
+    /// This phone already put it in the calendar for these dates. Write-only
+    /// access can't look there, so it's remembered instead; a new plan day
+    /// or time reads as not added.
+    var isInCalendar: Bool { Self.calendarLog[id.uuidString] == calendarKey }
+
+    private var calendarKey: String {
+        let plan = upcomingPlan
+        return [plan ?? startsOn, plan == nil ? endsOn : planTime].map { $0 ?? "" }.joined(separator: "|")
+    }
+
+    private static var calendarLog: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: "calendarAdded") as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: "calendarAdded") }
     }
 }

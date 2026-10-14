@@ -943,6 +943,7 @@ struct PlanSheet: View {
     // MARK: - Saving
 
     private func finish(_ plan: (day: String, time: String?)?) {
+        let moved = plan.map { $0.day != item.planOn || $0.time != item.planTime } ?? false
         if let plan {
             item.setPlan(day: plan.day, time: plan.time)
             item.clearReminder()
@@ -954,6 +955,7 @@ struct PlanSheet: View {
         }
         item.updatedAt = .now
         try? context.save()
+        if moved { Task { [item] in await SupabaseSync.announcePlan(item) } }
         onFinish?()
         dismiss()
     }

@@ -596,14 +596,22 @@ struct ContentView: View {
 
     /// Deep link from a notification, the widget or Spotlight: present the
     /// item if it exists. It may have been deleted since — then say so,
-    /// rather than a tap that appears to do nothing.
+    /// rather than a tap that appears to do nothing. One this phone hasn't
+    /// seen yet (a partner's, just added) waits for a pull first.
     private func openItem(_ id: UUID) {
         ItemGate.pending = nil
-        guard let match = items.first(where: { $0.id == id }) else {
-            goneItem = true
+        if let match = items.first(where: { $0.id == id }) {
+            if match.isDeleted { goneItem = true } else { deepLinked = match }
             return
         }
-        deepLinked = match
+        Task {
+            await SupabaseSync.sync(context: context)
+            let deadline = Date.now.addingTimeInterval(8)
+            while SyncStatus.shared.syncing, Date.now < deadline {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            if let match = context.item(id), !match.isDeleted { deepLinked = match } else { goneItem = true }
+        }
     }
 
     /// One glass capsule per undoable act, stacked when both are live.

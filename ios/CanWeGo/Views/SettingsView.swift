@@ -5,6 +5,7 @@ import AuthenticationServices
 import EventKit
 import SwiftData
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     /// The pages one tap in from the first.
@@ -48,6 +49,8 @@ struct SettingsView: View {
     @State private var showAuth = false
     @State private var showOnboardingPreview = false
     @State private var confirmSignOut = false
+    @State private var signingOut = false
+    @State private var unsyncedOnSignOut = false
     @State private var legal: LegalPage?
     @State private var confirmDelete = false
     @State private var showDeleteConfirm = false
@@ -69,6 +72,7 @@ struct SettingsView: View {
     @State private var calendarRefused = false
     /// iOS's own Live Activities switch for this app, in the Settings app.
     @State private var activitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
+    @State private var notificationStatus: UNAuthorizationStatus?
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     #endif
@@ -158,8 +162,7 @@ struct SettingsView: View {
                    let page = Page(rawValue: raw) {
                     path = [page]
                 }
-                pending = SupabaseSync.pendingCount(context: context)
-            }
+                pending = SupabaseSync.pendingCount(context: context)            }
             .onChange(of: syncStatus.syncing) { _, now in
                 if !now { pending = SupabaseSync.pendingCount(context: context) }
             }
@@ -170,6 +173,7 @@ struct SettingsView: View {
                 guard phase == .active else { return }
                 refreshCalendars()
                 activitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
+                Task { await refreshNotificationStatus() }
             }
             .alert("Choose a calendar in Settings", isPresented: $calendarRefused) {
                 Button("Open Settings") {
@@ -423,6 +427,11 @@ struct SettingsView: View {
 
             #if !APP_EXTENSION
             Section {
+                notificationsRow
+            }
+            .listRowBackground(Self.rowBackground)
+
+            Section {
                 Toggle(isOn: Binding(
                     get: { liveActivities && activitiesAllowed },
                     set: { liveActivities = $0 }
@@ -467,6 +476,48 @@ struct SettingsView: View {
         }
         .settingsPage("Preferences")
     }
+
+    #if !APP_EXTENSION
+    /// Never asked: the tap asks. Otherwise it opens this app's page in
+    /// iPhone Settings, the only place the answer can change.
+    private var notificationsRow: some View {
+        Button {
+            Haptics.tap()
+            if notificationStatus == .notDetermined {
+                Task {
+                    await PushRegistrar.requestNow()
+                    await refreshNotificationStatus()
+                }
+            } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                openURL(url)
+            }
+        } label: {
+            HStack {
+                SettingsRow(title: "Notifications", subtitle: notificationSummary)
+                Spacer()
+                Image(systemName: notificationStatus == .notDetermined ? "bell.badge" : "arrow.up.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink.opacity(0.45))
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .task { await refreshNotificationStatus() }
+    }
+
+    private var notificationSummary: String? {
+        switch notificationStatus {
+        case .authorized, .provisional, .ephemeral: "On: reminders, plans and what your group adds"
+        case .denied: "Off. Turn them on in iPhone Settings."
+        case .notDetermined: "Off. Tap to turn on."
+        default: nil
+        }
+    }
+
+    private func refreshNotificationStatus() async {
+        notificationStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+    #endif
 
     @ViewBuilder private var accountPage: some View {
         List {
@@ -548,28 +599,35 @@ struct SettingsView: View {
                         Haptics.tap()
                         confirmSignOut = true
                     } label: {
-                        SettingsRow(title: "Sign out", destructive: true)
+                        HStack {
+                            SettingsRow(title: "Sign out", destructive: true)
+                            Spacer()
+                            if signingOut { ProgressView() }
+                        }
                     }
-                    .disabled(deleteBusy)
+                    .disabled(deleteBusy || signingOut)
                     .confirmationDialog(
                         "Sign out?",
                         isPresented: $confirmSignOut,
                         titleVisibility: .visible
                     ) {
                         Button("Sign out", role: .destructive) {
-                            // RootGate resets the cursor and group card on
-                            // any sign-out, this one included. Dismiss so
-                            // the sign-in screen isn't trapped under this
-                            // sheet.
                             Task {
-                                await SupabaseSync.flushBeforeSignOut(context: context)
-                                SupabaseAuth.shared.signOut()
-                                dismiss()
+                                signingOut = true
+                                let landed = await SupabaseSync.flushBeforeSignOut(context: context)
+                                signingOut = false
+                                if landed { signOut() } else { unsyncedOnSignOut = true }
                             }
                         }
                         Button("Cancel", role: .cancel) {}
                     } message: {
                         Text("Your saves stay on this phone. You can sign back in any time.")
+                    }
+                    .alert("Some changes haven\u{2019}t synced", isPresented: $unsyncedOnSignOut) {
+                        Button("Stay signed in", role: .cancel) {}
+                        Button("Sign out anyway", role: .destructive) { signOut() }
+                    } message: {
+                        Text("They\u{2019}ll sync when you sign back in. If a different account signs in on this phone first, they\u{2019}ll be lost.")
                     }
                     Button(role: .destructive) {
                         Haptics.tap()
@@ -712,6 +770,14 @@ struct SettingsView: View {
             return "Your group keeps the library. Export first if you want your own copy."
         }
         return "This deletes your library too. Export first if you want a copy."
+    }
+
+    /// RootGate resets the cursor and group card on any sign-out, this one
+    /// included. Dismiss so the sign-in screen isn't trapped under this
+    /// sheet.
+    private func signOut() {
+        SupabaseAuth.shared.signOut()
+        dismiss()
     }
 
     private func deleteAccount() async {

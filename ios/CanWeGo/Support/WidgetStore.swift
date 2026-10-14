@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 import WidgetKit
 
-/// Feeds the home-screen widget: a JSON snapshot of the active events plus
+/// Feeds the home-screen widget: a JSON snapshot of the active saves plus
 /// pre-shrunk photos, parked in the App Group container. Rewritten on every
 /// foreground — the widget never touches the live store, it just reads
 /// whatever the app last left for it.
@@ -64,8 +64,8 @@ enum WidgetStore {
     }
 
     static func sync(items: [Item]) {
-        // The widget shows things you could still go to.
-        let active = items.filter { $0.isEvent && !$0.isDeleted && !$0.isDone && !$0.isMissed }
+        // The widget shows things you could still go to, places included.
+        let active = items.filter { !$0.isDeleted && !$0.isDone && !$0.isMissed }
         let entries = active.map { item in
             (
                 entry: Entry(
@@ -76,7 +76,10 @@ enum WidgetStore {
                         .filter { $0 != item.title }
                         .joined(separator: " · ")
                         .nilIfEmpty,
-                    timeLabel: item.timeLabel,
+                    // A place has no run to count down; its kind stands in.
+                    timeLabel: item.isPlace
+                        ? item.category.flatMap { $0 == "other" ? nil : Item.categoryLabel($0) }
+                        : item.timeLabel,
                     colorHex: item.colorHex,
                     hasImage: item.imageUrl != nil
                 ),
