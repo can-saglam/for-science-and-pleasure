@@ -1,6 +1,7 @@
 // What a test case expects, what a run produced, and how the two compare.
 
 import type { EarlyCard, Page } from "../../supabase/functions/_shared/extract.ts";
+import { cost } from "./prices.ts";
 
 export interface Case {
   id: string;
@@ -119,6 +120,9 @@ export interface Summary {
   gate?: { pass: number; of: number };
   /** Totals across the run, where the parser reported them. */
   usage?: { input_tokens: number; output_tokens: number; searches: number };
+  /** Dollars per 1,000 saves at list price, over the runs whose model is in
+   * prices.ts. */
+  per_1000?: number;
 }
 
 function pct(list: number[], p: number): number {
@@ -146,10 +150,14 @@ export function summarise(label: string, outcomes: Outcome[]): Summary {
   }
   const early = outcomes.map((o) => o.early_ms).filter((ms): ms is number => ms !== null);
   const sum = (key: string) => outcomes.reduce((n, o) => n + (Number(o.meta?.[key]) || 0), 0);
+  const costs = outcomes
+    .map((o) => typeof o.meta?.model === "string" ? cost(o.meta.model, o.meta as Parameters<typeof cost>[1]) : null)
+    .filter((c): c is number => c !== null);
   return {
     usage: outcomes.some((o) => o.meta?.model)
       ? { input_tokens: sum("input_tokens"), output_tokens: sum("output_tokens"), searches: sum("searches") }
       : undefined,
+    per_1000: costs.length ? (costs.reduce((a, b) => a + b, 0) / costs.length) * 1000 : undefined,
     label,
     at: new Date().toISOString(),
     cases: outcomes.length,

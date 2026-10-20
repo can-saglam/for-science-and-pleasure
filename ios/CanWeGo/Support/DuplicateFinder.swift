@@ -31,10 +31,20 @@ enum DuplicateFinder {
         }
     }
 
+    /// Letters and digits of any script, so a title in Japanese still has
+    /// a key.
     static func normalizeTitle(_ raw: String) -> String {
-        raw.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
-            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+        fold(raw)
+            .replacingOccurrences(of: #"[^\p{L}\p{N}]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Case, accents and width set aside: "Kadıköy", "KADIKÖY" and
+    /// "kadikoy" are one. Turkish's dotless ı has no accent to drop, so it
+    /// is mapped by hand.
+    static func fold(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "ı", with: "i")
+            .folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
     }
 
     /// "Joyce saved this 2 weeks ago." — who, when, and whether it has since

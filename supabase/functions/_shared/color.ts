@@ -362,7 +362,7 @@ export async function heroImageFromUrl(pageUrl: string): Promise<string | null> 
 /// had no picture. Wikipedia's summary endpoint is free and has decent
 /// coverage for museums, festivals and well-known rooms — not for a
 /// neighbourhood restaurant. Callers must only try a specific name.
-const WIKI_UA = "CanWeGo/1.0 (https://canwego.app; thumbnail fallback)";
+const WIKI_UA = "CanWeGo/1.0 (https://wegocan.com; thumbnail fallback)";
 
 export function wikipediaQueries(card: { title?: string | null; venue?: string | null }): string[] {
   const out: string[] = [];

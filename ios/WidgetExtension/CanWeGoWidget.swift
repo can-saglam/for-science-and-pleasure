@@ -181,7 +181,7 @@ struct Provider: TimelineProvider {
         // A fresh random save every hour, four hours ahead; then WidgetKit
         // asks again. The app also reloads the timeline whenever it writes
         // a fresh snapshot.
-        let calendar = Calendar.current
+        let calendar = UpNext.calendar
         let top = calendar.date(
             from: calendar.dateComponents([.year, .month, .day, .hour], from: .now)
         ) ?? .now

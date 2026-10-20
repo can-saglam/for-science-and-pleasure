@@ -95,7 +95,13 @@ private struct RootGate: View {
         }
         // An invite link. Parked for whichever screen can use it: the
         // first-run's code page (a new install), or the Join sheet.
+        // A save link likewise, for the library to open once it's up.
         .onOpenURL { url in
+            if let token = SaveLink.token(from: url) {
+                ShareGate.pendingToken = token
+                NotificationCenter.default.post(name: .cwgSharedSave, object: token)
+                return
+            }
             guard let code = JoinGate.code(from: url) else { return }
             JoinGate.pendingCode = code
             NotificationCenter.default.post(name: .cwgJoinCode, object: code)

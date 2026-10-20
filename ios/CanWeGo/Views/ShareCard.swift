@@ -3,27 +3,27 @@ import SwiftUI
 import UIKit
 
 /// The share actions, the same in the details' menu and a card's
-/// long-press: the link to send (the page, or a map without one), the link
-/// copied, and the postcard.
+/// long-press: the save sent as a link that opens it ready to save, the
+/// page's own link copied (or a map without one), and the postcard.
 struct ShareMenuItems: View {
     let item: Item
+    let send: () -> Void
     let postcard: () -> Void
 
     var body: some View {
+        Button {
+            Haptics.tap()
+            send()
+        } label: {
+            Label("Send to a friend", systemImage: "paperplane")
+        }
         if let url = item.shareURL {
             let page = item.sharesPage
-            ShareLink(item: url, message: Text(item.shareMessage)) {
-                Label(page ? "Share link" : "Share map link", systemImage: page ? "link" : "map")
-            }
             Button {
                 Haptics.success()
                 UIPasteboard.general.url = url
             } label: {
                 Label(page ? "Copy link" : "Copy map link", systemImage: "doc.on.doc")
-            }
-        } else {
-            ShareLink(item: item.shareMessage) {
-                Label("Share details", systemImage: "text.alignleft")
             }
         }
         Button {
@@ -151,14 +151,21 @@ struct ShareCard: View {
             .joined(separator: " · ")
     }
 
-    /// The finished picture and what travels with it, wrapped so a sheet
-    /// can be driven by it.
+    /// What goes to the share sheet, wrapped so a sheet can be driven by it.
     struct Rendered: Identifiable {
         let id = UUID()
-        let image: UIImage
-        /// The picture, then the words and the link, so a chat gets
-        /// something to tap; apps that only take a picture keep the picture.
+        /// For the postcard: the picture, then the words and the link, so a
+        /// chat gets something to tap; apps that only take a picture keep
+        /// the picture.
         let items: [Any]
+    }
+
+    /// The save as a link that opens it, here or on the web. Without a
+    /// connection to make one, the page's own link (or a map) goes instead.
+    @MainActor
+    static func sending(_ item: Item) async -> Rendered {
+        let link = (try? await SaveLink.url(for: item)) ?? item.shareURL
+        return Rendered(items: [item.shareMessage] + (link.map { [$0] } ?? []))
     }
 
     /// Fetches the full-size photo (never the card thumbnail — it would
@@ -176,7 +183,7 @@ struct ShareCard: View {
         renderer.scale = 2
         renderer.isOpaque = false
         guard let image = renderer.uiImage else { return nil }
-        return Rendered(image: image, items: [image, item.shareMessage] + (link.map { [$0] } ?? []))
+        return Rendered(items: [image, item.shareMessage] + (link.map { [$0] } ?? []))
     }
 
     /// One pixel per module; drawn without smoothing, it stays crisp at any size.

@@ -8,12 +8,20 @@ enum ItemGate {
 }
 
 /// A picture sent from Visual Intelligence, or a suggestion's link, to be
-/// looked up and saved, parked until the composer opens and takes it.
+/// looked up and saved, or a card someone sent, parked until the composer
+/// opens and takes it.
 /// `pendingOpen` is the Control Center button: the composer, empty.
 enum CaptureGate {
     static var pendingImage: Data?
     static var pendingLink: String?
     static var pendingOpen = false
+    /// A save someone sent: its card, ready to save as it is.
+    static var pendingCard: ParseClient.Card?
+
+    static func takeCard() -> ParseClient.Card? {
+        defer { pendingCard = nil }
+        return pendingCard
+    }
 
     static func take() -> Data? {
         defer { pendingImage = nil }
@@ -32,20 +40,34 @@ enum SearchGate {
     static var pending: (kind: String, text: String)?
 }
 
-/// An invite link (`canwego://join/KV7P2M`, or `https://canwego.app/join/…`
-/// once the domain exists) names a code to join with. Parked here until
-/// whichever screen can act on it is up: the first-run's code page for a
-/// new install, the Join sheet for someone already in.
+/// The app's own links: `canwego://<section>/…` or
+/// `https://wegocan.com/<section>/…`.
+enum OwnLink {
+    static let domain = "wegocan.com"
+
+    /// The part after `/<section>/`, or nil if the URL is something else.
+    static func value(in url: URL, section: String) -> String? {
+        let isOurs = url.scheme == "canwego" && url.host() == section
+        let host = url.host()?.lowercased()
+        let isWeb = ["https", "http"].contains(url.scheme ?? "")
+            && (host == domain || host == "www.\(domain)")
+            && url.pathComponents.dropFirst().first == section
+        guard isOurs || isWeb else { return nil }
+        let value = url.lastPathComponent
+        return value == section || value == "/" ? nil : value
+    }
+}
+
+/// An invite link (`canwego://join/KV7P2M` or `https://wegocan.com/join/…`)
+/// names a code to join with. Parked here until whichever screen can act
+/// on it is up: the first-run's code page for a new install, the Join sheet
+/// for someone already in.
 enum JoinGate {
     static var pendingCode: String?
 
     /// The code in an invite URL, or nil if the URL is something else.
     static func code(from url: URL) -> String? {
-        let isOurs = url.scheme == "canwego" && url.host() == "join"
-        let isWeb = ["https", "http"].contains(url.scheme ?? "")
-            && url.host()?.hasSuffix("canwego.app") == true
-            && url.pathComponents.dropFirst().first == "join"
-        guard isOurs || isWeb else { return nil }
+        guard OwnLink.value(in: url, section: "join") != nil else { return nil }
         let raw = url.lastPathComponent
         let code = raw.uppercased().filter { $0.isLetter || $0.isNumber }
         return code.count == 6 ? code : nil

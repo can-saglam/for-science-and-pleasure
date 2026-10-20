@@ -47,7 +47,7 @@ struct UpNextProvider: TimelineProvider {
     /// on a day. The app reloads the timeline whenever it writes.
     func getTimeline(in context: Context, completion: @escaping (Timeline<UpNextEntry>) -> Void) {
         let items = Self.load()
-        let calendar = Calendar.current
+        let calendar = UpNext.calendar
         var entries = [entry(at: .now, from: items)]
         var day = calendar.startOfDay(for: .now)
         for _ in 0..<3 {
@@ -71,25 +71,46 @@ struct UpNextProvider: TimelineProvider {
 }
 
 enum UpNext {
-    private static let format: DateFormatter = {
+    /// The library's home clock, as the app leaves it in the App Group:
+    /// days turn over at home's midnight, as in the app, wherever the
+    /// phone is. The phone's own clock until a home is known.
+    static var calendar: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = homeZone
+        return c
+    }
+
+    private static var homeZone: TimeZone {
+        struct Home: Decodable { let timezone: String }
+        guard let data = UserDefaults(suiteName: Snapshot.groupID)?.data(forKey: "groupHome"),
+              let home = try? JSONDecoder().decode(Home.self, from: data)
+        else { return .current }
+        return TimeZone(identifier: home.timezone) ?? .current
+    }
+
+    private static var format: DateFormatter {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = homeZone
         return f
-    }()
+    }
 
     static func day(_ date: Date) -> String { format.string(from: date) }
 
     static func date(_ day: String) -> Date? { format.date(from: day) }
 
     private static func days(from: String, to: String) -> Int? {
+        let format = format
         guard let a = format.date(from: from), let b = format.date(from: to) else { return nil }
-        return Calendar.current.dateComponents([.day], from: a, to: b).day
+        return calendar.dateComponents([.day], from: a, to: b).day
     }
 
     private static func weekday(_ day: String) -> String {
         guard let date = format.date(from: day) else { return day }
-        return date.formatted(.dateTime.weekday(.abbreviated))
+        var style = Date.FormatStyle.dateTime.weekday(.abbreviated)
+        style.timeZone = homeZone
+        return date.formatted(style)
     }
 
     /// Within a week, soonest first; nothing further out earns the spot.
@@ -125,7 +146,7 @@ enum UpNext {
 
     private static func nextDay(_ day: String) -> String? {
         guard let date = format.date(from: day),
-              let next = Calendar.current.date(byAdding: .day, value: 1, to: date)
+              let next = calendar.date(byAdding: .day, value: 1, to: date)
         else { return nil }
         return format.string(from: next)
     }

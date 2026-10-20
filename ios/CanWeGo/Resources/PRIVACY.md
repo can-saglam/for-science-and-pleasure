@@ -21,6 +21,8 @@ We do not sell this. We do not run ads. We do not track you across other apps.
 
 People in your group. If you leave a shared group, their copies stay; yours come with you only when the leave flow says so. If you are the last member and you delete the account, that group’s library is removed.
 
+Send to a friend makes a link to a copy of one card: its title, place, dates, photo and link, never your notes, plans or reminders. Anyone with the link can see that copy, on the web or in the app. Sending the same save again updates the copy. Deleting your account removes the copies you sent.
+
 ## Photos and links
 
 A screenshot or link you share or paste is sent to our parse function so we can turn it into a card for you to confirm. That happens as soon as you share into the app while signed in; signed out, nothing is sent. Nothing is kept until you tap Save.
@@ -40,4 +42,4 @@ Settings → Delete account exports your library first, then removes your login.
 
 ## Contact
 
-Email [hello@canwego.app](mailto:hello@canwego.app).
+Email [hello@wegocan.com](mailto:hello@wegocan.com).

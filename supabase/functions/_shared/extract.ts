@@ -1,4 +1,4 @@
-import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
+import { type Answer, ask } from "./models.ts";
 import { EVENT_CATEGORIES, normaliseCategory, PLACE_CATEGORIES } from "./categories.ts";
 import {
   colorFromImageBytes,
@@ -116,34 +116,26 @@ export interface ParseRun {
 /// (a name, unsure, an error) goes on to the full lookup.
 export async function looksLikeSearch(text: string): Promise<boolean> {
   try {
-    const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY"), maxRetries: 0, timeout: 8_000 });
-    const response = await anthropic.messages.create({
+    const answer = await ask({
       model: Deno.env.get("PARSE_GATE_MODEL") ?? "claude-haiku-5-5",
       max_tokens: 64,
-      output_config: {
-        format: {
-          type: "json_schema",
-          schema: {
-            type: "object",
-            properties: { search: { type: "boolean" } },
-            required: ["search"],
-            additionalProperties: false,
-          },
-        },
+      retries: 0,
+      signal: AbortSignal.timeout(8_000),
+      schema: {
+        type: "object",
+        properties: { search: { type: "boolean" } },
+        required: ["search"],
+        additionalProperties: false,
       },
-      messages: [{
-        role: "user",
-        content: [
-          "Someone typed this into an app that saves one event or place at a time.",
-          "Set search to true only if it clearly names no particular venue, show, exhibition, restaurant, event, artist or performer: a category, a list, a question or a search ('good brunch spots near me', 'rooftop bars with a view', 'gigs this weekend').",
-          "A name of one thing, even misspelt or partial ('the new Kapoor show at the Hayward', 'Bao Borough', 'that ramen place in Soho called Koya'), is not a search. If unsure, set search to false.",
-          `Input:\n${text.slice(0, 500)}`,
-        ].join("\n\n"),
-      }],
+      text: [
+        "Someone typed this into an app that saves one event or place at a time.",
+        "Set search to true only if it clearly names no particular venue, show, exhibition, restaurant, event, artist or performer: a category, a list, a question or a search ('good brunch spots near me', 'rooftop bars with a view', 'gigs this weekend').",
+        "A name of one thing, even misspelt or partial ('the new Kapoor show at the Hayward', 'Bao Borough', 'that ramen place in Soho called Koya'), is not a search. If unsure, set search to false.",
+        `Input:\n${text.slice(0, 500)}`,
+      ].join("\n\n"),
     });
-    const block = response.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") return false;
-    return (JSON.parse(block.text) as { search?: boolean }).search === true;
+    if (!answer.text) return false;
+    return (JSON.parse(answer.text) as { search?: boolean }).search === true;
   } catch {
     return false;
   }
@@ -708,9 +700,6 @@ export async function extractCard(
     page_unread: boolean;
   }
 > {
-  // One retry, for an overloaded or failed call. The phone retries only
-  // when nothing came back at all, so a slow parse is never paid twice.
-  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY"), maxRetries: 1 });
   const started = Date.now();
   const left = () => (run.deadline ?? Infinity) - Date.now();
   /// A lookup the card can do without: given the time left before the
@@ -847,94 +836,63 @@ export async function extractCard(
     );
   }
 
-  const content: Anthropic.ContentBlockParam[] = [];
-  if (input.image_base64) {
-    content.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: (input.image_media_type ?? "image/jpeg") as "image/jpeg",
-        data: input.image_base64,
-      },
-    });
-  } else if (cover) {
-    content.push({
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: cover.mediaType as "image/jpeg",
-        data: cover.base64,
-      },
-    });
-  }
-  content.push({ type: "text", text: parts.join("\n\n") });
+  const image = input.image_base64
+    ? { media_type: input.image_media_type ?? "image/jpeg", data: input.image_base64 }
+    : cover
+    ? { media_type: cover.mediaType, data: cover.base64 }
+    : null;
 
   run.route = input.image_base64 ? "image" : post ? "social" : mapsLink ? "maps" : pageText ? "page" : "search";
-  // Sonnet whenever search is on: opus + web search is slower and, on the
-  // test set (scripts/parse-eval), no better. Plain page reads stay on
-  // opus — no search rounds, so they're quick. The environment overrides
-  // are for trying others against the test set.
+  // Sonnet on every route: on the test set (scripts/parse-eval) opus reads
+  // pages no better at twice the price and a slower first answer, and with
+  // web search it is slower still. The environment overrides are for
+  // trying others against the test set.
   run.model = useWebSearch
     ? Deno.env.get("PARSE_SEARCH_MODEL") ?? "claude-sonnet-5-5"
-    : Deno.env.get("PARSE_READ_MODEL") ?? "claude-opus-5-5";
+    : Deno.env.get("PARSE_READ_MODEL") ?? "claude-sonnet-5-5";
   const modelStarted = Date.now();
   run.read_ms = modelStarted - started;
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content }];
-  const ask = async () => {
-    // Whatever is left past the model call goes to the lookups after it,
-    // which can each be skipped; the call itself can't.
-    const room = left() - 6_000;
-    if (room < 5_000) throw new OutOfTimeError();
-    try {
-      const reply = await anthropic.messages.create({
-        model: run.model!,
-        max_tokens: 8192,
-        system,
-        output_config: { format: { type: "json_schema", schema: cardSchema(home) } },
-        ...(useWebSearch
-          ? {
-              tools: [
-                { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 },
-              ],
-            }
-          : {}),
-        messages,
-      }, room === Infinity ? {} : { signal: AbortSignal.timeout(room) });
-      run.input_tokens = (run.input_tokens ?? 0) + (reply.usage?.input_tokens ?? 0);
-      run.output_tokens = (run.output_tokens ?? 0) + (reply.usage?.output_tokens ?? 0);
-      run.searches = (run.searches ?? 0) + (reply.usage?.server_tool_use?.web_search_requests ?? 0);
-      run.stop_reason = reply.stop_reason;
-      return reply;
-    } catch (e) {
-      if (e instanceof Anthropic.APIUserAbortError || (e as Error)?.name === "TimeoutError") {
-        throw new OutOfTimeError();
-      }
-      throw e;
-    }
-  };
-  let response = await ask();
-  // A long search turn can pause partway; carrying on finishes it.
-  if (response.stop_reason === "pause_turn") {
-    messages.push({ role: "assistant", content: response.content });
-    response = await ask();
+  // Whatever is left past the model call goes to the lookups after it,
+  // which can each be skipped; the call itself can't.
+  const room = left() - 6_000;
+  if (room < 5_000) throw new OutOfTimeError();
+  let response: Answer;
+  try {
+    // One retry, for an overloaded or failed call. The phone retries only
+    // when nothing came back at all, so a slow parse is never paid twice.
+    response = await ask({
+      model: run.model,
+      max_tokens: 8192,
+      system,
+      text: parts.join("\n\n"),
+      image,
+      search: useWebSearch,
+      schema: cardSchema(home),
+      retries: 1,
+      ...(room === Infinity ? {} : { signal: AbortSignal.timeout(room) }),
+    });
+  } catch (e) {
+    if ((e as Error)?.name === "TimeoutError") throw new OutOfTimeError();
+    throw e;
   }
+  run.input_tokens = response.input_tokens;
+  run.output_tokens = response.output_tokens;
+  run.searches = response.searches;
+  run.stop_reason = response.stop;
   const modelDone = Date.now();
   run.model_ms = modelDone - modelStarted;
 
   // Cut off, declined, or still mid-search: whatever text there is isn't
   // the card.
-  if (response.stop_reason !== "end_turn") {
-    throw new UnreadableAnswerError(response.stop_reason ?? "unknown");
+  if (!response.finished) {
+    throw new UnreadableAnswerError(response.stop);
   }
-  // With web search the model may emit commentary text between searches —
-  // the structured JSON is always the final text block.
-  const textBlock = [...response.content].reverse().find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
+  if (!response.text) {
     throw new UnreadableAnswerError("no_text");
   }
   let answer: ModelCard;
   try {
-    answer = JSON.parse(textBlock.text) as ModelCard;
+    answer = JSON.parse(response.text) as ModelCard;
   } catch {
     throw new UnreadableAnswerError("not_json");
   }
@@ -981,12 +939,9 @@ export async function extractCard(
   if (standing) sendEarly();
 
   const seen = new Set<string>();
-  for (const block of response.content) {
-    if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;
-    for (const result of block.content) {
-      const key = linkKey(result.url);
-      if (key) seen.add(key);
-    }
+  for (const source of response.sources) {
+    const key = linkKey(source);
+    if (key) seen.add(key);
   }
 
   let coords: { lat: number; lng: number } | null = pin;

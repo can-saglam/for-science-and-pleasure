@@ -2,13 +2,16 @@
 //
 //   deno run -A scripts/parse-eval/run.ts --label baseline
 //   deno run -A scripts/parse-eval/run.ts --label sonnet --only page,walled
-//   deno run -A scripts/parse-eval/run.ts --compare baseline sonnet
+//   deno run -A scripts/parse-eval/run.ts --compare baseline sonnet [more…]
 //   deno run -A scripts/parse-eval/run.ts --label haiku --gate
 //
 // PARSE_READ_MODEL, PARSE_SEARCH_MODEL and PARSE_GATE_MODEL in the
-// environment try another model on that route.
+// environment try another model on that route: Claude, OpenAI (gpt-*) or
+// Google (gemini-*), optionally with an effort (gpt-6-sol@low); see
+// _shared/models.ts. OPENAI_API_KEY and GEMINI_API_KEY come from
+// .supabase.env or data/keys.env.
 //
-// Each run calls Claude once per case (searching for most non-page cases),
+// Each run calls the model once per case (searching for most non-page cases),
 // plus the quick search check once per typed case. Results go to
 // scripts/parse-eval/data/results/<label>.json. The model doesn't answer
 // identically twice, so a gap of a check or two between runs is noise;
@@ -38,7 +41,8 @@ function line(s: Summary): string {
     (s.gate ? `  search check ${s.gate.pass}/${s.gate.of}` : "") +
     (s.usage
       ? `  tokens ${Math.round(s.usage.input_tokens / 1000)}k in / ${Math.round(s.usage.output_tokens / 1000)}k out, ${s.usage.searches} searches`
-      : "");
+      : "") +
+    (s.per_1000 === undefined ? "" : `  $${s.per_1000.toFixed(2)} per 1,000 saves`);
 }
 
 function table(summaries: Summary[]) {
@@ -63,10 +67,12 @@ function table(summaries: Summary[]) {
 
 const compare = args.indexOf("--compare");
 if (compare >= 0) {
-  const [a, b] = await Promise.all([load(args[compare + 1]), load(args[compare + 2])]);
-  console.log(line(a.summary));
-  console.log(line(b.summary));
-  table([a.summary, b.summary]);
+  const runs = await Promise.all(args.slice(compare + 1).map(load));
+  for (const r of runs) console.log(line(r.summary));
+  table(runs.map((r) => r.summary));
+  // Check by check, only between two.
+  if (runs.length !== 2) Deno.exit(0);
+  const [a, b] = runs;
   const before = new Map(a.outcomes.map((o) => [`${o.id}`, o]));
   const moved: string[] = [];
   for (const o of b.outcomes) {
@@ -100,13 +106,26 @@ if (!label) {
   console.error("Pass --label <name> to run, or --compare <a> <b>.");
   Deno.exit(1);
 }
-const env = new TextDecoder().decode(await Deno.readFile(".supabase.env"));
-const anthropicKey = env.match(/^ANTHROPIC_API_KEY=(.*)$/m)?.[1]?.trim();
-if (!anthropicKey) {
-  console.error("Missing ANTHROPIC_API_KEY in .supabase.env");
-  Deno.exit(1);
+const env = [
+  await Deno.readTextFile(".supabase.env"),
+  await Deno.readTextFile(`${DATA}/keys.env`).catch(() => ""),
+].join("\n");
+for (const name of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"]) {
+  const key = env.match(new RegExp(`^${name}=(.*)$`, "m"))?.[1]?.trim();
+  if (key) Deno.env.set(name, key);
 }
-Deno.env.set("ANTHROPIC_API_KEY", anthropicKey);
+const models = [
+  Deno.env.get("PARSE_READ_MODEL"),
+  Deno.env.get("PARSE_SEARCH_MODEL"),
+  Deno.env.get("PARSE_GATE_MODEL"),
+  "claude",
+];
+for (const [prefix, name] of [["claude", "ANTHROPIC_API_KEY"], ["gpt-", "OPENAI_API_KEY"], ["gemini-", "GEMINI_API_KEY"]]) {
+  if (models.some((m) => m?.startsWith(prefix)) && !Deno.env.get(name)) {
+    console.error(`Missing ${name} in .supabase.env or ${DATA}/keys.env`);
+    Deno.exit(1);
+  }
+}
 const { extractCard, looksLikeSearch } = await import("../../supabase/functions/_shared/extract.ts");
 
 const typed = JSON.parse(await Deno.readTextFile("scripts/parse-eval/typed.json")) as Case[];

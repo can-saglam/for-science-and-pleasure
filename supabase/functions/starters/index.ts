@@ -53,7 +53,7 @@ async function fromKnowledge(locality: string, country: string): Promise<Starter
     // No web search: a schema-only call finishes in a couple of seconds
     // and doesn't blow the edge worker's budget. Famous official sites
     // are in the model's knowledge; search was the path that came back empty.
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     max_tokens: 1024,
     output_config: { format: { type: "json_schema", schema: STARTERS_SCHEMA } },
     messages: [{

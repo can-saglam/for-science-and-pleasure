@@ -110,9 +110,10 @@ struct LibraryView: View {
             return false
         }
         if !query.isEmpty {
+            let probe = DuplicateFinder.fold(query)
             return [item.title, item.venue, item.area, item.notes, item.summary]
                 .compactMap(\.self)
-                .contains { $0.localizedCaseInsensitiveContains(query) }
+                .contains { DuplicateFinder.fold($0).contains(probe) }
         }
         return true
     }

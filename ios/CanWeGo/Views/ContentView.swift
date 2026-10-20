@@ -114,6 +114,8 @@ struct ContentView: View {
     @State private var deepLinked: Item?
     /// A notification/widget/Spotlight tap on a save that no longer exists.
     @State private var goneItem = false
+    /// A save link that led nowhere (removed, mistyped, or offline).
+    @State private var sharedMissing = false
     /// An invite code that arrived by link; presents the Join sheet.
     @State private var joinCode: String?
     /// Plans whose day has gone by: "Did you make it?"
@@ -266,7 +268,17 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cwgJoinCode)) { note in
             if let code = note.object as? String { joinCode = code }
         }
+        // A save link: its card opens in the composer, ready to save.
+        .onReceive(NotificationCenter.default.publisher(for: .cwgSharedSave)) { note in
+            if let token = note.object as? String { openShared(token) }
+        }
+        .alert("This save isn\u{2019}t here", isPresented: $sharedMissing) {
+            Button("OK") {}
+        } message: {
+            Text("The link may be incomplete, or you\u{2019}re offline. Ask whoever sent it to share it again.")
+        }
         .task {
+            if let token = ShareGate.pendingToken { openShared(token) }
             if let code = JoinGate.pendingCode { joinCode = code }
             await readVisualProbe()
         }
@@ -576,12 +588,14 @@ struct ContentView: View {
     /// picture or link opens the composer on it; a search moves to its
     /// tab, where the list opens it.
     private func takeVisualHandoff() {
-        if CaptureGate.pendingImage != nil || CaptureGate.pendingLink != nil || CaptureGate.pendingOpen {
+        if CaptureGate.pendingImage != nil || CaptureGate.pendingLink != nil || CaptureGate.pendingCard != nil
+            || CaptureGate.pendingOpen {
             CaptureGate.pendingOpen = false
             if captureOpen {
                 // A composer already open keeps what's being typed there.
                 CaptureGate.pendingImage = nil
                 CaptureGate.pendingLink = nil
+                CaptureGate.pendingCard = nil
             } else {
                 deepLinked = nil
                 captureOpen = true
@@ -591,6 +605,18 @@ struct ContentView: View {
             deepLinked = nil
             let target = search.kind == Item.Kind.place ? 1 : 0
             if tab != target { tab = target }
+        }
+    }
+
+    private func openShared(_ token: String) {
+        ShareGate.pendingToken = nil
+        Task {
+            guard let card = try? await SaveLink.card(token: token) else {
+                sharedMissing = true
+                return
+            }
+            CaptureGate.pendingCard = card
+            takeVisualHandoff()
         }
     }
 

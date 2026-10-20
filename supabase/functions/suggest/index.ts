@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
 
     const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
     const response = await anthropic.messages.create({
-      model: "claude-opus-4-8",
+      model: "claude-opus-5-5",
       max_tokens: 4096,
       output_config: { format: { type: "json_schema", schema: PLANS_SCHEMA } },
       messages: [

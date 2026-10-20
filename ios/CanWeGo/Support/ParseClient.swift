@@ -56,7 +56,7 @@ enum ParseClient {
         }
     }
 
-    private struct Secrets {
+    struct Secrets {
         let supabaseURL: URL
 
         static let shared: Secrets? = {

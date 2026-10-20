@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, busyMatters, interleave, isDue, isTicketEventPage, leaseFree, readItems, servePool, shapeSuggestions, stillOn } from "./suggestions.ts";
+import { aboutEvent, answerText, busyMatters, interleave, isDue, isTicketEventPage, leaseFree, readItems, servePool, shapeSuggestions, stillOn, triedRecently } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -179,4 +179,13 @@ Deno.test("a stuck refresh frees up after five minutes", () => {
   assert(leaseFree(null, now));
   assert(!leaseFree("2026-09-26T11:58:00Z", now));
   assert(leaseFree("2026-09-26T11:50:00Z", now));
+});
+
+Deno.test("a refresh that found nothing waits a day before the next", () => {
+  const now = new Date("2026-09-26T12:00:00Z");
+  assert(!triedRecently(null, now));
+  assert(triedRecently({ outcome: "empty", at: "2026-09-26T11:50:00Z" }, now));
+  assert(triedRecently({ outcome: "error", at: "2026-09-25T13:00:00Z" }, now));
+  assert(!triedRecently({ outcome: "empty", at: "2026-09-25T11:00:00Z" }, now));
+  assert(!triedRecently({ outcome: "kept", at: "2026-09-26T11:50:00Z" }, now));
 });

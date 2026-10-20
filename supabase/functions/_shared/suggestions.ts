@@ -59,6 +59,13 @@ export function leaseFree(refreshingSince: string | null, now = new Date()): boo
   return !refreshingSince || now.getTime() - new Date(refreshingSince).getTime() > REFRESH_LEASE_MS;
 }
 
+/// A refresh that found nothing or failed leaves the pool as overdue as it
+/// was, so without this every visit after the lease would pay for another
+/// search; one try a day is enough.
+export function triedRecently(last: { outcome: string; at: string } | null, now = new Date()): boolean {
+  return !!last && last.outcome !== "kept" && now.getTime() - new Date(last.at).getTime() < 86_400_000;
+}
+
 /// An event is on until its last day; a place always is.
 export function stillOn(s: Suggestion, today: string): boolean {
   if (s.kind === "place") return true;

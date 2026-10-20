@@ -215,6 +215,11 @@ struct CaptureView: View {
                 text = link
                 startParse()
             }
+            // A save someone sent is already a card: nothing to read.
+            if draft == nil, let card = CaptureGate.takeCard() {
+                reading = .link
+                draft = item(from: card)
+            }
             // CWG_BLANK is only set by automated screenshot runs; it jumps
             // straight to the blank-card edit stage.
             if ProcessInfo.processInfo.environment["CWG_BLANK"] != nil, draft == nil {

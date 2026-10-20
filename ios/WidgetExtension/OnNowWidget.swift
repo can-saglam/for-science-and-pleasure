@@ -31,7 +31,7 @@ struct OnNowProvider: TimelineProvider {
     /// out its own day, so one past midnight moves the labels on too.
     func getTimeline(in context: Context, completion: @escaping (Timeline<UpNextEntry>) -> Void) {
         let items = UpNextProvider.load()
-        let calendar = Calendar.current
+        let calendar = UpNext.calendar
         let top = calendar.dateInterval(of: .hour, for: .now)?.start ?? .now
         var entries = [entry(at: .now, from: items)]
         for hour in 1...6 {

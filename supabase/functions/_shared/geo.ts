@@ -10,7 +10,7 @@ import { metresBetween } from "./places.ts";
 // so addresses go to Photon, which serves the same OpenStreetMap data, and
 // bare UK postcodes to postcodes.io. Nominatim is only asked when Photon
 // itself is down.
-const GEO_UA = "CanWeGo/1.0 (https://canwego.app; geocoding)";
+const GEO_UA = "CanWeGo/1.0 (https://wegocan.com; geocoding)";
 type LatLng = { lat: number; lng: number };
 
 // Nominatim allows one request per second per app.
@@ -199,29 +199,50 @@ export async function resolveMapsLink(url: string): Promise<MapsLinkInfo | null>
     // Short links now serve a client-side interstitial instead of an HTTP
     // redirect; _imcp=1 is what that page appends to force the real redirect.
     short.searchParams.set("_imcp", "1");
-    const res = await publicFetch(short.toString(), {
-      redirect: "follow",
-      signal: AbortSignal.timeout(10_000),
-      // Without a browser UA, Google serves bot pages instead of redirecting.
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-        "Accept-Language": "en-GB,en;q=0.9",
-      },
-    });
-    res.body?.cancel();
-    let finalUrl = res.url;
-    // UK/EU egress IPs get bounced to a consent interstitial; the real maps
-    // URL (with the pin) rides along in the `continue` parameter.
-    const parsed = new URL(finalUrl);
-    if (parsed.hostname === "consent.google.com") {
-      const cont = parsed.searchParams.get("continue");
-      if (cont) finalUrl = cont;
-    }
-    return parseGoogleMapsUrl(finalUrl);
+    return await followMapsRedirects(short.toString());
   } catch {
     return null;
   }
+}
+
+/// Walks the short link's redirects by hand. The first hop already names
+/// the place; later ones can stall for seconds on Google's side, so they
+/// are only worth waiting for while the pin is still missing, and a stall
+/// keeps what was already found.
+async function followMapsRedirects(start: string): Promise<MapsLinkInfo | null> {
+  const signal = AbortSignal.timeout(10_000);
+  let best: MapsLinkInfo | null = null;
+  let current = start;
+  try {
+    for (let hop = 0; hop < 6; hop++) {
+      const res = await publicFetch(current, {
+        redirect: "manual",
+        signal: best ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : signal,
+        // Without a browser UA, Google serves bot pages instead of redirecting.
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+          "Accept-Language": "en-GB,en;q=0.9",
+        },
+      });
+      await res.body?.cancel();
+      const location = res.headers.get("location");
+      if (!location) break;
+      current = new URL(location, current).toString();
+      // UK/EU egress IPs get bounced to a consent interstitial; the real
+      // maps URL (with the pin) rides along in the `continue` parameter.
+      const parsed = new URL(current);
+      if (parsed.hostname === "consent.google.com") {
+        current = parsed.searchParams.get("continue") ?? current;
+      }
+      const info = parseGoogleMapsUrl(current);
+      if (info && (info.name || info.lat !== null)) best = info;
+      if (best?.lat != null) break;
+    }
+  } catch {
+    // Out of time or refused: what was found so far stands.
+  }
+  return best ?? parseGoogleMapsUrl(current);
 }
 
 export const corsHeaders = {

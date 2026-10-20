@@ -167,6 +167,8 @@ struct ItemDetailView: View {
                             }
                             Divider()
                             ShareMenuItems(item: item) {
+                                Task { shareCard = await ShareCard.sending(item) }
+                            } postcard: {
                                 Task { shareCard = await ShareCard.render(item) }
                             }
                             Divider()

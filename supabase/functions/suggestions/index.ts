@@ -18,6 +18,7 @@ import {
   busyMatters,
   isDue,
   leaseFree,
+  triedRecently,
   refreshEvents,
   refreshPlaces,
   servePool,
@@ -81,7 +82,7 @@ Deno.serve(async (req) => {
     };
 
     /// One refresh per row at a time. An empty or failed refresh keeps the
-    /// old pool and holds the lease, so the next try waits it out.
+    /// old pool, and the next try waits a day (triedRecently).
     const refresh = async (kind: SuggestionKind, quick = false): Promise<Suggestion[] | null> => {
       await db
         .from("city_suggestions")
@@ -137,6 +138,18 @@ Deno.serve(async (req) => {
     let places = servePool(placeRow?.payload, "place", today);
     const allowed = eventRow || placeRow ? true : await consumeQuota(db, caller.userId, "suggest");
 
+    const lastTry = async (kind: SuggestionKind) => {
+      const { data } = await db
+        .from("suggestion_runs")
+        .select("outcome, at")
+        .eq("key", key)
+        .eq("kind", kind)
+        .order("at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data as { outcome: string; at: string } | null;
+    };
+
     const later: Promise<unknown>[] = [];
     let eventsComing = false;
     if (allowed && busyMatters(eventRow?.fetched_at ?? null, "event")) {
@@ -147,10 +160,18 @@ Deno.serve(async (req) => {
       if (places.length === 0 && leaseFree(placeRow?.refreshing_since ?? null)) {
         places = (await refresh("place", true)) ?? [];
         if (places.length > 0) later.push(refresh("place"));
-      } else if (isDue(placeRow?.fetched_at ?? null, "place", places.length) && leaseFree(placeRow?.refreshing_since ?? null)) {
+      } else if (
+        isDue(placeRow?.fetched_at ?? null, "place", places.length) &&
+        leaseFree(placeRow?.refreshing_since ?? null) &&
+        !triedRecently(await lastTry("place"))
+      ) {
         later.push(refresh("place"));
       }
-      if (isDue(eventRow?.fetched_at ?? null, "event", events.length, new Date(), busy) && leaseFree(eventRow?.refreshing_since ?? null)) {
+      if (
+        isDue(eventRow?.fetched_at ?? null, "event", events.length, new Date(), busy) &&
+        leaseFree(eventRow?.refreshing_since ?? null) &&
+        !triedRecently(await lastTry("event"))
+      ) {
         later.push(refresh("event"));
         eventsComing = events.length === 0;
       }
