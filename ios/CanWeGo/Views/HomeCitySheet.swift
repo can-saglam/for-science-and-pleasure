@@ -162,7 +162,7 @@ struct HomeCitySheet: View {
         var seen = Set<String>()
         var homes: [HomeStore.Home] = []
         for item in items {
-            guard let found = HomeStore.from(item.placemark) else { continue }
+            guard let found = HomeStore.from(item) else { continue }
             // A ward (Nakano) is listed as its city (Tokyo).
             let home = HomeStore.widerCity(for: found) ?? found
             let key = "\(home.locality)|\(home.country)"

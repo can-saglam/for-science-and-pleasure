@@ -166,6 +166,7 @@ struct OnboardingView: View {
     @State private var lifted: Int?
 
     @State private var busy = false
+    @State private var pageWidth: CGFloat = 402
     /// Everything that should freeze the bottom bar, not just server writes.
     private var frozen: Bool { busy || signingIn }
     @State private var note: String?
@@ -206,6 +207,7 @@ struct OnboardingView: View {
                 // The front door is a single screen. The later pages still
                 // scroll, so a keyboard can get out of the way.
                 .scrollDisabled(page == .welcome)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
             }
             .safeAreaPadding(.bottom, page == .welcome ? 0 : 84)
 
@@ -245,16 +247,18 @@ struct OnboardingView: View {
     /// into a wash. They drift a little as the pages turn. The orbs
     /// jump to a new colour instead of interpolating — a live 90pt blur
     /// every frame of a theme ease is what made the slider hitch on
-    /// device.
+    /// device. The orbs are wider than a small phone, so they're an
+    /// overlay: in a ZStack their size would widen the whole page and eat
+    /// its margins.
     private var backdrop: some View {
-        ZStack {
-            AppBackground.base
-            orbs
-                .transaction { $0.animation = nil }
-        }
-        .ignoresSafeArea()
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: index)
-        .accessibilityHidden(true)
+        AppBackground.base
+            .overlay {
+                orbs
+                    .transaction { $0.animation = nil }
+            }
+            .ignoresSafeArea()
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: index)
+            .accessibilityHidden(true)
     }
 
     private var orbs: some View {
@@ -361,14 +365,14 @@ struct OnboardingView: View {
             .accessibilityLabel("Back")
             .accessibilityHidden(index == 0)
 
-            Spacer()
+            Spacer(minLength: 0)
 
             if offersNotNow {
                 // The way out sits beside the ask, not up in the page.
                 // Back, dots and two pills don't fit one bar, so the
                 // dots step aside on this page.
                 notNowButton
-                    .padding(.trailing, 10)
+                    .padding(.trailing, 2)
             } else {
                 // Until there's a session the step count isn't known (the
                 // account may already answer most of it), so no dots yet.
@@ -425,7 +429,7 @@ struct OnboardingView: View {
             Text("Not now")
                 .fontWeight(.semibold)
                 .lineLimit(1)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 18)
                 .frame(height: Self.control)
                 .contentShape(.capsule)
         }
@@ -641,6 +645,9 @@ struct OnboardingView: View {
     private var welcomePage: some View {
         VStack(spacing: 22) {
             cardFan(Self.sampleCards, seats: Self.seats, dealt: dealt, key: 0)
+                // The cascade is ~340pt across; a small phone's margins
+                // hold less, so it shrinks to fit rather than bleed.
+                .scaleEffect(min(1, (pageWidth - 56) / 340))
                 .frame(height: 250)
                 .accessibilityHidden(true)
                 .padding(.bottom, 18)
@@ -1746,7 +1753,7 @@ struct OnboardingView: View {
         var seen = Set<String>()
         var homes: [HomeStore.Home] = []
         for item in items {
-            guard let found = HomeStore.from(item.placemark) else { continue }
+            guard let found = HomeStore.from(item) else { continue }
             let city = HomeStore.widerCity(for: found)
             let home = city ?? found
             let key = "\(home.locality)|\(home.country)"

@@ -841,10 +841,13 @@ struct PlanSheet: View {
         .accessibilityHidden(past)
     }
 
-    /// "Tuesday 6 October" over "Open 10:00–18:00"; a prompt until a day
-    /// is picked, so the picker below doesn't move when one is.
+    /// "Tuesday 6 October at 15:00" over "Open 10:00–18:00"; a prompt
+    /// until a day is picked, so the picker below doesn't move when one is.
     private func dayLine(_ d: String?) -> some View {
-        let name = d.map { DayString.text($0, .dateTime.weekday(.wide).day().month(.wide)) ?? $0 }
+        let name = d.map { d in
+            let date = DayString.text(d, .dateTime.weekday(.wide).day().month(.wide)) ?? d
+            return timed ? "\(date) at \(OpeningHours.time(clock))" : date
+        }
         var open = ""
         if let d, let hours, let r = hours.ranges(on: d) {
             let exact = hours.knowsExactly(d)

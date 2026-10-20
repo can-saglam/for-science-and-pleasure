@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import MapKit
 import Observation
 
 /// The group's home: the city the library is about. Read from `groups`
@@ -73,9 +74,15 @@ final class HomeStore {
         (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).removeObject(forKey: Self.cacheKey)
     }
 
-    /// City, country, timezone and pin from a geocoded placemark. Prefers
+    /// City, country, timezone and pin from a geocoded map item. Prefers
     /// the locality (the city), never a county or country.
-    static func from(_ placemark: CLPlacemark) -> Home? {
+    static func from(_ item: MKMapItem) -> Home? {
+        from(item.placemark, timeZone: item.timeZone)
+    }
+
+    /// A map item's placemark carries no timezone (the item does), so a
+    /// placemark alone would fall back to the phone's zone, wherever it is.
+    private static func from(_ placemark: CLPlacemark, timeZone: TimeZone?) -> Home? {
         let skipAdmin: Set<String> = [
             "England", "Scotland", "Wales", "Northern Ireland",
         ]
@@ -92,7 +99,7 @@ final class HomeStore {
         return Home(
             locality: locality,
             country: placemark.country?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "",
-            timezone: placemark.timeZone?.identifier ?? TimeZone.current.identifier,
+            timezone: (timeZone ?? placemark.timeZone ?? .current).identifier,
             lat: placemark.location?.coordinate.latitude,
             lng: placemark.location?.coordinate.longitude,
             partOf: area.flatMap { wardCities.contains($0) && $0 != locality ? $0 : nil }
