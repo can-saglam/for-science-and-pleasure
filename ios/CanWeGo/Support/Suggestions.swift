@@ -69,15 +69,24 @@ final class Suggestions {
             loading = false
             guard let pool else { return }
             take(pool, for: key)
-            guard pool.eventsComing == true || pool.picturesComing == true else { return }
-            try? await Task.sleep(for: .seconds(90))
-            guard !Task.isCancelled, city == key,
-                  let again = try? await ParseClient.suggestions(locality: home.locality, country: country),
-                  city == key
-            else { return }
-            take(again, for: key)
+            var coming = pool.eventsComing == true || pool.picturesComing == true
+            var asks = 0
+            while coming, asks < Self.followUps {
+                asks += 1
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled, city == key else { return }
+                guard let again = try? await ParseClient.suggestions(locality: home.locality, country: country) else { continue }
+                guard !Task.isCancelled, city == key else { return }
+                take(again, for: key)
+                coming = again.eventsComing == true || again.picturesComing == true
+            }
         }
     }
+
+    /// While the server is still searching a new city or finding its
+    /// pictures, ask again every 20 seconds, for up to five minutes: an
+    /// event search takes two or three.
+    private static let followUps = 15
 
     private func take(_ pool: ParseClient.SuggestionPool, for key: String) {
         events = pool.events

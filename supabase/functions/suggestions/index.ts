@@ -101,8 +101,9 @@ Deno.serve(async (req) => {
     };
 
     /// An empty or failed refresh keeps the old pool, and the next try
-    /// waits a day (triedRecently). The quick first ask skips pictures so
-    /// it answers fast; the searched pool that follows has them.
+    /// waits a day (triedRecently). The quick first ask gives pictures a
+    /// few seconds so it still answers fast; any it misses come with the
+    /// searched pool that follows.
     const refresh = async (kind: SuggestionKind, quick = false): Promise<Suggestion[] | null> => {
       if (!await claim(kind)) return null;
       const started = Date.now();
@@ -121,7 +122,7 @@ Deno.serve(async (req) => {
           await note(summary);
           return null;
         }
-        const items = quick ? result.items : await dress(result.items, locality, country);
+        const items = await dress(result.items, locality, country, quick ? 5_000 : undefined);
         await db
           .from("city_suggestions")
           .update({
@@ -184,7 +185,6 @@ Deno.serve(async (req) => {
     };
 
     const later: Promise<unknown>[] = [];
-    let eventsComing = false;
     if (allowed && busyMatters(eventRow?.fetched_at ?? null, "event")) {
       const { data: people } = await db.rpc("city_people", { p_key: key });
       busy = typeof people === "number" && people >= BUSY_CITY_PEOPLE;
@@ -212,12 +212,19 @@ Deno.serve(async (req) => {
       ) {
         later.push(refresh("event"));
         refreshing.add("event");
-        eventsComing = events.length === 0;
       }
     }
+    // "Coming" while any job is on the row, not just one this ask started,
+    // so a phone asking again mid-search keeps waiting for it.
+    const busyRow = (kind: SuggestionKind, stored: Row | null) =>
+      refreshing.has(kind) || !leaseFree(stored?.refreshing_since ?? null);
+    const eventsComing = events.length === 0 && busyRow("event", eventRow);
     let picturesComing = false;
     for (const [kind, pool, stored] of [["event", events, eventRow], ["place", places, placeRow]] as const) {
-      if (!refreshing.has(kind) && stored && undressed(pool) && leaseFree(stored.refreshing_since)) {
+      if (!undressed(pool)) continue;
+      if (busyRow(kind, stored)) {
+        picturesComing = true;
+      } else if (stored) {
         later.push(redress(kind));
         picturesComing = true;
       }

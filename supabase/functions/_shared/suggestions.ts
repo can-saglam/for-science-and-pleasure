@@ -189,24 +189,43 @@ export function undressed(items: Suggestion[]): boolean {
 /// Each pick's picture and card colour, for the chips: an event's page
 /// image, or a place's Google photo as the same signed link saved places
 /// keep. Best-effort; a pick that's been tried keeps `image: null`, so a
-/// pool is only ever dressed once.
-export async function dress(items: Suggestion[], locality: string, country: string): Promise<Suggestion[]> {
+/// pool is only ever dressed once. With `withinMs`, a pick still being
+/// looked at when time's up goes as it was, to be dressed later.
+export async function dress(
+  items: Suggestion[],
+  locality: string,
+  country: string,
+  withinMs?: number,
+): Promise<Suggestion[]> {
   const home: Home = { locality, country, timezone: "UTC", lat: null, lng: null };
-  return await Promise.all(items.map(async (s): Promise<Suggestion> => {
-    if (s.image !== undefined) return s;
-    try {
-      if (s.kind === "event") {
-        const image = await heroImageFromUrl(s.url);
-        return { ...s, image, color: image ? await colorFromImageUrl(image) : null };
-      }
-      const match = await findPlace(s.title, { area: s.venue }, home);
-      if (!match?.photo) return { ...s, image: null, color: null };
-      const [image, direct] = await Promise.all([placePhotoLink(match.id, match.credit), photoUri(match.photo, 400)]);
-      return { ...s, image, color: direct ? await colorFromImageUrl(direct) : null };
-    } catch {
-      return { ...s, image: null, color: null };
+  let timer: number | undefined;
+  const timeUp = withinMs === undefined
+    ? null
+    : new Promise<null>((done) => timer = setTimeout(() => done(null), withinMs));
+  try {
+    return await Promise.all(items.map(async (s): Promise<Suggestion> => {
+      if (s.image !== undefined) return s;
+      const dressed = dressOne(s, home);
+      return (timeUp ? await Promise.race([dressed, timeUp]) : await dressed) ?? s;
+    }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function dressOne(s: Suggestion, home: Home): Promise<Suggestion> {
+  try {
+    if (s.kind === "event") {
+      const image = await heroImageFromUrl(s.url);
+      return { ...s, image, color: image ? await colorFromImageUrl(image) : null };
     }
-  }));
+    const match = await findPlace(s.title, { area: s.venue }, home);
+    if (!match?.photo) return { ...s, image: null, color: null };
+    const [image, direct] = await Promise.all([placePhotoLink(match.id, match.credit), photoUri(match.photo, 400)]);
+    return { ...s, image, color: direct ? await colorFromImageUrl(direct) : null };
+  } catch {
+    return { ...s, image: null, color: null };
+  }
 }
 
 // MARK: - Refreshing
