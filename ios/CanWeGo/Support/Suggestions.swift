@@ -46,10 +46,13 @@ final class Suggestions {
     /// Ask the server, unless this city's pool is recent or on its way.
     /// A city with no events yet has a search running there: one more ask
     /// a minute and a half later picks them up, and until they're in, the
-    /// pool counts as recent for ten minutes, not hours.
+    /// pool counts as recent for ten minutes, not hours. Pictures being
+    /// looked up get the same second ask, and a pool kept from before picks
+    /// had pictures the same ten minutes.
     func load(for home: HomeStore.Home) {
         let key = Self.key(for: home)
-        let maxAge = events.isEmpty ? 600 : Self.maxAge
+        let bare = (events + places).allSatisfy { $0.image == nil }
+        let maxAge = events.isEmpty || bare ? 600 : Self.maxAge
         if key == city, loading || Date.now.timeIntervalSince(fetchedAt) < maxAge { return }
         if key != city {
             city = key
@@ -66,7 +69,7 @@ final class Suggestions {
             loading = false
             guard let pool else { return }
             take(pool, for: key)
-            guard pool.eventsComing == true else { return }
+            guard pool.eventsComing == true || pool.picturesComing == true else { return }
             try? await Task.sleep(for: .seconds(90))
             guard !Task.isCancelled, city == key,
                   let again = try? await ParseClient.suggestions(locality: home.locality, country: country),
@@ -88,7 +91,7 @@ final class Suggestions {
 
     /// Up to `count` for one tab: nothing that's ended, nothing already
     /// saved, and a new order each day that holds steady within it.
-    func picks(kind: String, for home: HomeStore.Home, excluding saved: [Item], count: Int = 4) -> [Pick] {
+    func picks(kind: String, for home: HomeStore.Home, excluding saved: [Item], count: Int = 6) -> [Pick] {
         guard city == Self.key(for: home) else { return [] }
         let today = DayString.today()
         var savedLinks = Set<String>()
@@ -109,21 +112,41 @@ final class Suggestions {
             .map(\.self)
     }
 
-    /// The add page's chips (and the first-save page's): events first,
-    /// the larger half, places to fill.
-    func mixed(for home: HomeStore.Home, excluding saved: [Item] = [], count: Int = 5) -> [Pick] {
+    /// The add page's chips (and the first-save page's): events and places
+    /// taking turns, events the larger half, places to fill.
+    func mixed(for home: HomeStore.Home, excluding saved: [Item] = [], count: Int = 8) -> [Pick] {
         let on = picks(kind: Item.Kind.event, for: home, excluding: saved, count: (count + 1) / 2)
-        return on + picks(kind: Item.Kind.place, for: home, excluding: saved, count: count - on.count)
+        let spots = picks(kind: Item.Kind.place, for: home, excluding: saved, count: count - on.count)
+        return (0..<max(on.count, spots.count)).flatMap { i in
+            [i < on.count ? on[i] : nil, i < spots.count ? spots[i] : nil].compactMap(\.self)
+        }
     }
 
-    /// "until 2 Nov", "from 3 Oct", "tomorrow", "Sat 4 Oct".
+    /// The line under a chip's title: where, with a festival's "Various
+    /// London venues" said as "All over London".
+    func whereText(_ s: Pick) -> String? {
+        guard let venue = s.venue?.trimmingCharacters(in: .whitespaces), !venue.isEmpty, venue != s.title else { return nil }
+        let lower = venue.lowercased()
+        guard lower.hasPrefix("various") || lower.hasPrefix("multiple") else { return venue }
+        let locality = city?.split(separator: "|").first.map(String.init)
+        return locality.map { "All over \($0)" } ?? "Various venues"
+    }
+
+    /// "until 2 Nov", "2–8 Nov", "from 3 Oct", "tomorrow", "Sat 4 Oct".
     static func when(_ s: Pick) -> String? {
         guard s.kind == Item.Kind.event, let start = s.startsOn else { return nil }
         let today = DayString.today()
         if let end = s.endsOn, end != start {
-            return start <= today
-                ? DayString.text(end).map { "until \($0)" }
-                : DayString.text(start).map { "from \($0)" }
+            if start <= today { return DayString.text(end).map { "until \($0)" } }
+            // A run that hasn't started says how long it is, when that's
+            // short enough to matter.
+            if let days = DayString.daysBetween(start, end), days <= 21,
+               let from = DayString.date(start), let to = DayString.date(end) {
+                var style = Date.IntervalFormatStyle.interval.day().month(.abbreviated)
+                style.timeZone = DayString.timeZone
+                return (from..<to).formatted(style)
+            }
+            return DayString.text(start).map { "from \($0)" }
         }
         if start == today { return "today" }
         if DayString.daysFromToday(start) == 1 { return "tomorrow" }

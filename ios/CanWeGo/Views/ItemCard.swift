@@ -396,12 +396,18 @@ private struct MeltImage: View {
 }
 
 /// The melt itself, from images already in hand: the list card's, and
-/// Siri's, which is drawn once and can't wait for a load.
+/// Siri's, which is drawn once and can't wait for a load. A city pick's
+/// chip melts the other way, its photo at the leading edge.
 struct MeltLayers: View {
     let sharp: UIImage
     let blurred: UIImage
     let cardBackground: Color
     let width: CGFloat
+    var photoLeading = false
+
+    /// From the card colour to the photo.
+    private var startPoint: UnitPoint { photoLeading ? .trailing : .leading }
+    private var endPoint: UnitPoint { photoLeading ? .leading : .trailing }
 
     var body: some View {
         ZStack {
@@ -413,8 +419,8 @@ struct MeltLayers: View {
                             .init(color: .clear, location: 0.25),
                             .init(color: .black, location: 0.8),
                         ],
-                        startPoint: .leading,
-                        endPoint: .trailing
+                        startPoint: startPoint,
+                        endPoint: endPoint
                     )
                 )
             // Multiply pulls bright content toward the card color in
@@ -426,8 +432,8 @@ struct MeltLayers: View {
                     .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: 0.45),
                     .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: 0.95),
                 ],
-                startPoint: .leading,
-                endPoint: .trailing
+                startPoint: startPoint,
+                endPoint: endPoint
             )
             .blendMode(.multiply)
             LinearGradient(
@@ -440,8 +446,8 @@ struct MeltLayers: View {
                     .init(color: cardBackground.opacity(0.05), location: 0.75),
                     .init(color: cardBackground.opacity(0), location: 0.9),
                 ],
-                startPoint: .leading,
-                endPoint: .trailing
+                startPoint: startPoint,
+                endPoint: endPoint
             )
         }
     }
@@ -505,8 +511,8 @@ struct ItemCardRow: View {
     @State private var celebrate = 0
     @State private var paywall: PlusReason?
     @State private var planning = false
-    /// A rendered postcard of this save, on its way to the share sheet.
-    @State private var shareCard: ShareCard.Rendered?
+    /// This save's link, on its way to the share sheet.
+    @State private var sharing: ShareItems?
     @State private var undoBin = UndoBin.shared
     /// Bumped each time this card lands; plays its lift once.
     @State private var landings = 0
@@ -621,9 +627,7 @@ struct ItemCardRow: View {
             }
             Section {
                 ShareMenuItems(item: item) {
-                    Task { shareCard = await ShareCard.sending(item) }
-                } postcard: {
-                    Task { shareCard = await ShareCard.render(item) }
+                    Task { sharing = await ShareItems.sending(item) }
                 }
             }
             Button(role: .destructive) {
@@ -633,8 +637,8 @@ struct ItemCardRow: View {
             }
         }
         .sensoryFeedback(.success, trigger: celebrate)
-        .sheet(item: $shareCard) { card in
-            ActivitySheet(items: card.items)
+        .sheet(item: $sharing) { outgoing in
+            ActivitySheet(items: outgoing.items)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $paywall) { PlusPaywall(reason: $0, incoming: item, onUnlocked: { item.putBack() }) }

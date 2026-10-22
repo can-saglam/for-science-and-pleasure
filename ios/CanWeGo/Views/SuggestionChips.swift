@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// A few things to go to in the home city, as glass chips wrapping to
-/// centred rows. A tap opens the add sheet on the link and reads it, the
-/// same as sharing it in.
+/// A few things to go to in the home city, in one row that scrolls
+/// sideways. A tap opens the add sheet on the link and reads it, the same
+/// as sharing it in.
 struct SuggestionChips: View {
     let picks: [ParseClient.Suggestion]
 
     var body: some View {
-        CentredFlow(spacing: 8) {
+        PickStrip {
             ForEach(picks) { s in
                 PickChip(pick: s, hint: "Adds it to your library") { Self.open(s) }
             }
@@ -20,105 +20,142 @@ struct SuggestionChips: View {
     }
 }
 
-/// One city pick as a glass chip: a ticket or pin, the title, and an
-/// event's dates. Ticked, it turns solid ink with the page colour for
-/// text. The venue only goes to VoiceOver, to keep chips one line.
+/// One row of picks that scrolls sideways, chip by chip, and runs on past
+/// its container to the screen's edges.
+struct PickStrip<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) { content() }
+                .scrollTargetLayout()
+        }
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollClipDisabled()
+    }
+}
+
+/// One city pick as a small card: its picture melting in from the left
+/// edge the way a saved card's does from the right, the title, then when
+/// and where. Tinted from the picture's colour, like a card. Ticked, it
+/// takes an ink outline and a check over the picture.
 struct PickChip: View {
     let pick: ParseClient.Suggestion
     var on = false
     let hint: String
     let action: () -> Void
 
+    /// The chip's height, and where the text starts: the photo stays
+    /// sharp across about this much before it fades under the text.
+    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 56
+    @State private var photo: (sharp: UIImage, blurred: UIImage)?
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16, style: .continuous) }
+
+    private var accent: Color {
+        pick.color.flatMap(Color.init(hex:)) ?? Item.fallbackAccent(pick.url)
+    }
+
+    private var url: URL? { pick.image.flatMap(URL.init(string:)) }
+
+    private var detail: String? {
+        let parts = [Suggestions.when(pick), Suggestions.shared.whereText(pick)].compactMap(\.self)
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    init(pick: ParseClient.Suggestion, on: Bool = false, hint: String, action: @escaping () -> Void) {
+        self.pick = pick
+        self.on = on
+        self.hint = hint
+        self.action = action
+        if let url = pick.image.flatMap(URL.init(string:)), let sharp = ImageStore.cached(url) {
+            _photo = State(initialValue: (sharp, ImageStore.cachedMelt(url) ?? sharp))
+        }
+    }
+
     var body: some View {
         Button {
             Haptics.tap()
             action()
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: on ? "checkmark" : pick.kind == Item.Kind.event ? "ticket" : "mappin.and.ellipse")
-                    .font(.caption.weight(.semibold))
-                    .contentTransition(.symbolEffect(.replace))
-                Text(pick.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                if let when = Suggestions.when(pick) {
-                    Text(when)
-                        .font(.caption2)
-                        .opacity(0.72)
-                        .fixedSize()
+            HStack(spacing: 0) {
+                picture
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pick.shortTitle ?? pick.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.ink)
+                    if let detail {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(AppBackground.secondaryInk)
+                    }
+                }
+                .lineLimit(1)
+                .padding(.trailing, 14)
+            }
+            .frame(minHeight: side)
+            .frame(maxWidth: 300, alignment: .leading)
+            .background(alignment: .leading) {
+                if let photo {
+                    MeltLayers(sharp: photo.sharp, blurred: photo.blurred, cardBackground: tint, width: meltWidth, photoLeading: true)
+                        .frame(width: meltWidth)
+                        .accessibilityHidden(true)
                 }
             }
-            .foregroundStyle(on ? AppBackground.base : AppBackground.ink)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 9)
-            .background(on ? AppBackground.ink : .clear, in: .capsule)
-            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
-            .contentShape(.capsule)
+            .background(tint, in: shape)
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(on ? AppBackground.ink : ItemCard.border(accent), lineWidth: on ? 2 : 1)
+            }
+            // The press dims the chip as one picture; dimmed layer by
+            // layer, the melt's photo shows through its own wash.
+            .compositingGroup()
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.2), value: on)
+        .task(id: url) {
+            guard let url, photo == nil, let pair = await ImageStore.meltPair(url) else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { photo = pair }
+        }
         .accessibilityLabel(spoken)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityHint(hint)
     }
 
-    /// "BFI Southbank, until 18 Oct".
+    private var tint: Color { ItemCard.background(accent) }
+
+    /// The melt runs a little under the text, as a card's does, but is
+    /// mostly washed out by the first letter so a poster's own lettering
+    /// can't fight the title.
+    private var meltWidth: CGFloat { side * 1.6 }
+
+    /// The space the photo keeps clear at the leading edge: the ticket or
+    /// pin when there's no photo, and the check once ticked.
+    private var picture: some View {
+        ZStack {
+            if photo == nil {
+                Image(systemName: pick.kind == Item.Kind.event ? "ticket" : "mappin.and.ellipse")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(AppBackground.secondaryInk)
+            }
+            if on {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(AppBackground.base, AppBackground.ink)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .frame(width: photo == nil ? side * 0.8 : side + 8, height: side)
+        .accessibilityHidden(true)
+    }
+
+    /// "Pitchfork Music Festival London 2026, All over London, 2–8 Nov".
     private var spoken: String {
-        let venue = pick.venue.flatMap { $0 == pick.title || $0.isEmpty ? nil : $0 }
-        return [pick.title, venue, Suggestions.when(pick)].compactMap(\.self).joined(separator: ", ")
-    }
-}
-
-/// Rows that wrap and centre (or start at the left), each child no wider
-/// than the row.
-struct CentredFlow: Layout {
-    var spacing: CGFloat = 8
-    var leading = false
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        let rows = rows(width: width, subviews: subviews)
-        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
-        let widest = rows.map(\.width).max() ?? 0
-        return CGSize(width: proposal.width ?? widest, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in rows(width: bounds.width, subviews: subviews) {
-            var x = bounds.minX + (leading ? 0 : (bounds.width - row.width) / 2)
-            for (index, size) in row.items {
-                subviews[index].place(
-                    at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
-                    proposal: ProposedViewSize(size)
-                )
-                x += size.width + spacing
-            }
-            y += row.height + spacing
-        }
-    }
-
-    private struct Row {
-        var items: [(Int, CGSize)] = []
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-    }
-
-    private func rows(width: CGFloat, subviews: Subviews) -> [Row] {
-        var rows: [Row] = []
-        var row = Row()
-        for index in subviews.indices {
-            var size = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil))
-            size.width = min(size.width, width)
-            if !row.items.isEmpty, row.width + spacing + size.width > width {
-                rows.append(row)
-                row = Row()
-            }
-            row.width += (row.items.isEmpty ? 0 : spacing) + size.width
-            row.height = max(row.height, size.height)
-            row.items.append((index, size))
-        }
-        if !row.items.isEmpty { rows.append(row) }
-        return rows
+        [pick.title, Suggestions.shared.whereText(pick), Suggestions.when(pick)].compactMap(\.self).joined(separator: ", ")
     }
 }

@@ -72,6 +72,9 @@ struct LibraryView: View {
     @State private var scrollPosition = ScrollPosition()
     /// The list's visible height, for centring an empty tab in it.
     @State private var listHeight: CGFloat = 0
+    /// The tip row's height, row insets included, so an empty tab stays
+    /// centred on screen instead of sliding down under a tip.
+    @State private var tipHeight: CGFloat = 0
 
     private enum ArchiveSide: CaseIterable {
         case been, all
@@ -233,14 +236,15 @@ struct LibraryView: View {
     /// The active list's order. Static so launch can warm photos in the
     /// same order the list will ask for them.
     static func ordered(_ list: [Item], kind: String) -> [Item] {
-        // Places respect a hand-arranged order first (long-press drag);
-        // anything never moved falls back to the closing-soon sort below.
+        // Places respect a hand-arranged order (long-press drag). Anything
+        // saved since the last arrangement has no position yet and goes on
+        // top, newest first, until it's dragged somewhere.
         if kind == Item.Kind.place {
             return list.sorted { a, b in
                 switch (a.sortOrder, b.sortOrder) {
                 case let (x?, y?) where x != y: return x < y
-                case (_?, nil): return true
-                case (nil, _?): return false
+                case (_?, nil): return false
+                case (nil, _?): return true
                 default: return closesSooner(a, b)
                 }
             }
@@ -769,6 +773,7 @@ struct LibraryView: View {
                 .tipCornerRadius(12)
                 .tipImageSize(CGSize(width: 22, height: 22))
                 .padding(.top, 6)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tipHeight = $0 + 10 }
                 .cardListRow()
 
             #if !APP_EXTENSION
@@ -844,8 +849,11 @@ struct LibraryView: View {
                         suggestionChips
                     }
                     // Centred between the header and the tab bar, less the
-                    // bottom content margin.
-                    .frame(minHeight: max(listHeight - 24, 0))
+                    // bottom content margin. The tip row (a sliver even
+                    // with no tip) comes off both ends, so the centre
+                    // stays put whether or not a tip shows.
+                    .frame(minHeight: max(listHeight - 24 - 2 * tipHeight, 0))
+                    .padding(.bottom, tipHeight)
                     .cardListRow()
                 } else if askQuestion == nil {
                     EmptyState(
@@ -965,7 +973,8 @@ struct LibraryView: View {
     // MARK: - Empty states
 
     /// A title and a line under it, in the brand's type instead of a system
-    /// placeholder. A chosen filter chip's glyph sits above.
+    /// placeholder, aligned to the cards' leading edge. A chosen filter
+    /// chip's glyph sits above.
     private struct EmptyState<Actions: View>: View {
         let title: String
         let message: String
@@ -981,28 +990,27 @@ struct LibraryView: View {
         }
 
         var body: some View {
-            VStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
                 if let glyph {
                     Image(systemName: glyph)
                         .font(.system(size: 34, weight: .medium))
                         .foregroundStyle(AppBackground.ink.opacity(0.55))
                         .frame(height: 56)
                 }
-                VStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(title)
                         .font(.displaySmallBold(22, relativeTo: .title3))
                         .foregroundStyle(AppBackground.ink)
                     Text(message)
                         .font(.subheadline)
                         .foregroundStyle(AppBackground.secondaryInk)
-                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .multilineTextAlignment(.leading)
                 actions()
                     .padding(.top, 2)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
         }
     }
@@ -1028,7 +1036,7 @@ struct LibraryView: View {
         let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: library) } ?? []
         VStack(spacing: 0) {
             if !picks.isEmpty {
-                VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text(been.isEmpty ? "Or start with one of these" : "Or try one of these")
                         .font(.caption.weight(.semibold))
                         .textCase(.uppercase)

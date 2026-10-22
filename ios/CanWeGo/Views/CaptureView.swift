@@ -694,8 +694,10 @@ struct CaptureView: View {
         item.url = card.url
         item.lat = card.lat
         item.lng = card.lng
-        item.colorHex = card.color
-        item.imageUrl = card.image_url
+        // A tapped pick's own picture stands in when the page gave none.
+        let stand = card.image_url == nil ? pickedLook : nil
+        item.colorHex = stand?.colorHex ?? card.color
+        item.imageUrl = stand?.imageUrl ?? card.image_url
         item.source = card.source
         item.placeId = card.place_id
         item.showings = card.showings ?? []

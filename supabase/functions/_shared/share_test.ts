@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { sharedCard, shareToken } from "./share.ts";
+import { firstName, sharedCard, shareToken } from "./share.ts";
 
 Deno.test("a shared card keeps the public fields and drops the rest", () => {
   const card = sharedCard({
@@ -31,6 +31,13 @@ Deno.test("something that isn't a card isn't shared", () => {
   assertEquals(sharedCard(null), null);
   assertEquals(sharedCard({ kind: "event", title: "  " }), null);
   assertEquals(sharedCard({ kind: "party", title: "Bao" }), null);
+});
+
+Deno.test("a shared save names its sender by first name only", () => {
+  assertEquals(firstName("  Can Sağlam "), "Can");
+  assertEquals(firstName("Özge"), "Özge");
+  assertEquals(firstName("   "), null);
+  assertEquals(firstName(null), null);
 });
 
 Deno.test("share tokens are ten unambiguous characters", () => {

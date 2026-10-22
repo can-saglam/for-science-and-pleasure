@@ -291,12 +291,18 @@ enum ParseClient {
         var venue: String?
         var startsOn: String?
         var endsOn: String?
+        /// What a friend would call it, when the title is long.
+        var shortTitle: String?
+        /// The chip's picture and its dominant colour, when the pick has one.
+        var image: String?
+        var color: String?
         var id: String { url }
 
         enum CodingKeys: String, CodingKey {
-            case title, url, kind, venue
+            case title, url, kind, venue, image, color
             case startsOn = "starts_on"
             case endsOn = "ends_on"
+            case shortTitle = "short_title"
         }
     }
 
@@ -305,10 +311,13 @@ enum ParseClient {
         let places: [Suggestion]
         /// No events yet for this city; a search for them is running.
         var eventsComing: Bool?
+        /// The picks' pictures are being looked up; they land in a minute.
+        var picturesComing: Bool?
 
         enum CodingKeys: String, CodingKey {
             case events, places
             case eventsComing = "events_coming"
+            case picturesComing = "pictures_coming"
         }
     }
 

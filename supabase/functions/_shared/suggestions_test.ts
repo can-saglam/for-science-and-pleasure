@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, busyMatters, interleave, isDue, isTicketEventPage, leaseFree, readItems, servePool, shapeSuggestions, stillOn, triedRecently } from "./suggestions.ts";
+import { aboutEvent, answerText, busyMatters, interleave, isDue, isTicketEventPage, leaseFree, readItems, servePool, shapeSuggestions, stillOn, triedRecently, undressed } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -43,6 +43,24 @@ Deno.test("events need a date and must still be on", () => {
   }, "event", today);
   assertEquals(got.map((s) => s.title), ["Amar Kanwar", "Tonight"]);
   assertEquals(got[0].kind, "event");
+});
+
+Deno.test("a short title is kept only when it's shorter and short enough", () => {
+  const got = shapeSuggestions({
+    items: [
+      { title: "Pitchfork Music Festival London 2026", short_title: "Pitchfork Festival", starts_on: "2026-11-02", ends_on: "2026-11-08", url: "https://pitchforkmusicfestival.co.uk/" },
+      { title: "Hamlet", short_title: "Hamlet", starts_on: "2026-10-31", ends_on: null, url: "https://www.barbican.org.uk/hamlet" },
+      { title: "A Long Exhibition Title Goes Here", short_title: "Still a very long name that runs on and on", starts_on: "2026-10-01", ends_on: null, url: "https://www.tate.org.uk/x" },
+    ],
+  }, "event", today);
+  assertEquals(got.map((s) => s.short_title ?? null), ["Pitchfork Festival", null, null]);
+});
+
+Deno.test("a pool is dressed once: tried picks keep a null picture", () => {
+  const pick = { title: "A", url: "https://a.org/", kind: "event" as const, venue: null, starts_on: today, ends_on: null };
+  assert(undressed([pick]));
+  assert(!undressed([{ ...pick, image: null, color: null }]));
+  assert(!undressed([{ ...pick, image: "https://a.org/a.jpg", color: "#336699" }]));
 });
 
 Deno.test("listings sites and duplicates are dropped", () => {

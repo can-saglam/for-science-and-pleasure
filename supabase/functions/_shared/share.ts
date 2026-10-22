@@ -33,6 +33,12 @@ export interface SharedCard {
   source: "shared";
 }
 
+/// "Can" from "Can Sağlam": who sent it, without the whole name.
+export function firstName(name: unknown): string | null {
+  const first = typeof name === "string" ? name.trim().split(/\s+/)[0] : "";
+  return first ? first.slice(0, 40) : null;
+}
+
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function text(v: unknown, max: number): string | null {

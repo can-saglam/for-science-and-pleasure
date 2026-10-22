@@ -16,12 +16,14 @@ import {
   type Suggestion,
   type SuggestionKind,
   busyMatters,
+  dress,
   isDue,
   leaseFree,
   triedRecently,
   refreshEvents,
   refreshPlaces,
   servePool,
+  undressed,
 } from "../_shared/suggestions.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -81,9 +83,8 @@ Deno.serve(async (req) => {
       if (error) console.error("suggestion_runs", error.message);
     };
 
-    /// One refresh per row at a time. An empty or failed refresh keeps the
-    /// old pool, and the next try waits a day (triedRecently).
-    const refresh = async (kind: SuggestionKind, quick = false): Promise<Suggestion[] | null> => {
+    /// One job per row at a time: a refresh, or dressing an old pool.
+    const claim = async (kind: SuggestionKind): Promise<boolean> => {
       await db
         .from("city_suggestions")
         .upsert({ key, kind, locality, country }, { onConflict: "key,kind", ignoreDuplicates: true });
@@ -96,7 +97,14 @@ Deno.serve(async (req) => {
         .eq("kind", kind)
         .or(`refreshing_since.is.null,refreshing_since.lt.${cutoff}`)
         .select("key");
-      if (!claimed?.length) return null;
+      return !!claimed?.length;
+    };
+
+    /// An empty or failed refresh keeps the old pool, and the next try
+    /// waits a day (triedRecently). The quick first ask skips pictures so
+    /// it answers fast; the searched pool that follows has them.
+    const refresh = async (kind: SuggestionKind, quick = false): Promise<Suggestion[] | null> => {
+      if (!await claim(kind)) return null;
       const started = Date.now();
       const took = () => `${Math.round((Date.now() - started) / 1000)}s`;
       const note = (last_note: string) =>
@@ -113,22 +121,47 @@ Deno.serve(async (req) => {
           await note(summary);
           return null;
         }
+        const items = quick ? result.items : await dress(result.items, locality, country);
         await db
           .from("city_suggestions")
           .update({
-            payload: { items: result.items },
+            payload: { items },
             fetched_at: new Date().toISOString(),
             refreshing_since: null,
             last_note: summary,
           })
           .eq("key", key)
           .eq("kind", kind);
-        return result.items;
+        return items;
       } catch (error) {
         console.error("suggestions refresh", kind, error);
         await note(`error after ${took()}: ${String(error).slice(0, 300)}`);
         await record(kind, "error", null, Date.now() - started);
         return null;
+      }
+    };
+
+    /// A pool stored before picks had pictures gets them once, without a
+    /// new search.
+    const redress = async (kind: SuggestionKind) => {
+      if (!await claim(kind)) return;
+      try {
+        const { data } = await db
+          .from("city_suggestions")
+          .select("payload")
+          .eq("key", key)
+          .eq("kind", kind)
+          .maybeSingle();
+        const stored = (data?.payload as { items?: unknown } | null)?.items;
+        const items = await dress(Array.isArray(stored) ? stored as Suggestion[] : [], locality, country);
+        await db
+          .from("city_suggestions")
+          .update({ payload: { items }, refreshing_since: null })
+          .eq("key", key)
+          .eq("kind", kind);
+      } catch (error) {
+        console.error("suggestions dress", kind, error);
+        await db.from("city_suggestions").update({ refreshing_since: null }).eq("key", key).eq("kind", kind);
       }
     };
 
@@ -156,16 +189,21 @@ Deno.serve(async (req) => {
       const { data: people } = await db.rpc("city_people", { p_key: key });
       busy = typeof people === "number" && people >= BUSY_CITY_PEOPLE;
     }
+    const refreshing = new Set<SuggestionKind>();
     if (allowed) {
       if (places.length === 0 && leaseFree(placeRow?.refreshing_since ?? null)) {
         places = (await refresh("place", true)) ?? [];
-        if (places.length > 0) later.push(refresh("place"));
+        if (places.length > 0) {
+          later.push(refresh("place"));
+          refreshing.add("place");
+        }
       } else if (
         isDue(placeRow?.fetched_at ?? null, "place", places.length) &&
         leaseFree(placeRow?.refreshing_since ?? null) &&
         !triedRecently(await lastTry("place"))
       ) {
         later.push(refresh("place"));
+        refreshing.add("place");
       }
       if (
         isDue(eventRow?.fetched_at ?? null, "event", events.length, new Date(), busy) &&
@@ -173,7 +211,15 @@ Deno.serve(async (req) => {
         !triedRecently(await lastTry("event"))
       ) {
         later.push(refresh("event"));
+        refreshing.add("event");
         eventsComing = events.length === 0;
+      }
+    }
+    let picturesComing = false;
+    for (const [kind, pool, stored] of [["event", events, eventRow], ["place", places, placeRow]] as const) {
+      if (!refreshing.has(kind) && stored && undressed(pool) && leaseFree(stored.refreshing_since)) {
+        later.push(redress(kind));
+        picturesComing = true;
       }
     }
     if (later.length > 0) {
@@ -190,7 +236,7 @@ Deno.serve(async (req) => {
         ends_on: null,
       }));
     }
-    return json({ events, places, events_coming: eventsComing });
+    return json({ events, places, events_coming: eventsComing, pictures_coming: picturesComing });
   } catch (e) {
     console.error(e);
     return json({ error: "internal error" }, 500);

@@ -5,8 +5,11 @@
 // page loads and dates this run); a place's site has to answer. Pure
 // helpers first, then the two refreshes.
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
+import { colorFromImageUrl, heroImageFromUrl } from "./color.ts";
 import { cleanLink, linkKey, ownPage } from "./extract.ts";
+import type { Home } from "./home.ts";
 import { publicFetch } from "./netguard.ts";
+import { findPlace, photoUri, placePhotoLink } from "./places.ts";
 import { AGGREGATOR_RE } from "./starters.ts";
 
 export type SuggestionKind = "event" | "place";
@@ -18,6 +21,13 @@ export interface Suggestion {
   venue: string | null;
   starts_on: string | null;
   ends_on: string | null;
+  /** What a friend would call it, when the title is long; null when not. */
+  short_title?: string | null;
+  /** The chip's picture: an event page's image, a place's photo link.
+   * Missing on picks stored before pictures; null once tried. */
+  image?: string | null;
+  /** The picture's dominant colour, for the chip's tint. */
+  color?: string | null;
 }
 
 /// The add page shows two events a day in a new order each day, so a
@@ -108,7 +118,17 @@ export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: stri
       if (!starts) continue;
       if (ends && ends < starts) ends = null;
     }
-    const suggestion: Suggestion = { title, url, kind, venue, starts_on: starts, ends_on: ends };
+    const short = typeof e.short_title === "string" ? e.short_title.trim() : "";
+    const shortTitle = short && short.length <= 30 && short.length < title.length ? short : null;
+    const suggestion: Suggestion = {
+      title,
+      url,
+      kind,
+      venue,
+      starts_on: starts,
+      ends_on: ends,
+      ...(shortTitle ? { short_title: shortTitle } : {}),
+    };
     if (!stillOn(suggestion, today)) continue;
     seen.add(key);
     out.push(suggestion);
@@ -161,6 +181,34 @@ export function servePool(payload: unknown, kind: SuggestionKind, today: string)
   return items.filter((s) => s && s.kind === kind && typeof s.url === "string" && stillOn(s, today));
 }
 
+/// A pool with picks that have never been looked at for a picture.
+export function undressed(items: Suggestion[]): boolean {
+  return items.some((s) => s.image === undefined);
+}
+
+/// Each pick's picture and card colour, for the chips: an event's page
+/// image, or a place's Google photo as the same signed link saved places
+/// keep. Best-effort; a pick that's been tried keeps `image: null`, so a
+/// pool is only ever dressed once.
+export async function dress(items: Suggestion[], locality: string, country: string): Promise<Suggestion[]> {
+  const home: Home = { locality, country, timezone: "UTC", lat: null, lng: null };
+  return await Promise.all(items.map(async (s): Promise<Suggestion> => {
+    if (s.image !== undefined) return s;
+    try {
+      if (s.kind === "event") {
+        const image = await heroImageFromUrl(s.url);
+        return { ...s, image, color: image ? await colorFromImageUrl(image) : null };
+      }
+      const match = await findPlace(s.title, { area: s.venue }, home);
+      if (!match?.photo) return { ...s, image: null, color: null };
+      const [image, direct] = await Promise.all([placePhotoLink(match.id, match.credit), photoUri(match.photo, 400)]);
+      return { ...s, image, color: direct ? await colorFromImageUrl(direct) : null };
+    } catch {
+      return { ...s, image: null, color: null };
+    }
+  }));
+}
+
 // MARK: - Refreshing
 
 const EVENT_SCHEMA = {
@@ -172,12 +220,18 @@ const EVENT_SCHEMA = {
         type: "object",
         properties: {
           title: { type: "string", description: "The event's name as its organiser or venue lists it, never with the venue or dates appended" },
+          short_title: {
+            type: "string",
+            description:
+              "What a friend would call it, in at most 24 characters: 'Pitchfork Festival' for 'Pitchfork Music Festival London 2026', " +
+              "'Monika Sosnowska' for \"Monika Sosnowska: 'Weight of Matter'\". The title itself when it's already that short",
+          },
           venue: { type: ["string", "null"], description: "The venue's short name" },
           starts_on: { type: "string", description: "First day, yyyy-MM-dd" },
           ends_on: { type: ["string", "null"], description: "Last day of a run, yyyy-MM-dd; null for a one-night event" },
           url: { type: "string", description: "The event's own page on the venue's or organiser's site, exactly as seen in the search results" },
         },
-        required: ["title", "venue", "starts_on", "ends_on", "url"],
+        required: ["title", "short_title", "venue", "starts_on", "ends_on", "url"],
         additionalProperties: false,
       },
     },

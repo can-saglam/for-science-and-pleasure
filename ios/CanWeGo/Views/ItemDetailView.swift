@@ -27,8 +27,8 @@ struct ItemDetailView: View {
         ProcessInfo.processInfo.environment["CWG_DETENT"] == "large" ? .large : .medium
     @State private var fetching = false
     @State private var fetchNote: String?
-    /// A rendered postcard of this save, on its way to the share sheet.
-    @State private var shareCard: ShareCard.Rendered?
+    /// This save's link, on its way to the share sheet.
+    @State private var sharing: ShareItems?
     @State private var paywall: PlusReason?
     @State private var hours: OpeningHours?
     @State private var hoursLoading = false
@@ -167,9 +167,7 @@ struct ItemDetailView: View {
                             }
                             Divider()
                             ShareMenuItems(item: item) {
-                                Task { shareCard = await ShareCard.sending(item) }
-                            } postcard: {
-                                Task { shareCard = await ShareCard.render(item) }
+                                Task { sharing = await ShareItems.sending(item) }
                             }
                             Divider()
                             Button(role: .destructive) {
@@ -201,8 +199,8 @@ struct ItemDetailView: View {
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationBackground(AppBackground.sheet)
-        .sheet(item: $shareCard) { card in
-            ActivitySheet(items: card.items)
+        .sheet(item: $sharing) { outgoing in
+            ActivitySheet(items: outgoing.items)
                 .presentationDetents([.medium, .large])
         }
         .sheet(item: $planShowing) { PlanSheet(item: item, showing: $0) }

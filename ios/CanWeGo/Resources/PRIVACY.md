@@ -21,7 +21,7 @@ We do not sell this. We do not run ads. We do not track you across other apps.
 
 People in your group. If you leave a shared group, their copies stay; yours come with you only when the leave flow says so. If you are the last member and you delete the account, that group’s library is removed.
 
-Send to a friend makes a link to a copy of one card: its title, place, dates, photo and link, never your notes, plans or reminders. Anyone with the link can see that copy, on the web or in the app. Sending the same save again updates the copy. Deleting your account removes the copies you sent.
+Send to a friend makes a link to a copy of one card: its title, place, dates, photo and link, never your notes, plans or reminders. Anyone with the link can see that copy, on the web or in the app, along with the first word of the name you go by in the app, so they know who sent it. Sending the same save again updates the copy. Deleting your account removes the copies you sent.
 
 ## Photos and links
 

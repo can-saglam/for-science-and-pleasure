@@ -20,8 +20,7 @@ struct LogoTitle: View {
     /// How far the list is pulled past its top.
     var pull: PullDistance? = nil
     /// Writes in by hand rather than standing still. Only the three places
-    /// above ask; a mark rendered offscreen (the share postcard) must never
-    /// start blank.
+    /// above ask.
     var writes: Moment? = nil
 
     @State private var animates: Bool

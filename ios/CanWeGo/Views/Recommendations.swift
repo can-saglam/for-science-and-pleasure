@@ -2,10 +2,10 @@ import SwiftUI
 
 /// The home city's few under the add page's question (and the first-save
 /// page's): things on soon and places, from the same pool as the empty
-/// library tabs, as glass chips that wrap from the left. On the add page
-/// a tap looks it up straight away; on the first-save page (`ticked` set)
-/// a tap ticks it (the chip turns solid) to save with the rest. Nothing at all without a city, or with an
-/// empty pool that isn't loading.
+/// library tabs, in one row that scrolls sideways. On the add page a tap
+/// looks it up straight away; on the first-save page (`ticked` set) a tap
+/// ticks it (an outline and a check) to save with the rest. Nothing at all
+/// without a city, or with an empty pool that isn't loading.
 struct Recommendations: View {
     let city: String?
     let picks: [ParseClient.Suggestion]
@@ -30,7 +30,7 @@ struct Recommendations: View {
                     .textCase(.uppercase)
                     .tracking(0.6)
                     .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
-                CentredFlow(spacing: 8, leading: true) {
+                PickStrip {
                     ForEach(picks) { pick in
                         PickChip(
                             pick: pick,
@@ -66,6 +66,8 @@ extension Item {
         startsOn = suggestion.startsOn
         endsOn = suggestion.endsOn
         url = suggestion.url
+        imageUrl = suggestion.image
+        colorHex = suggestion.color
     }
 
     /// Everything a lookup found, over whatever was there.
@@ -83,8 +85,12 @@ extension Item {
         url = card.url ?? url
         lat = card.lat
         lng = card.lng
-        colorHex = card.color
-        imageUrl = card.image_url
+        // A pick's picture (and the colour read from it) stays when the
+        // page gave none.
+        if card.image_url != nil || imageUrl == nil {
+            colorHex = card.color
+            imageUrl = card.image_url
+        }
         source = card.source
         placeId = card.place_id
         showings = card.showings ?? []

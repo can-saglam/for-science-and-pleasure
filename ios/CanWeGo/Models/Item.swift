@@ -662,9 +662,14 @@ extension Item {
 
     var accentColor: Color {
         if let hex = colorHex, let color = Color(hex: hex) { return color }
-        // Stable hash of the id so the fallback never flickers between runs.
-        let hash = id.uuidString.utf8.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1) }
-        let hex = Item.palette[abs(hash) % Item.palette.count]
+        return Self.fallbackAccent(id.uuidString)
+    }
+
+    /// One of the palette, picked by a stable hash of `key` so it never
+    /// flickers between runs.
+    static func fallbackAccent(_ key: String) -> Color {
+        let hash = key.utf8.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1) }
+        let hex = palette[abs(hash) % palette.count]
         return Color(hex: hex) ?? .secondary
     }
 }

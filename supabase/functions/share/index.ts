@@ -2,11 +2,12 @@
 //   POST { item_id, card } (member JWT) → { token, url }. The card is what
 //     the phone has, so a save made offline or just edited goes as it is.
 //     Sharing the same save again keeps its link and refreshes the copy.
-//   GET ?t=<token> (public) → { card }, for wegocan.com/s/<token> and for
-//     the app, which opens it ready to save.
+//   GET ?t=<token> (public) → { card, from }, for wegocan.com/s/<token> and
+//     for the app, which opens it ready to save. `from` is the sender's
+//     first name as the app shows it, or null.
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
-import { sharedCard, shareToken, SITE } from "../_shared/share.ts";
+import { firstName, sharedCard, shareToken, SITE } from "../_shared/share.ts";
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -23,10 +24,17 @@ Deno.serve(async (req) => {
     if (req.method === "GET") {
       const token = new URL(req.url).searchParams.get("t") ?? "";
       if (!/^[A-Za-z0-9]{10}$/.test(token)) return json({ error: "not found" }, 404);
-      const { data } = await db.from("shared_saves").select("card").eq("token", token).maybeSingle();
+      const { data } = await db.from("shared_saves").select("card, created_by").eq("token", token).maybeSingle();
       if (!data) return json({ error: "not found" }, 404);
-      // A minute: a sender's re-share shows up soon after.
-      return json({ card: data.card }, 200, { "Cache-Control": "public, max-age=60" });
+      const { data: profile } = await db
+        .from("profiles")
+        .select("display_name")
+        .eq("user_id", data.created_by)
+        .maybeSingle();
+      // A minute: a sender's re-share (or a new name) shows up soon after.
+      return json({ card: data.card, from: firstName(profile?.display_name) }, 200, {
+        "Cache-Control": "public, max-age=60",
+      });
     }
 
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
