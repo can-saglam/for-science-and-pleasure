@@ -360,10 +360,10 @@ struct OnboardingView: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: .circle)
-            .opacity(index > 0 && !frozen ? 1 : 0)
-            .disabled(index == 0 || frozen)
+            .opacity(canGoBack && !frozen ? 1 : 0)
+            .disabled(!canGoBack || frozen)
             .accessibilityLabel("Back")
-            .accessibilityHidden(index == 0)
+            .accessibilityHidden(!canGoBack)
 
             Spacer(minLength: 0)
 
@@ -657,7 +657,7 @@ struct OnboardingView: View {
             LogoTitle(height: 52, writes: .onboarding)
             Text(auth.sessionExpired && !preview
                  ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
-                 : "Save the things you want to go to.\nShare them. Get a nudge\nbefore they close.")
+                 : "For all the places you\u{2019}ll go!")
                 .font(.displaySmallBold(23, relativeTo: .title3))
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
@@ -915,13 +915,11 @@ struct OnboardingView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 quiet("Try again") {
-                    Task {
-                        signingIn = true
-                        await signedInFromFrontDoor()
-                        signingIn = false
-                    }
+                    Task { await openLibrary() }
                 }
-            } else if signingIn {
+            } else if signingIn || (auth.signedIn && !preview && note == nil) {
+                // Signed in, this page has nothing left to ask: it moves
+                // on by itself to the first unanswered question.
                 HStack(spacing: 10) {
                     ProgressView().tint(AppBackground.ink)
                     Text("Opening your library…")
@@ -930,23 +928,9 @@ struct OnboardingView: View {
                 }
                 .frame(height: 50)
             } else if auth.signedIn, !preview {
-                // A relaunch after sign-in used to hide Apple's button
-                // and leave no way off this page. Continue picks up
-                // the first unanswered question.
-                Button {
-                    Haptics.tap()
-                    Task {
-                        signingIn = true
-                        await signedInFromFrontDoor()
-                        signingIn = false
-                    }
-                } label: {
-                    Text("Continue")
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+                quiet("Try again") {
+                    Task { await openLibrary() }
                 }
-                .buttonStyle(.glass)
             } else {
                 SignInWithAppleButton(.continue) { request in
                     nonce = AppleSignIn.makeNonce()
@@ -996,6 +980,13 @@ struct OnboardingView: View {
         } catch {
             note = AppleSignIn.message(for: error)
         }
+        signingIn = false
+    }
+
+    private func openLibrary() async {
+        signingIn = true
+        note = nil
+        await signedInFromFrontDoor()
         signingIn = false
     }
 
@@ -2377,7 +2368,7 @@ struct OnboardingView: View {
         // Signed in but still on welcome (no resume, or a failed first
         // pull): don't leave them with only the legal links.
         if !preview, auth.signedIn, page == .welcome {
-            Task { await signedInFromFrontDoor() }
+            Task { await openLibrary() }
         }
         if locationAllowed, pages.contains(.home) {
             Task { await guessHome() }
@@ -2525,8 +2516,14 @@ struct OnboardingView: View {
         }
     }
 
+    /// Once signed in, the welcome page is behind them for good.
+    private var canGoBack: Bool {
+        guard index > 0 else { return false }
+        return preview || !auth.signedIn || pages[index - 1] != .welcome
+    }
+
     private func back() {
-        guard index > 0 else { return }
+        guard canGoBack else { return }
         note = nil
         focus = nil
         withAnimation(ease) { index -= 1 }
