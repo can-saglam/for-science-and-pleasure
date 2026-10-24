@@ -1,59 +1,36 @@
 import SwiftData
 import SwiftUI
 
-/// A save is planned or reminded, not both: a toggle picks which row shows,
-/// and choosing in one drops the other. Switching the toggle alone changes
-/// nothing. Only the row that applies shows when the other can't be used.
+/// A save is planned or reminded, not both: the day row, with a bell beside
+/// it for a reminder instead. Choosing one drops the other. Once there's a
+/// plan the bell goes, since they're going. Only the control that applies
+/// shows when the other can't be used.
 struct PlanOrRemind: View {
     @Bindable var item: Item
-    @State private var mode: Mode
-
-    enum Mode { case plan, remind }
-
-    init(item: Item) {
-        self.item = item
-        _mode = State(initialValue: item.hasReminder && item.upcomingPlan == nil ? .remind : .plan)
-    }
 
     private var plans: Bool { item.canPlan || item.upcomingPlan != nil }
     private var reminds: Bool { item.canRemind && (!item.availableReminderChoices.isEmpty || item.hasCustomReminder) }
-    private var showsPlan: Bool { plans && (mode == .plan || !reminds) }
+    private var reminded: Bool { item.hasReminder && item.upcomingPlan == nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if plans && reminds {
-                Picker("Plan or remind", selection: $mode.animation(.snappy)) {
-                    Text("Plan").tag(Mode.plan)
-                    Text("Remind").tag(Mode.remind)
+        if plans {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    PlanRow(item: item, title: "Pick a day to go")
+                    if reminds, item.upcomingPlan == nil {
+                        RemindRow(item: item, persist: true, title: "Remind me", compact: true)
+                            .transition(.opacity)
+                    }
                 }
-                .pickerStyle(.segmented)
-                .sensoryFeedback(.selection, trigger: mode)
-            }
-            if showsPlan {
-                PlanRow(item: item, title: reminds ? "Pick a day" : "Plan a day")
-                if item.hasReminder, item.upcomingPlan == nil {
-                    footnote("A plan replaces the reminder.")
-                }
-            } else {
-                RemindRow(item: item, persist: true, title: plans && reminds ? "Pick an option" : "Remind")
-                if reminds, let plan = item.planSentenceText, item.upcomingPlan != nil {
-                    footnote("A reminder replaces the plan for \(plan).")
+                if reminds, reminded {
+                    NotificationsOffNote()
+                        .padding(.leading, 4)
                 }
             }
+            .animation(.snappy, value: item.upcomingPlan)
+        } else {
+            RemindRow(item: item, persist: true)
         }
-        .onChange(of: item.planOn) { _, day in
-            if day != nil { mode = .plan }
-        }
-        .onChange(of: item.remindAt) { _, day in
-            if day != nil, item.planOn == nil { mode = .remind }
-        }
-    }
-
-    private func footnote(_ text: String) -> some View {
-        Text(text)
-            .font(.footnote)
-            .foregroundStyle(AppBackground.secondaryInk)
-            .padding(.leading, 4)
     }
 }
 
@@ -417,49 +394,26 @@ struct PlanSheet: View {
                     }
 
                     notes
-
-                    if item.upcomingPlan != nil {
-                        Button(role: .destructive) {
-                            Haptics.tap()
-                            finish(nil)
-                        } label: {
-                            Label("Remove plan", systemImage: "calendar.badge.minus")
-                                .fontWeight(.semibold)
-                                .frame(maxWidth: .infinity)
-                        }
-                        .destructiveGlass()
-                        .controlSize(.large)
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
                 .padding(.bottom, 24)
             }
             // Pinned, so saving is in reach at half height and at big text
-            // sizes alike.
+            // sizes alike. Floating like the detail drawer's actions.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Button {
-                    guard let day else { return }
-                    Haptics.success()
-                    finish((day, timed ? clock : nil))
-                } label: {
-                    Text("Save plan")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                }
-                .prominentGlass()
-                .controlSize(.large)
-                .disabled(!canSave)
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 8)
-                .background {
-                    LinearGradient(
-                        stops: [.init(color: AppBackground.sheet.opacity(0), location: 0),
-                                .init(color: AppBackground.sheet, location: 0.35)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .ignoresSafeArea()
+                FloatingActions {
+                    if item.upcomingPlan != nil {
+                        FloatingCircleButton("Remove plan", systemImage: "calendar.badge.minus", tint: AppBackground.destructive) {
+                            finish(nil)
+                        }
+                    }
+                    FloatingMainButton("Save plan", systemImage: "checkmark") {
+                        guard let day else { return }
+                        Haptics.success()
+                        finish((day, timed ? clock : nil))
+                    }
+                    .disabled(!canSave)
                 }
             }
             .background { ThemeFill(color: AppBackground.sheet) }

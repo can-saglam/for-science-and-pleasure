@@ -424,6 +424,10 @@ extension Item {
     /// Nobody's been to an event that hasn't opened yet.
     var canMarkDone: Bool { timeBucket != .upcoming }
 
+    /// Only while it's still on; an event that's over would just land back
+    /// in the archive.
+    var canPutBack: Bool { isDone && timeBucket != .past }
+
     /// Days become weeks become months once the number stops being useful —
     /// "52 days left" reads worse than "7 weeks left".
     private static func friendlySpan(_ d: Int) -> String {

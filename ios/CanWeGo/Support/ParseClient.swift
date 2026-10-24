@@ -1,4 +1,5 @@
 import Foundation
+import StoreKit
 
 /// Calls the stateless `parse` edge function — paste a link or attach a
 /// screenshot, get back a structured card. Nothing is stored server-side.
@@ -343,7 +344,8 @@ enum ParseClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let jwt = try await SupabaseAuth.shared.validToken()
         request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(["locality": locality, "country": country])
+        struct Body: Encodable { let locality, country: String; let store: Bool }
+        request.httpBody = try JSONEncoder().encode(Body(locality: locality, country: country, store: await fromAppStore.value))
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -352,6 +354,18 @@ enum ParseClient {
             throw ParseError.server(message ?? "Suggestions failed (\(status)).", status: status)
         }
         return try JSONDecoder().decode(SuggestionPool.self, from: data)
+    }
+
+    /// An App Store install rather than TestFlight or Xcode, so the server
+    /// can tell real demand from testing and knows when the app went live.
+    private static let fromAppStore = Task<Bool, Never> {
+        #if DEBUG
+        // Without a receipt, AppTransaction asks the user to sign in to their Apple Account.
+        return false
+        #else
+        guard case .verified(let transaction)? = try? await AppTransaction.shared else { return false }
+        return transaction.environment == .production
+        #endif
     }
 
     // MARK: - Locate (find missing locations)

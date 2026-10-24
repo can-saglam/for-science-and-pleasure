@@ -38,21 +38,42 @@ struct ItemDetailView: View {
         case idle, added, failed
     }
 
-    /// "Added by Can" — same as the web; quietly absent when unknown.
-    private var addedBy: String? {
-        MembersStore.shared.saverName(for: item).map { "Added by \($0)" }
+    /// "Added by Can" and "edited by Joyce yesterday" (just "edited
+    /// yesterday" when it's the saver's own edit). The edit only shows once
+    /// the row has actually been changed after it was saved (the server
+    /// stamps updated_by on human edits alone, so a thumbnail backfill never
+    /// counts). Either is nil when unknown.
+    private var who: (added: String?, edited: String?) {
+        let saver = MembersStore.shared.saverName(for: item)
+        let editor = item.updatedBy.flatMap { by in
+            item.updatedAt.timeIntervalSince(item.createdAt) > 60 ? MembersStore.shared.name(forUser: by) : nil
+        }
+        let when = item.updatedAt.formatted(.relative(presentation: .named))
+        let own = saver != nil && (item.updatedBy == item.createdBy || editor == saver)
+        return (
+            saver.map { "Added by \($0)" },
+            editor.map { own ? "edited \(when)" : "edited by \($0) \(when)" }
+        )
     }
 
-    /// "Edited by Joyce · yesterday" — only once the row has actually been
-    /// edited after it was saved (the server stamps updated_by on human
-    /// edits alone, so a thumbnail backfill never produces this line).
-    private var editedBy: String? {
-        guard let by = item.updatedBy,
-              item.updatedAt.timeIntervalSince(item.createdAt) > 60,
-              let name = MembersStore.shared.name(forUser: by)
-        else { return nil }
-        let when = item.updatedAt.formatted(.relative(presentation: .named))
-        return "Edited by \(name) · \(when)"
+    /// Who saved and who last edited, on one line when it fits; with long
+    /// names, the edit takes a line of its own rather than breaking mid-name.
+    @ViewBuilder
+    private var whoRow: some View {
+        let (added, edited) = who
+        if let added, let edited {
+            metaRow("person") {
+                ViewThatFits(in: .horizontal) {
+                    Text("\(added) · \(edited)")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(added)
+                        Text(edited.prefix(1).uppercased() + edited.dropFirst())
+                    }
+                }
+            }
+        } else if let line = added ?? edited.map({ $0.prefix(1).uppercased() + $0.dropFirst() }) {
+            metaRow("person", line)
+        }
     }
 
     private var dateLine: String? { item.dateLine }
@@ -493,8 +514,7 @@ struct ItemDetailView: View {
             metaRow("building.2", item.venue != item.title ? item.venue : nil)
             metaRow("map", areaLine)
             metaRow("banknote", item.price)
-            metaRow("person", addedBy)
-            metaRow("pencil", editedBy)
+            whoRow
             metaRow("camera", photoCredit)
         }
 
@@ -577,15 +597,19 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func metaRow(_ symbol: String, _ text: String?) -> some View {
         if let text {
-            Label {
-                Text(text).foregroundStyle(AppBackground.secondaryInk)
-            } icon: {
-                Image(systemName: symbol)
-                    .foregroundStyle(AppBackground.ink.opacity(0.45))
-                    .frame(width: 20)
-            }
-            .font(.subheadline)
+            metaRow(symbol) { Text(text) }
         }
+    }
+
+    private func metaRow(_ symbol: String, @ViewBuilder _ content: () -> some View) -> some View {
+        Label {
+            content().foregroundStyle(AppBackground.secondaryInk)
+        } icon: {
+            Image(systemName: symbol)
+                .foregroundStyle(AppBackground.ink.opacity(0.45))
+                .frame(width: 20)
+        }
+        .font(.subheadline)
     }
 
 }

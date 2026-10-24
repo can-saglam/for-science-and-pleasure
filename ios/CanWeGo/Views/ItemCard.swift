@@ -544,9 +544,9 @@ struct ItemCardRow: View {
         // actions a sighted thumb has.
         .accessibilityHint("Opens the details")
         .accessibilityActions {
-            if item.isDone {
+            if item.canPutBack {
                 Button("Put back") { putBack() }
-            } else if item.canMarkDone {
+            } else if !item.isDone && item.canMarkDone {
                 Button(Voice.didGo) {
                     celebrate += 1
                     item.markDone()
@@ -562,7 +562,7 @@ struct ItemCardRow: View {
         // mark an event done (see: Carnival, 7:13am, nobody remembers doing
         // it). The swipe now only reveals the button; done takes a real tap.
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if item.isDone {
+            if item.canPutBack {
                 Button {
                     Haptics.tap()
                     putBack()
@@ -570,7 +570,7 @@ struct ItemCardRow: View {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
                 .tint(AppBackground.swipePutBack)
-            } else if item.canMarkDone {
+            } else if !item.isDone && item.canMarkDone {
                 Button {
                     celebrate += 1
                     item.markDone()
@@ -591,14 +591,14 @@ struct ItemCardRow: View {
         }
         .contentShape(.contextMenuPreview, .rect(cornerRadius: compact ? 14 : 18, style: .continuous))
         .contextMenu {
-            if item.isDone {
+            if item.canPutBack {
                 Button {
                     Haptics.tap()
                     putBack()
                 } label: {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
-            } else if item.canMarkDone {
+            } else if !item.isDone && item.canMarkDone {
                 Button {
                     celebrate += 1
                     item.markDone()

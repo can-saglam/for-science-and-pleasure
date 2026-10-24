@@ -1939,6 +1939,7 @@ struct OnboardingView: View {
                             city: starterChips.isEmpty ? chosenHome?.locality : starterCity,
                             picks: starterChips,
                             loading: suggestions.loading,
+                            finding: suggestions.findingEvents,
                             ticked: Set(tickedPicks.map(\.id))
                         ) { pick in
                             if let i = tickedPicks.firstIndex(of: pick) {

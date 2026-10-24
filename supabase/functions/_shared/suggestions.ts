@@ -396,13 +396,44 @@ async function searchEvents(
     }
   }
   const text = answerText(response.content);
-  const raw = readItems(text);
+  // Cut off after a last search, the list it had already written is
+  // still in an earlier text block.
+  const raw = readItems(text) ?? lastListIn(response.content);
+  const usage = usageOf(response);
   return {
     raw: raw ?? [],
     seen,
-    note: raw ? `${raw.length} (${response.stop_reason})` : `unreadable (${response.stop_reason}): ${text.slice(0, 120)}`,
-    usage: usageOf(response),
+    note: raw
+      ? `${raw.length} (${response.stop_reason})`
+      : `unreadable (${response.stop_reason}, ${usage.output_tokens} out; ${blockSummary(response.content)}): ${text.slice(0, 120)}`,
+    usage,
   };
+}
+
+/// The last text block that holds a list, scanning back from the end.
+export function lastListIn(content: ReadonlyArray<{ type: string; text?: string }>): unknown[] | null {
+  for (let i = content.length - 1; i >= 0; i--) {
+    const b = content[i];
+    if (b.type !== "text" || !b.text) continue;
+    const items = readItems(b.text);
+    if (items?.length) return items;
+  }
+  return null;
+}
+
+/// "text×3 1.2k, server_tool_use×4, web_search_tool_result×4, thinking×2 9.8k":
+/// where an answer's output went, for a note when it couldn't be read.
+export function blockSummary(content: ReadonlyArray<{ type: string; text?: string; thinking?: string }>): string {
+  const tally = new Map<string, { n: number; chars: number }>();
+  for (const b of content) {
+    const t = tally.get(b.type) ?? { n: 0, chars: 0 };
+    t.n += 1;
+    t.chars += (b.text ?? b.thinking ?? "").length;
+    tally.set(b.type, t);
+  }
+  return [...tally].map(([type, { n, chars }]) =>
+    `${type}×${n}${chars ? ` ${(chars / 1000).toFixed(1)}k` : ""}`
+  ).join(", ");
 }
 
 /// What's on now or soon, from a web search. Every link is opened: a page

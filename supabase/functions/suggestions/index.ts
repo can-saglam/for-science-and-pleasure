@@ -1,5 +1,7 @@
 // suggestions: things on in a home city, for the add page, the empty
-// library tabs and the first-save page. Body: { locality, country }. Answers from the
+// library tabs and the first-save page. Body: { locality, country, store }
+// (store: an App Store install; each ask is logged in city_asks so the
+// warm-up follows demand). Answers from the
 // stored pool straight away, ended events filtered out; a stale pool
 // refreshes after the answer, so the next ask gets the new one. A city
 // with no places yet waits for the quick knowledge call so the first ask
@@ -10,18 +12,14 @@ import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { consumeQuota } from "../_shared/quota.ts";
 import { fallbackStarters, starterKey } from "../_shared/starters.ts";
+import { cityJobs } from "../_shared/suggestion_jobs.ts";
 import {
   BUSY_CITY_PEOPLE,
-  type Refreshed,
-  type Suggestion,
   type SuggestionKind,
   busyMatters,
-  dress,
   isDue,
   leaseFree,
   triedRecently,
-  refreshEvents,
-  refreshPlaces,
   servePool,
   undressed,
 } from "../_shared/suggestions.ts";
@@ -58,113 +56,21 @@ Deno.serve(async (req) => {
     const db = admin();
     const key = starterKey(locality, country);
     const today = new Date().toISOString().slice(0, 10);
-    const { data } = await db
-      .from("city_suggestions")
-      .select("kind, payload, fetched_at, refreshing_since")
-      .eq("key", key);
+    const [{ data, error: readError }, { error: askError }] = await Promise.all([
+      db.from("city_suggestions").select("kind, payload, fetched_at, refreshing_since").eq("key", key),
+      db.from("city_asks").upsert(
+        { key, user_id: caller.userId, day: today, store: body.store === true },
+        { onConflict: "key,user_id,day", ignoreDuplicates: true },
+      ),
+    ]);
+    if (askError) console.error("city_asks", askError.message);
+    // Not "a new city": that would spend the caller's limit and a search.
+    if (readError) throw new Error(`city_suggestions: ${readError.message}`);
     const rows = (data ?? []) as Row[];
     const row = (kind: SuggestionKind) => rows.find((r) => r.kind === kind) ?? null;
     let busy = false;
 
-    const record = async (kind: SuggestionKind, outcome: string, result: Refreshed | null, ms: number) => {
-      const { error } = await db.from("suggestion_runs").insert({
-        key,
-        kind,
-        outcome,
-        busy: kind === "event" && busy,
-        proposed: result?.proposed ?? null,
-        kept: result?.items.length ?? null,
-        model: result?.usage.model ?? null,
-        searches: result?.usage.searches ?? null,
-        input_tokens: result?.usage.input_tokens ?? null,
-        output_tokens: result?.usage.output_tokens ?? null,
-        total_ms: ms,
-      });
-      if (error) console.error("suggestion_runs", error.message);
-    };
-
-    /// One job per row at a time: a refresh, or dressing an old pool.
-    const claim = async (kind: SuggestionKind): Promise<boolean> => {
-      await db
-        .from("city_suggestions")
-        .upsert({ key, kind, locality, country }, { onConflict: "key,kind", ignoreDuplicates: true });
-      const now = new Date();
-      const cutoff = new Date(now.getTime() - 5 * 60_000).toISOString();
-      const { data: claimed } = await db
-        .from("city_suggestions")
-        .update({ refreshing_since: now.toISOString() })
-        .eq("key", key)
-        .eq("kind", kind)
-        .or(`refreshing_since.is.null,refreshing_since.lt.${cutoff}`)
-        .select("key");
-      return !!claimed?.length;
-    };
-
-    /// An empty or failed refresh keeps the old pool, and the next try
-    /// waits a day (triedRecently). The quick first ask gives pictures a
-    /// few seconds so it still answers fast; any it misses come with the
-    /// searched pool that follows.
-    const refresh = async (kind: SuggestionKind, quick = false): Promise<Suggestion[] | null> => {
-      if (!await claim(kind)) return null;
-      const started = Date.now();
-      const took = () => `${Math.round((Date.now() - started) / 1000)}s`;
-      const note = (last_note: string) =>
-        db.from("city_suggestions").update({ last_note }).eq("key", key).eq("kind", kind);
-      let stage = "started";
-      try {
-        await note(stage);
-        const result = kind === "event"
-          ? await refreshEvents(locality, country, today, (s) => note(stage = `${s} (${took()})`))
-          : await refreshPlaces(locality, country, today, quick);
-        const summary = `kept ${result.items.length} of ${result.proposed} in ${took()}; ${stage}`;
-        await record(kind, result.items.length === 0 ? "empty" : "kept", result, Date.now() - started);
-        if (result.items.length === 0) {
-          await note(summary);
-          return null;
-        }
-        const items = await dress(result.items, locality, country, quick ? 5_000 : undefined);
-        await db
-          .from("city_suggestions")
-          .update({
-            payload: { items },
-            fetched_at: new Date().toISOString(),
-            refreshing_since: null,
-            last_note: summary,
-          })
-          .eq("key", key)
-          .eq("kind", kind);
-        return items;
-      } catch (error) {
-        console.error("suggestions refresh", kind, error);
-        await note(`error after ${took()}: ${String(error).slice(0, 300)}`);
-        await record(kind, "error", null, Date.now() - started);
-        return null;
-      }
-    };
-
-    /// A pool stored before picks had pictures gets them once, without a
-    /// new search.
-    const redress = async (kind: SuggestionKind) => {
-      if (!await claim(kind)) return;
-      try {
-        const { data } = await db
-          .from("city_suggestions")
-          .select("payload")
-          .eq("key", key)
-          .eq("kind", kind)
-          .maybeSingle();
-        const stored = (data?.payload as { items?: unknown } | null)?.items;
-        const items = await dress(Array.isArray(stored) ? stored as Suggestion[] : [], locality, country);
-        await db
-          .from("city_suggestions")
-          .update({ payload: { items }, refreshing_since: null })
-          .eq("key", key)
-          .eq("kind", kind);
-      } catch (error) {
-        console.error("suggestions dress", kind, error);
-        await db.from("city_suggestions").update({ refreshing_since: null }).eq("key", key).eq("kind", kind);
-      }
-    };
+    const { refresh, redress } = cityJobs(db, { key, locality, country, today }, () => busy);
 
     const eventRow = row("event");
     const placeRow = row("place");

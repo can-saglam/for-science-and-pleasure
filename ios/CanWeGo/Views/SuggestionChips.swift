@@ -5,9 +5,12 @@ import SwiftUI
 /// as sharing it in.
 struct SuggestionChips: View {
     let picks: [ParseClient.Suggestion]
+    /// Set while the city's events are still being searched for.
+    var finding: String? = nil
 
     var body: some View {
         PickStrip {
+            if let finding { FindingChip(city: finding) }
             ForEach(picks) { s in
                 PickChip(pick: s, hint: "Adds it to your library") { Self.open(s) }
             }
@@ -17,6 +20,44 @@ struct SuggestionChips: View {
     static func open(_ s: ParseClient.Suggestion) {
         CaptureGate.pendingLink = s.url
         NotificationCenter.default.post(name: .cwgCaptureImage, object: nil)
+    }
+}
+
+/// Where a new city's events will be, while they're searched for: a chip
+/// the size of the others, so the row doesn't look empty or broken, and
+/// takes its place when they arrive.
+struct FindingChip: View {
+    let city: String
+
+    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 56
+
+    var body: some View {
+        HStack(spacing: 11) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(AppBackground.secondaryInk)
+                .frame(width: side * 0.5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Finding what's on in \(city)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink)
+                Text("Takes a minute or two")
+                    .font(.caption)
+                    .foregroundStyle(AppBackground.secondaryInk)
+            }
+            .lineLimit(1)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 14)
+        .frame(minHeight: side)
+        .frame(maxWidth: 300, alignment: .leading)
+        .background(AppBackground.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(AppBackground.ink.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Finding what's on in \(city). Takes a minute or two.")
     }
 }
 

@@ -449,3 +449,7 @@ verify_jwt = false
 # making one checks the caller itself.
 [functions.share]
 verify_jwt = false
+
+# Called by pg_cron with the cron secret, which the function checks.
+[functions.warm-cities]
+verify_jwt = false

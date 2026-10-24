@@ -9,13 +9,14 @@ import UserNotifications
 /// checked, so it can be switched off. Saves with no dates to hang a
 /// preset off get no row. Writes the reminder fields on `item`. When
 /// `persist` is true (detail, already saved) it stamps `updatedAt` and
-/// saves so sync picks the change up.
+/// saves so sync picks the change up. `compact` draws only a bell button
+/// and leaves the notifications footnote to the caller.
 struct RemindRow: View {
     @Bindable var item: Item
     var persist = false
     var title = "Remind"
+    var compact = false
     @Environment(\.modelContext) private var context
-    @State private var notificationsDenied = false
 
     private var offersPresets: Bool { !item.availableReminderChoices.isEmpty }
 
@@ -25,7 +26,9 @@ struct RemindRow: View {
             // Menu's own label while the popover is up, and that used
             // to take the whole control with it.
             VStack(alignment: .leading, spacing: 8) {
-            chip
+            Group {
+                if compact { bell } else { chip }
+            }
                 .overlay {
                     Menu {
                         menuContent
@@ -49,10 +52,9 @@ struct RemindRow: View {
                     guard !persist else { return }
                     item.reconcileReminder()
                 }
-                .task { await refreshNotificationStatus() }
 
-            if notificationsDenied, item.hasReminder {
-                notificationFootnote
+            if !compact, item.hasReminder {
+                NotificationsOffNote()
             }
             }
         } else if persist, item.hasReminder {
@@ -75,19 +77,13 @@ struct RemindRow: View {
         }
     }
 
-    @ViewBuilder
-    private var notificationFootnote: some View {
-        #if !APP_EXTENSION
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-            Link("Notifications are off, so reminders won\u{2019}t arrive. Open Settings.", destination: url)
-                .font(.footnote)
-                .foregroundStyle(AppBackground.secondaryInk)
-        }
-        #else
-        Text("Notifications are off, so reminders won\u{2019}t arrive until they\u{2019}re allowed.")
-            .font(.footnote)
-            .foregroundStyle(AppBackground.secondaryInk)
-        #endif
+    private var bell: some View {
+        Image(systemName: item.hasReminder ? "bell.fill" : "bell")
+            .font(.subheadline)
+            .foregroundStyle(AppBackground.ink.opacity(item.hasReminder ? 1 : 0.75))
+            .frame(width: 44, height: 44)
+            .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+            .accessibilityHidden(true)
     }
 
     private var chip: some View {
@@ -188,14 +184,42 @@ struct RemindRow: View {
                 _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             }
             #endif
-            await refreshNotificationStatus()
+            NotificationsOffNote.refresh()
+        }
+    }
+}
+
+/// Under a set reminder when notifications are denied: it won't arrive.
+struct NotificationsOffNote: View {
+    @State private var denied = false
+    private static let changed = Notification.Name("CanWeGo.notificationStatusChanged")
+
+    static func refresh() {
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    var body: some View {
+        Group {
+            if denied {
+                #if !APP_EXTENSION
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    Link("Notifications are off, so reminders won\u{2019}t arrive. Open Settings.", destination: url)
+                }
+                #else
+                Text("Notifications are off, so reminders won\u{2019}t arrive until they\u{2019}re allowed.")
+                #endif
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(AppBackground.secondaryInk)
+        .task { await check() }
+        .onReceive(NotificationCenter.default.publisher(for: Self.changed)) { _ in
+            Task { await check() }
         }
     }
 
-    private func refreshNotificationStatus() async {
+    private func check() async {
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-        await MainActor.run {
-            notificationsDenied = status == .denied
-        }
+        await MainActor.run { denied = status == .denied }
     }
 }

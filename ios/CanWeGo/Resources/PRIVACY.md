@@ -8,6 +8,7 @@ Can We Go? is a shared list of places and events you mean to go to.
 - The name you give yourself in the app, so people in your group know who saved what.
 - The cards you save: titles, dates, notes, links, photos you attach, and who in the group added them.
 - A home city, if you set one, so dates and distances read in that city.
+- Which city you asked for suggestions in, once a day, and whether your copy came from the App Store, so we keep suggestions ready in the cities people use. These are deleted after 120 days.
 - Whether you subscribe to Can We Go? Plus, and until when, so your group gets its benefits.
 - A device token, if you allow notifications, so someone else in the group can be told when you save something. It is stored with an ID Apple gives the app on your phone, so a reinstall replaces the old token instead of adding another.
 

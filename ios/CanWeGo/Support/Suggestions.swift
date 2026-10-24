@@ -26,6 +26,9 @@ final class Suggestions {
     /// "London|United Kingdom": the city the pool is about.
     private(set) var city: String?
     private(set) var loading = false
+    /// The city has no events yet and the server is searching for them,
+    /// so the chips can say so instead of looking empty.
+    private(set) var findingEvents = false
     private var fetchedAt = Date.distantPast
     private var task: Task<Void, Never>?
 
@@ -44,11 +47,9 @@ final class Suggestions {
     }
 
     /// Ask the server, unless this city's pool is recent or on its way.
-    /// A city with no events yet has a search running there: one more ask
-    /// a minute and a half later picks them up, and until they're in, the
-    /// pool counts as recent for ten minutes, not hours. Pictures being
-    /// looked up get the same second ask, and a pool kept from before picks
-    /// had pictures the same ten minutes.
+    /// While a new city's events or pictures are still being found, keep
+    /// asking (see `followUps`); until they're in, the pool counts as recent
+    /// for ten minutes, not hours.
     func load(for home: HomeStore.Home) {
         let key = Self.key(for: home)
         let bare = (events + places).allSatisfy { $0.image == nil }
@@ -58,6 +59,7 @@ final class Suggestions {
             city = key
             events = []
             places = []
+            findingEvents = false
             fetchedAt = .distantPast
         }
         loading = true
@@ -80,6 +82,7 @@ final class Suggestions {
                 take(again, for: key)
                 coming = again.eventsComing == true || again.picturesComing == true
             }
+            findingEvents = false
         }
     }
 
@@ -91,6 +94,7 @@ final class Suggestions {
     private func take(_ pool: ParseClient.SuggestionPool, for key: String) {
         events = pool.events
         places = pool.places
+        findingEvents = pool.eventsComing == true
         fetchedAt = .now
         let stored = Stored(city: key, fetchedAt: fetchedAt, events: events, places: places)
         if let data = try? JSONEncoder().encode(stored) {

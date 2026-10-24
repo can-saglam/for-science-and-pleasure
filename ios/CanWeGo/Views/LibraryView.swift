@@ -546,7 +546,7 @@ struct LibraryView: View {
             .task {
                 let env = ProcessInfo.processInfo.environment
                 if let probe = env["CWG_OPEN"],
-                   let match = visible.first(where: { $0.title.localizedCaseInsensitiveContains(probe) }) {
+                   let match = (visible + archiveAll).first(where: { $0.title.localizedCaseInsensitiveContains(probe) }) {
                     selected = match
                 }
                 if let chip = env["CWG_CHIP"] {
@@ -1034,15 +1034,16 @@ struct LibraryView: View {
     private var suggestionChips: some View {
         let home = HomeStore.shared.isSet ? HomeStore.shared.home : nil
         let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: library) } ?? []
+        let finding = kind == Item.Kind.event && Suggestions.shared.findingEvents ? home?.locality : nil
         VStack(spacing: 0) {
-            if !picks.isEmpty {
+            if !picks.isEmpty || finding != nil {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(been.isEmpty ? "Or start with one of these" : "Or try one of these")
                         .font(.caption.weight(.semibold))
                         .textCase(.uppercase)
                         .tracking(0.6)
                         .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
-                    SuggestionChips(picks: picks)
+                    SuggestionChips(picks: picks, finding: finding)
                 }
                 .padding(.top, 12)
                 .transition(.opacity)

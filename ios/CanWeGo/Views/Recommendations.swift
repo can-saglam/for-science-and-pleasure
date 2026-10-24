@@ -10,6 +10,8 @@ struct Recommendations: View {
     let city: String?
     let picks: [ParseClient.Suggestion]
     var loading = false
+    /// The city's events are still being searched for.
+    var finding = false
     /// The ticked picks' ids, when chips tick instead of opening.
     var ticked: Set<String>? = nil
     let onPick: (ParseClient.Suggestion) -> Void
@@ -31,6 +33,7 @@ struct Recommendations: View {
                     .tracking(0.6)
                     .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 PickStrip {
+                    if finding { FindingChip(city: city) }
                     ForEach(picks) { pick in
                         PickChip(
                             pick: pick,

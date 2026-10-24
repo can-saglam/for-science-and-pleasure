@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, busyMatters, interleave, isDue, isTicketEventPage, leaseFree, readItems, servePool, shapeSuggestions, stillOn, triedRecently, undressed } from "./suggestions.ts";
+import { aboutEvent, answerText, blockSummary, busyMatters, interleave, isDue, isTicketEventPage, lastListIn, leaseFree, readItems, servePool, shapeSuggestions, stillOn, triedRecently, undressed } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -206,4 +206,22 @@ Deno.test("a refresh that found nothing waits a day before the next", () => {
   assert(triedRecently({ outcome: "error", at: "2026-09-25T13:00:00Z" }, now));
   assert(!triedRecently({ outcome: "empty", at: "2026-09-25T11:00:00Z" }, now));
   assert(!triedRecently({ outcome: "kept", at: "2026-09-26T11:50:00Z" }, now));
+});
+
+Deno.test("an answer cut off after a last search keeps the list it wrote before it", () => {
+  const content = [
+    { type: "text", text: '{"items":[{"title":"A"},{"title":"B"}]}' },
+    { type: "server_tool_use" },
+    { type: "web_search_tool_result" },
+  ];
+  assertEquals(answerText(content), "");
+  assertEquals(lastListIn(content)?.length, 2);
+  assertEquals(lastListIn([{ type: "text", text: "Let me search." }, { type: "server_tool_use" }]), null);
+});
+
+Deno.test("a block summary says where the output went", () => {
+  assertEquals(
+    blockSummary([{ type: "thinking", thinking: "x".repeat(2500) }, { type: "server_tool_use" }, { type: "server_tool_use" }]),
+    "thinking×1 2.5k, server_tool_use×2",
+  );
 });

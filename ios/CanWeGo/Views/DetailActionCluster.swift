@@ -30,7 +30,7 @@ struct DetailActionCluster: View {
 
     /// Anything to show at all.
     static func hasActions(_ item: Item, done: Bool) -> Bool {
-        item.url.flatMap(URL.init(string:)) != nil || item.isDone || item.canMarkDone || done
+        item.url.flatMap(URL.init(string:)) != nil || item.canPutBack || (!item.isDone && item.canMarkDone) || done
             || item.startsOn != nil || item.upcomingPlan != nil
             || (item.isPlace && item.directionsURL != nil)
     }
@@ -49,7 +49,9 @@ struct DetailActionCluster: View {
         FloatingActions {
             if item.isDone && !done {
                 if let link { FloatingCircleButton("Open link", systemImage: "safari") { openURL(link) } }
-                FloatingMainButton("Put back", systemImage: "arrow.uturn.backward", action: putBack)
+                if item.canPutBack {
+                    FloatingMainButton("Put back", systemImage: "arrow.uturn.backward", action: putBack)
+                }
             } else {
                 if showingDirections || !showsCalendar || link == nil, let directions {
                     FloatingCircleButton("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(directions) }
