@@ -16,6 +16,9 @@ struct ItemCard: View {
     /// "2,600 km from London" on saves far from home. Off in onboarding,
     /// where home is being chosen (and a replay never saves it).
     var awayHint = true
+    /// Grows to the height it's given, text at the top: cards laid side
+    /// by side at one height (onboarding's strip).
+    var fillsHeight = false
 
     private var subtitle: String {
         if let meta { return meta }
@@ -208,7 +211,8 @@ struct ItemCard: View {
         .padding(.vertical, compact ? 10 : 13)
         // Keep text clear of the visible part of the photo.
         .padding(.trailing, imageURL == nil ? 0 : 64)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil,
+               alignment: fillsHeight ? .topLeading : .leading)
         .background(alignment: .trailing) {
             if let imageURL {
                 bleedImage(imageURL)

@@ -84,7 +84,7 @@ struct OnboardingView: View {
     @State private var themes = ThemeStore.shared
     @State private var auth = SupabaseAuth.shared
 
-    enum Page: String, Hashable { case welcome, together, home, name, save, joined, invite, notify, done }
+    enum Page: String, Hashable { case welcome, intro, together, home, name, save, joined, invite, notify, done }
     @State private var pages: [Page] = [.welcome, .together, .name, .home, .save, .notify, .done]
     @State private var index = 0
 
@@ -157,6 +157,8 @@ struct OnboardingView: View {
     @State private var drift = false
     /// Welcome's card fan has been dealt (once per run of the flow).
     @State private var dealt = false
+    @State private var introShown = false
+    @State private var stripStart: Date?
     /// The joined page's fan of the group's own saves, dealt on arrival.
     @State private var joinedDealt = false
     @State private var savedDealt = false
@@ -210,6 +212,20 @@ struct OnboardingView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
             }
             .safeAreaPadding(.bottom, page == .welcome ? 0 : 84)
+            // The welcome cards live above the pages and follow a slot on
+            // each, so signing in squares the same fan into the intro's stack.
+            .overlayPreferenceValue(DeckSlotKey.self) { slots in
+                GeometryReader { proxy in
+                    if let anchor = slots[page] {
+                        let rect = proxy[anchor]
+                        showcaseDeck
+                            .frame(width: rect.width, height: rect.height)
+                            .position(x: rect.midX, y: rect.midY)
+                            .animation(reduceMotion ? nil : .spring(duration: 1.0, bounce: 0), value: page)
+                            .transition(.opacity)
+                    }
+                }
+            }
 
             if preview {
                 closeButton
@@ -409,6 +425,7 @@ struct OnboardingView: View {
     private func topInset(in height: CGFloat) -> CGFloat {
         switch page {
         case .welcome, .notify, .done: 0
+        case .intro: 36
         case .home: max(Self.headlineTop, height * 0.34)
         default: Self.headlineTop
         }
@@ -484,7 +501,7 @@ struct OnboardingView: View {
         switch page {
         case .welcome:
             return Forward(title: "Get started", disabled: needsSignIn || unreachable, run: advance)
-        case .joined:
+        case .intro, .joined:
             return Forward(run: advance)
         case .together:
             switch together {
@@ -546,6 +563,7 @@ struct OnboardingView: View {
     private var pageBody: some View {
         switch page {
         case .welcome: welcomePage
+        case .intro: introPage
         case .together: togetherPage
         case .name: namePage
         case .home: homePage
@@ -644,16 +662,8 @@ struct OnboardingView: View {
     /// asked of them; returning ones skip the whole run.
     private var welcomePage: some View {
         VStack(spacing: 22) {
-            cardFan(Self.sampleCards, seats: Self.seats, dealt: dealt, key: 0)
-                // The cascade is ~340pt across; a small phone's margins
-                // hold less, so it shrinks to fit rather than bleed.
-                .scaleEffect(min(1, (pageWidth - 56) / 340))
-                .frame(height: 250)
-                .accessibilityHidden(true)
+            deckSlot(.welcome, height: 250)
                 .padding(.bottom, 18)
-                // Drawn over the wordmark and button below, so a card
-                // pulled down travels across the page, not under it.
-                .zIndex(1)
             LogoTitle(height: 52, writes: .onboarding)
             Text(auth.sessionExpired && !preview
                  ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
@@ -700,6 +710,63 @@ struct OnboardingView: View {
         (0.0, 12.0, 58.0),
     ]
 
+    /// The intro's row: the welcome four across the screen, then a few more
+    /// waiting off its right edge to drift in. Unscaled points, a card's
+    /// width plus a gap apart.
+    private static let stripPitch: Double = 298
+    private static let stripSeats: [(Double, Double, Double)] =
+        (0..<(sampleCards.count + stripExtras.count)).map { (0.0, (Double($0) - 1.5) * stripPitch, 0.0) }
+    private static let stripScale: CGFloat = 0.74
+    /// One height for every card in the row, whatever lines it has.
+    private static let stripCardHeight: CGFloat = 100
+
+    /// `x` brought into the loop's span, which starts at `start`.
+    private static func wrapped(_ x: Double, in loop: Double, from start: Double) -> Double {
+        let r = (x - start).truncatingRemainder(dividingBy: loop)
+        return start + (r < 0 ? r + loop : r)
+    }
+
+    /// How far the strip has run. It sets off while the cards are still
+    /// landing, its speed rising along a smooth curve with no kick at
+    /// either end, so settling and drifting read as one motion.
+    private func stripTravel(at date: Date) -> CGFloat {
+        guard let stripStart, !reduceMotion else { return 0 }
+        let t = date.timeIntervalSince(stripStart) - 0.35
+        guard t > 0 else { return 0 }
+        let speed = 36.0, ramp = 2.6
+        if t >= ramp { return CGFloat(speed * (t - ramp / 2)) }
+        let u = t / ramp
+        return CGFloat(speed * ramp * (u * u * u - u * u * u * u / 2))
+    }
+
+    /// Where the welcome cards sit on a page. The deck itself is drawn
+    /// above the pages and follows whichever slot is showing.
+    private func deckSlot(_ page: Page, height: CGFloat) -> some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .anchorPreference(key: DeckSlotKey.self, value: .bounds) { [page: $0] }
+            .accessibilityHidden(true)
+    }
+
+    /// Loose on the front door; once signed in, a row that runs across
+    /// the screen on a loop. Above the pages, so a card pulled down
+    /// travels across the page rather than under it.
+    private var showcaseDeck: some View {
+        let strip = page == .intro
+        return TimelineView(.animation(paused: !strip || reduceMotion)) { context in
+            cardFan(strip ? Self.sampleCards + Self.stripExtras : Self.sampleCards,
+                    seats: strip ? Self.stripSeats : Self.seats,
+                    dealt: dealt, key: 0, still: strip,
+                    slide: strip ? stripTravel(at: context.date) : 0,
+                    loop: strip ? Self.stripPitch * Double(Self.stripSeats.count) : 0)
+        }
+        // The cascade is ~340pt across; a small phone's margins hold
+        // less, so it shrinks to fit rather than bleed.
+        .scaleEffect(min(1, (pageWidth - 56) / 340) * (strip ? Self.stripScale : 1))
+        .accessibilityHidden(true)
+    }
+
     /// Seats for up to three real cards, back to front: the welcome
     /// cascade's front three, tilted and shifted half as much, as the
     /// cards are wider and a tilt would dip a title under the next card.
@@ -741,9 +808,13 @@ struct OnboardingView: View {
     /// fan's pulls apart; cards in `reading` shimmer until their page is in.
     /// With `overlap`, the seats' heights are ignored: each card tucks that
     /// far under the one behind it, however many lines their titles run to.
+    /// `still` stops the drift, and the cards settle into new seats one
+    /// after another rather than all at once. With a `loop` length, the
+    /// seats run `slide` to the left and wrap round to the right.
     private func cardFan(
         _ items: [Item], seats: [(Double, Double, Double)], dealt: Bool, key: Int, width: CGFloat = 280,
-        reading: Set<UUID> = [], overlap: CGFloat? = nil
+        reading: Set<UUID> = [], overlap: CGFloat? = nil, still: Bool = false,
+        slide: CGFloat = 0, loop: Double = 0
     ) -> some View {
         let count = min(items.count, seats.count)
         var seats = Array(seats.prefix(count))
@@ -761,15 +832,19 @@ struct OnboardingView: View {
                 seats[n].2 = Double(tops[n] + heights[n] / 2 - total / 2)
             }
         }
-        return ZStack {
+        // A card wraps half a gap past the leftmost seat, out of sight.
+        let loopStart = (seats.map(\.1).min() ?? 0) - loop / Double(max(count, 1)) / 2
+        // A running row lines up the cards' tops (at the largest text
+        // sizes they keep their own heights).
+        return ZStack(alignment: loop > 0 ? .top : .center) {
             ForEach(Array(items.prefix(count).enumerated()), id: \.offset) { index, item in
                 let i = key + index
                 let seat = seats[index]
                 let front = index == min(items.count, seats.count) - 1
-                let sway = front ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
+                let sway = front || still ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
                 let pull = pulled[i] ?? .zero
                 let held = lifted == i
-                ItemCard(item: item, awayHint: false)
+                ItemCard(item: item, oneLineTitle: loop > 0, awayHint: false, fillsHeight: loop > 0)
                     .overlay {
                         if reading.contains(item.id) {
                             Shimmer(highlight: .white.opacity(themes.current.isLight ? 0.55 : 0.14))
@@ -779,7 +854,8 @@ struct OnboardingView: View {
                         }
                     }
                     .animation(ease, value: reading.contains(item.id))
-                    .frame(width: width)
+                    .frame(width: width,
+                           height: loop > 0 && !typeSize.isAccessibilitySize ? Self.stripCardHeight : nil)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeights[i] = $0 }
                     // A held card tilts with the pull, like a card on a
                     // table dragged from one edge.
@@ -802,7 +878,15 @@ struct OnboardingView: View {
                         reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(index) * 0.13),
                         value: dealt
                     )
+                    // Into new seats left to right, without overshoot.
+                    .animation(
+                        reduceMotion ? nil : .spring(duration: 1.0, bounce: 0).delay(Double(index) * 0.04),
+                        value: still
+                    )
                     .animation(reduceMotion ? nil : .spring(duration: 0.3), value: held)
+                    // Below the animations: the strip moves every frame and
+                    // wraps out of sight, so it must never spring.
+                    .offset(x: loop > 0 ? Self.wrapped(seat.1 - slide, in: loop, from: loopStart) - seat.1 : 0)
                     // Ahead of the page's scroll view, which has nothing
                     // to scroll here but would still claim a vertical pull.
                     .highPriorityGesture(
@@ -888,6 +972,43 @@ struct OnboardingView: View {
         d.colorHex = "#B8892E"
         d.imageUrl = photo("SampleGig")
         return [a, d, b, c]
+    }()
+
+    /// Three more for the intro's strip, drifting in after the welcome
+    /// four: another show, a bar, a gig. Not every save has a photo.
+    private static let stripExtras: [Item] = {
+        let day = { (n: Int) in DayString.addingDays(n, to: DayString.today()) }
+        let a = Item()
+        a.kind = Item.Kind.event
+        a.title = "Salman Toor: Someone Like You"
+        a.venue = "Courtauld Gallery"
+        a.area = "Strand"
+        a.category = "exhibition"
+        a.startsOn = day(-20)
+        a.endsOn = day(23)
+        a.colorHex = "#3F6E4A"
+        let url = URL(string: "cwg-sample://sampletoor")!
+        if let image = UIImage(named: "SampleToor") {
+            ImageStore.seed(image, for: url)
+            a.imageUrl = url.absoluteString
+        }
+        let b = Item()
+        b.kind = Item.Kind.place
+        b.title = "Bar Termini"
+        b.venue = "Bar Termini"
+        b.area = "Soho"
+        b.category = "bar"
+        b.colorHex = "#A8442F"
+        let c = Item()
+        c.kind = Item.Kind.event
+        c.title = "Kokoroko"
+        c.venue = "Roundhouse"
+        c.area = "Camden"
+        c.category = "gig"
+        c.startsOn = day(12)
+        c.endsOn = day(12)
+        c.colorHex = "#C07A2A"
+        return [a, b, c]
     }()
 
     /// The two links App Review looks for under a sign-in button. The
@@ -1105,25 +1226,69 @@ struct OnboardingView: View {
         .padding(.top, 4)
     }
 
+    // MARK: Intro
+
+    /// Straight after sign-in, before any question: what the app is for,
+    /// ending on sharing so the next page's question has its context.
+    private var introPage: some View {
+        let points = [
+            ("square.and.arrow.down", "Save it from anywhere",
+             "Share a link from Instagram, TikTok, Safari or Maps, snap a poster, or search. It becomes a card with the dates."),
+            ("hourglass", "See what\u{2019}s closing",
+             "What ends soon rises to the top, and you can get a nudge before it\u{2019}s gone."),
+            ("person.2.fill", "Share it with your people",
+             "Keep one list with a partner or friends, so plans stop getting lost in the group chat."),
+        ]
+        return VStack(alignment: .leading, spacing: 18) {
+            deckSlot(.intro, height: 80)
+                .padding(.top, 24)
+                .padding(.bottom, 16)
+            headline(firstName.map { "Hi \($0).\nHere\u{2019}s the idea." } ?? "Here\u{2019}s\nthe idea.")
+            lede("One list for the exhibitions, gigs, restaurants and bars you mean to get to.")
+
+            VStack(alignment: .leading, spacing: 20) {
+                ForEach(Array(points.enumerated()), id: \.offset) { i, point in
+                    row(point.0, point.1, point.2)
+                        // In one by one once the cards have squared up.
+                        .opacity(introShown ? 1 : 0)
+                        .offset(y: introShown ? 0 : 10)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.5).delay(0.55 + Double(i) * 0.15),
+                                   value: introShown)
+                }
+            }
+            .padding(.top, 8)
+        }
+        .onAppear {
+            dealt = true
+            introShown = true
+            stripStart = .now
+        }
+        .onDisappear { stripStart = nil }
+    }
+
+    private var firstName: String? {
+        trimmedName.split(separator: " ").first.map(String.init)
+    }
+
     // MARK: Together
 
     /// Who it's for and, for a shared library, which side of the invite
     /// they're on, as one question. A code opens its field under the tile.
     private var togetherPage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            headline("Just you, or\nwith someone?")
-            lede("Either works, and you can change it later in Settings.")
+            headline("Who\u{2019}s coming\nalong?")
+            lede("Keep a list of your own, or share one with your partner or friends. You can switch later in Settings.")
 
             choiceTile("person.fill", "Just me",
-                       "Your own library of things you want to go to.",
+                       "A list of your own, for every place you can\u{2019}t wait to try.",
                        selected: together == .solo) { chooseTogether(.solo) }
                 .disabled(joined)
-            choiceTile("person.2.fill", "Start a shared library",
-                       "Set it up now. You'll send them an invite in a minute.",
+            choiceTile("person.2.fill", "Me and my people",
+                       "One list with your partner or friends. We\u{2019}ll help you invite them next.",
                        selected: together == .start) { chooseTogether(.start) }
                 .disabled(joined)
-            choiceTile("envelope.open.fill", "I have a code",
-                       "Someone already started. Codes look like KV7-P2M.",
+            choiceTile("envelope.open.fill", "I\u{2019}ve got an invite",
+                       "Pop in the code a friend sent you, like KV7-P2M, and you\u{2019}re in.",
                        selected: together == .code) { chooseTogether(.code) }
 
             if together == .code {
@@ -1781,49 +1946,49 @@ struct OnboardingView: View {
     /// doesn't. Same cities as `_shared/starters.ts`.
     private static let cityStarters: [String: [ParseClient.Suggestion]] = [
         "london": [
-            .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place"),
-            .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place"),
-            .init(title: "Roundhouse", url: "https://www.roundhouse.org.uk", kind: "place"),
+            .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place", category: "gallery"),
+            .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place", category: "restaurant"),
+            .init(title: "Roundhouse", url: "https://www.roundhouse.org.uk", kind: "place", category: "venue"),
         ],
         "singapore": [
-            .init(title: "National Gallery", url: "https://www.nationalgallery.sg", kind: "place"),
-            .init(title: "Atlas", url: "https://www.atlasbar.sg", kind: "place"),
-            .init(title: "The Projector", url: "https://theprojector.sg", kind: "place"),
+            .init(title: "National Gallery", url: "https://www.nationalgallery.sg", kind: "place", category: "gallery"),
+            .init(title: "Atlas", url: "https://www.atlasbar.sg", kind: "place", category: "drink"),
+            .init(title: "The Projector", url: "https://theprojector.sg", kind: "place", category: "venue"),
         ],
         "lisbon": [
-            .init(title: "MAAT", url: "https://www.maat.pt", kind: "place"),
-            .init(title: "Cervejaria Ramiro", url: "https://www.cervejariaramiro.pt", kind: "place"),
-            .init(title: "Lux Frágil", url: "https://www.luxfragil.com", kind: "place"),
+            .init(title: "MAAT", url: "https://www.maat.pt", kind: "place", category: "museum"),
+            .init(title: "Cervejaria Ramiro", url: "https://www.cervejariaramiro.pt", kind: "place", category: "restaurant"),
+            .init(title: "Lux Frágil", url: "https://www.luxfragil.com", kind: "place", category: "drink"),
         ],
         "paris": [
-            .init(title: "Musée d'Orsay", url: "https://www.musee-orsay.fr", kind: "place"),
-            .init(title: "Septime", url: "https://www.septime-charonne.fr", kind: "place"),
-            .init(title: "Centre Pompidou", url: "https://www.centrepompidou.fr", kind: "place"),
+            .init(title: "Musée d'Orsay", url: "https://www.musee-orsay.fr", kind: "place", category: "museum"),
+            .init(title: "Septime", url: "https://www.septime-charonne.fr", kind: "place", category: "restaurant"),
+            .init(title: "Centre Pompidou", url: "https://www.centrepompidou.fr", kind: "place", category: "museum"),
         ],
         "new york": [
-            .init(title: "MoMA", url: "https://www.moma.org", kind: "place"),
-            .init(title: "Katz's Delicatessen", url: "https://www.katzsdelicatessen.com", kind: "place"),
-            .init(title: "Film Forum", url: "https://www.filmforum.org", kind: "place"),
+            .init(title: "MoMA", url: "https://www.moma.org", kind: "place", category: "museum"),
+            .init(title: "Katz's Delicatessen", url: "https://www.katzsdelicatessen.com", kind: "place", category: "restaurant"),
+            .init(title: "Film Forum", url: "https://www.filmforum.org", kind: "place", category: "venue"),
         ],
         "tokyo": [
-            .init(title: "Mori Art Museum", url: "https://www.mori.art.museum", kind: "place"),
-            .init(title: "teamLab Planets", url: "https://www.teamlab.art/e/planets/", kind: "place"),
-            .init(title: "Unit", url: "https://www.unit-tokyo.com", kind: "place"),
+            .init(title: "Mori Art Museum", url: "https://www.mori.art.museum", kind: "place", category: "museum"),
+            .init(title: "teamLab Planets", url: "https://www.teamlab.art/e/planets/", kind: "place", category: "museum"),
+            .init(title: "Unit", url: "https://www.unit-tokyo.com", kind: "place", category: "venue"),
         ],
         "hong kong": [
-            .init(title: "M+", url: "https://www.mplus.org.hk", kind: "place"),
-            .init(title: "Yardbird", url: "https://www.yardbirdrestaurant.com", kind: "place"),
-            .init(title: "Broadway Cinematheque", url: "https://www.cinema.com.hk", kind: "place"),
+            .init(title: "M+", url: "https://www.mplus.org.hk", kind: "place", category: "museum"),
+            .init(title: "Yardbird", url: "https://www.yardbirdrestaurant.com", kind: "place", category: "restaurant"),
+            .init(title: "Broadway Cinematheque", url: "https://www.cinema.com.hk", kind: "place", category: "venue"),
         ],
         "san francisco": [
-            .init(title: "SFMOMA", url: "https://www.sfmoma.org", kind: "place"),
-            .init(title: "Zuni Café", url: "https://zunicafe.com", kind: "place"),
-            .init(title: "Roxie Theater", url: "https://roxie.com", kind: "place"),
+            .init(title: "SFMOMA", url: "https://www.sfmoma.org", kind: "place", category: "museum"),
+            .init(title: "Zuni Café", url: "https://zunicafe.com", kind: "place", category: "restaurant"),
+            .init(title: "Roxie Theater", url: "https://roxie.com", kind: "place", category: "venue"),
         ],
         "los angeles": [
-            .init(title: "The Broad", url: "https://www.thebroad.org", kind: "place"),
-            .init(title: "République", url: "https://republiquela.com", kind: "place"),
-            .init(title: "New Beverly Cinema", url: "https://thenewbev.com", kind: "place"),
+            .init(title: "The Broad", url: "https://www.thebroad.org", kind: "place", category: "museum"),
+            .init(title: "République", url: "https://republiquela.com", kind: "place", category: "restaurant"),
+            .init(title: "New Beverly Cinema", url: "https://thenewbev.com", kind: "place", category: "venue"),
         ],
     ]
 
@@ -2399,6 +2564,7 @@ struct OnboardingView: View {
         if preview || JoinGate.pendingCode != nil || !alreadyShared {
             order.insert(.together, at: 1)
         }
+        order.insert(.intro, at: 1)
         if together == .start, !joined, preview || !alreadyShared, let i = order.firstIndex(of: .notify) {
             order.insert(.invite, at: i)
         }
@@ -2926,5 +3092,14 @@ private struct ActivityMelt: View {
         .frame(width: 150)
         .frame(maxHeight: .infinity)
         .clipped()
+    }
+}
+
+/// Each page's slot for the welcome cards, by page: while two pages
+/// cross-fade, the cards follow the one being turned to.
+private struct DeckSlotKey: PreferenceKey {
+    static let defaultValue: [OnboardingView.Page: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [OnboardingView.Page: Anchor<CGRect>], nextValue: () -> [OnboardingView.Page: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
     }
 }

@@ -47,13 +47,14 @@ final class Suggestions {
     }
 
     /// Ask the server, unless this city's pool is recent or on its way.
-    /// While a new city's events or pictures are still being found, keep
-    /// asking (see `followUps`); until they're in, the pool counts as recent
-    /// for ten minutes, not hours.
+    /// While a new city's events, pictures, or types are still being
+    /// found, keep asking (see `followUps`); until they're in, the pool
+    /// counts as recent for ten minutes, not hours.
     func load(for home: HomeStore.Home) {
         let key = Self.key(for: home)
         let bare = (events + places).allSatisfy { $0.image == nil }
-        let maxAge = events.isEmpty || bare ? 600 : Self.maxAge
+        let unlabelled = !(events + places).isEmpty && (events + places).contains { $0.category == nil }
+        let maxAge = events.isEmpty || bare || unlabelled ? 600 : Self.maxAge
         if key == city, loading || Date.now.timeIntervalSince(fetchedAt) < maxAge { return }
         if key != city {
             city = key
@@ -71,7 +72,7 @@ final class Suggestions {
             loading = false
             guard let pool else { return }
             take(pool, for: key)
-            var coming = pool.eventsComing == true || pool.picturesComing == true
+            var coming = pool.eventsComing == true || pool.picturesComing == true || pool.categoriesComing == true
             var asks = 0
             while coming, asks < Self.followUps {
                 asks += 1
@@ -80,15 +81,15 @@ final class Suggestions {
                 guard let again = try? await ParseClient.suggestions(locality: home.locality, country: country) else { continue }
                 guard !Task.isCancelled, city == key else { return }
                 take(again, for: key)
-                coming = again.eventsComing == true || again.picturesComing == true
+                coming = again.eventsComing == true || again.picturesComing == true || again.categoriesComing == true
             }
             findingEvents = false
         }
     }
 
-    /// While the server is still searching a new city or finding its
-    /// pictures, ask again every 20 seconds, for up to five minutes: an
-    /// event search takes two or three.
+    /// While the server is still searching a new city, finding pictures,
+    /// or naming what each pick is, ask again every 20 seconds, for up to
+    /// five minutes: an event search takes two or three.
     private static let followUps = 15
 
     private func take(_ pool: ParseClient.SuggestionPool, for key: String) {

@@ -29,7 +29,7 @@ struct SuggestionChips: View {
 struct FindingChip: View {
     let city: String
 
-    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 56
+    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 72
 
     var body: some View {
         HStack(spacing: 11) {
@@ -78,9 +78,9 @@ struct PickStrip<Content: View>: View {
 }
 
 /// One city pick as a small card: its picture melting in from the left
-/// edge the way a saved card's does from the right, the title, then when
-/// and where. Tinted from the picture's colour, like a card. Ticked, it
-/// takes an ink outline and a check over the picture.
+/// edge the way a saved card's does from the right, the title, when and
+/// where, then what it is. Tinted from the picture's colour, like a card.
+/// Ticked, it takes an ink outline and a check over the picture.
 struct PickChip: View {
     let pick: ParseClient.Suggestion
     var on = false
@@ -89,7 +89,7 @@ struct PickChip: View {
 
     /// The chip's height, and where the text starts: the photo stays
     /// sharp across about this much before it fades under the text.
-    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 56
+    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 72
     @State private var photo: (sharp: UIImage, blurred: UIImage)?
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16, style: .continuous) }
@@ -103,6 +103,14 @@ struct PickChip: View {
     private var detail: String? {
         let parts = [Suggestions.when(pick), Suggestions.shared.whereText(pick)].compactMap(\.self)
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "Festival", "Restaurant": the same word as a filter chip. Absent
+    /// on a pick stored before this line existed.
+    private var kindLabel: String? {
+        guard let category = pick.category?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !category.isEmpty else { return nil }
+        return Item.categoryLabel(category)
     }
 
     init(pick: ParseClient.Suggestion, on: Bool = false, hint: String, action: @escaping () -> Void) {
@@ -130,6 +138,11 @@ struct PickChip: View {
                         Text(detail)
                             .font(.caption)
                             .foregroundStyle(AppBackground.secondaryInk)
+                    }
+                    if let kindLabel {
+                        Text(kindLabel)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(AppBackground.ink)
                     }
                 }
                 .lineLimit(1)
@@ -195,8 +208,8 @@ struct PickChip: View {
         .accessibilityHidden(true)
     }
 
-    /// "Pitchfork Music Festival London 2026, All over London, 2–8 Nov".
+    /// "Pitchfork Music Festival London 2026, All over London, 2–8 Nov, Festival".
     private var spoken: String {
-        [pick.title, Suggestions.shared.whereText(pick), Suggestions.when(pick)].compactMap(\.self).joined(separator: ", ")
+        [pick.title, Suggestions.shared.whereText(pick), Suggestions.when(pick), kindLabel].compactMap(\.self).joined(separator: ", ")
     }
 }

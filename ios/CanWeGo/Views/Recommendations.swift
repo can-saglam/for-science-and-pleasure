@@ -65,6 +65,7 @@ extension Item {
         self.init()
         kind = suggestion.kind
         title = suggestion.title
+        category = suggestion.category
         venue = suggestion.venue
         startsOn = suggestion.startsOn
         endsOn = suggestion.endsOn
