@@ -425,7 +425,7 @@ struct OnboardingView: View {
     private func topInset(in height: CGFloat) -> CGFloat {
         switch page {
         case .welcome, .notify, .done: 0
-        case .intro: 36
+        case .intro: 76
         case .home: max(Self.headlineTop, height * 0.34)
         default: Self.headlineTop
         }
@@ -844,6 +844,7 @@ struct OnboardingView: View {
                 let sway = front || still ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
                 let pull = pulled[i] ?? .zero
                 let held = lifted == i
+                let travel = loop > 0 ? Self.wrapped(seat.1 - slide, in: loop, from: loopStart) - seat.1 : 0
                 ItemCard(item: item, oneLineTitle: loop > 0, awayHint: false, fillsHeight: loop > 0)
                     .overlay {
                         if reading.contains(item.id) {
@@ -886,7 +887,7 @@ struct OnboardingView: View {
                     .animation(reduceMotion ? nil : .spring(duration: 0.3), value: held)
                     // Below the animations: the strip moves every frame and
                     // wraps out of sight, so it must never spring.
-                    .offset(x: loop > 0 ? Self.wrapped(seat.1 - slide, in: loop, from: loopStart) - seat.1 : 0)
+                    .offset(x: travel)
                     // Ahead of the page's scroll view, which has nothing
                     // to scroll here but would still claim a vertical pull.
                     .highPriorityGesture(
@@ -922,7 +923,7 @@ struct OnboardingView: View {
     }
 
     /// Four saves that read like a real week, back to front: an
-    /// exhibition with days left, a gig this week, a place to eat, and a
+    /// exhibition with days left, a gig this week, a supper booked, and a
     /// festival that's on today. Their photos come
     /// from the bundle, handed to the image cache under made-up URLs so
     /// the cards render them through the ordinary melt.
@@ -945,11 +946,13 @@ struct OnboardingView: View {
         a.colorHex = "#B44A2C"
         a.imageUrl = photo("SampleAnish")
         let b = Item()
-        b.kind = Item.Kind.place
-        b.title = "Sessions Arts Club"
+        b.kind = Item.Kind.event
+        b.title = "Supper at Sessions Arts Club"
         b.venue = "Sessions Arts Club"
         b.area = "Clerkenwell"
         b.category = "restaurant"
+        b.startsOn = day(6)
+        b.endsOn = day(6)
         b.colorHex = "#2C7A6B"
         b.imageUrl = photo("SampleSessions")
         let c = Item()
@@ -974,8 +977,9 @@ struct OnboardingView: View {
         return [a, d, b, c]
     }()
 
-    /// Three more for the intro's strip, drifting in after the welcome
-    /// four: another show, a bar, a gig. Not every save has a photo.
+    /// More for the intro's strip, drifting in after the welcome four.
+    /// Like them, each has a photo and a date, so every card in the row
+    /// fills its three lines.
     private static let stripExtras: [Item] = {
         let day = { (n: Int) in DayString.addingDays(n, to: DayString.today()) }
         let a = Item()
@@ -992,23 +996,7 @@ struct OnboardingView: View {
             ImageStore.seed(image, for: url)
             a.imageUrl = url.absoluteString
         }
-        let b = Item()
-        b.kind = Item.Kind.place
-        b.title = "Bar Termini"
-        b.venue = "Bar Termini"
-        b.area = "Soho"
-        b.category = "bar"
-        b.colorHex = "#A8442F"
-        let c = Item()
-        c.kind = Item.Kind.event
-        c.title = "Kokoroko"
-        c.venue = "Roundhouse"
-        c.area = "Camden"
-        c.category = "gig"
-        c.startsOn = day(12)
-        c.endsOn = day(12)
-        c.colorHex = "#C07A2A"
-        return [a, b, c]
+        return [a]
     }()
 
     /// The two links App Review looks for under a sign-in button. The
