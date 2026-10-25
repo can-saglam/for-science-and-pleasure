@@ -937,7 +937,7 @@ struct OnboardingView: View {
         }
         let a = Item()
         a.kind = Item.Kind.event
-        a.title = "Anish Kapoor at Hayward Gallery"
+        a.title = "Anish Kapoor"
         a.venue = "Hayward Gallery"
         a.area = "Southbank"
         a.category = "exhibition"
@@ -947,7 +947,7 @@ struct OnboardingView: View {
         a.imageUrl = photo("SampleAnish")
         let b = Item()
         b.kind = Item.Kind.event
-        b.title = "Supper at Sessions Arts Club"
+        b.title = "Sessions Arts Club"
         b.venue = "Sessions Arts Club"
         b.area = "Clerkenwell"
         b.category = "restaurant"
@@ -984,7 +984,7 @@ struct OnboardingView: View {
         let day = { (n: Int) in DayString.addingDays(n, to: DayString.today()) }
         let a = Item()
         a.kind = Item.Kind.event
-        a.title = "Salman Toor: Someone Like You"
+        a.title = "Salman Toor"
         a.venue = "Courtauld Gallery"
         a.area = "Strand"
         a.category = "exhibition"
