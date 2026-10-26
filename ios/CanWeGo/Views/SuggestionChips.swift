@@ -12,7 +12,7 @@ struct SuggestionChips: View {
         PickStrip {
             if let finding { FindingChip(city: finding) }
             ForEach(picks) { s in
-                PickChip(pick: s, hint: "Adds it to your library") { Self.open(s) }
+                PickChip(pick: s, wide: true, hint: "Adds it to your library") { Self.open(s) }
             }
         }
     }
@@ -77,13 +77,31 @@ struct PickStrip<Content: View>: View {
     }
 }
 
+/// A wide chip takes the strip's width less the gap between chips, so the
+/// next one starts where the cards above end and only peeks in.
+private struct StripWidth: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on {
+            content.containerRelativeFrame(.horizontal) { width, _ in width - 8 }
+        } else {
+            content
+        }
+    }
+}
+
 /// One city pick as a small card: its picture melting in from the left
 /// edge the way a saved card's does from the right, the title, when and
-/// where, then what it is. Tinted from the picture's colour, like a card.
+/// where, then what it is (or, wide, what it's like). Tinted from the
+/// picture's colour, like a card.
 /// Ticked, it takes an ink outline and a check over the picture.
 struct PickChip: View {
     let pick: ParseClient.Suggestion
     var on = false
+    /// The library's version: as wide as the cards above, less the gap,
+    /// with the pick's one-line description under when and where.
+    var wide = false
     let hint: String
     let action: () -> Void
 
@@ -113,9 +131,15 @@ struct PickChip: View {
         return Item.categoryLabel(category)
     }
 
-    init(pick: ParseClient.Suggestion, on: Bool = false, hint: String, action: @escaping () -> Void) {
+    private var about: String? {
+        guard let about = pick.about?.trimmingCharacters(in: .whitespacesAndNewlines), !about.isEmpty else { return nil }
+        return about
+    }
+
+    init(pick: ParseClient.Suggestion, on: Bool = false, wide: Bool = false, hint: String, action: @escaping () -> Void) {
         self.pick = pick
         self.on = on
+        self.wide = wide
         self.hint = hint
         self.action = action
         if let url = pick.image.flatMap(URL.init(string:)), let sharp = ImageStore.cached(url) {
@@ -139,7 +163,13 @@ struct PickChip: View {
                             .font(.caption)
                             .foregroundStyle(AppBackground.secondaryInk)
                     }
-                    if let kindLabel {
+                    if wide, let about {
+                        Text(about)
+                            .font(.caption)
+                            .foregroundStyle(AppBackground.ink.opacity(0.85))
+                            .lineLimit(2, reservesSpace: true)
+                            .padding(.top, 3)
+                    } else if let kindLabel {
                         Text(kindLabel)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(AppBackground.ink)
@@ -147,9 +177,10 @@ struct PickChip: View {
                 }
                 .lineLimit(1)
                 .padding(.trailing, 14)
+                .padding(.vertical, wide ? 12 : 0)
             }
             .frame(minHeight: side)
-            .frame(maxWidth: 300, alignment: .leading)
+            .frame(maxWidth: wide ? .infinity : 300, alignment: .leading)
             .background(alignment: .leading) {
                 if let photo {
                     MeltLayers(sharp: photo.sharp, blurred: photo.blurred, cardBackground: tint, width: meltWidth, photoLeading: true)
@@ -168,6 +199,7 @@ struct PickChip: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .modifier(StripWidth(on: wide))
         .animation(.easeInOut(duration: 0.2), value: on)
         .task(id: url) {
             guard let url, photo == nil, let pair = await ImageStore.meltPair(url) else { return }
@@ -210,6 +242,7 @@ struct PickChip: View {
 
     /// "Pitchfork Music Festival London 2026, All over London, 2–8 Nov, Festival".
     private var spoken: String {
-        [pick.title, Suggestions.shared.whereText(pick), Suggestions.when(pick), kindLabel].compactMap(\.self).joined(separator: ", ")
+        [pick.title, Suggestions.shared.whereText(pick), Suggestions.when(pick), kindLabel, wide ? about : nil]
+            .compactMap(\.self).joined(separator: ", ")
     }
 }

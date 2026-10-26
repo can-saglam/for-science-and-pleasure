@@ -297,13 +297,16 @@ enum ParseClient {
         /// exhibition, restaurant, and the rest of that kind's vocabulary.
         /// Missing on a pick stored before the chip said what it is.
         var category: String?
+        /// One line on what it is and why go. Missing on a pick stored
+        /// before the chip had room for it.
+        var about: String?
         /// The chip's picture and its dominant colour, when the pick has one.
         var image: String?
         var color: String?
         var id: String { url }
 
         enum CodingKeys: String, CodingKey {
-            case title, url, kind, venue, image, color, category
+            case title, url, kind, venue, image, color, category, about
             case startsOn = "starts_on"
             case endsOn = "ends_on"
             case shortTitle = "short_title"
@@ -319,12 +322,15 @@ enum ParseClient {
         var picturesComing: Bool?
         /// Stored picks are being labelled with what they are.
         var categoriesComing: Bool?
+        /// Stored picks are getting their one-line descriptions.
+        var descriptionsComing: Bool?
 
         enum CodingKeys: String, CodingKey {
             case events, places
             case eventsComing = "events_coming"
             case picturesComing = "pictures_coming"
             case categoriesComing = "categories_coming"
+            case descriptionsComing = "descriptions_coming"
         }
     }
 

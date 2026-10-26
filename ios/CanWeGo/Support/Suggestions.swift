@@ -54,7 +54,9 @@ final class Suggestions {
         let key = Self.key(for: home)
         let bare = (events + places).allSatisfy { $0.image == nil }
         let unlabelled = !(events + places).isEmpty && (events + places).contains { $0.category == nil }
-        let maxAge = events.isEmpty || bare || unlabelled ? 600 : Self.maxAge
+        // All of them: a pick the server had nothing to say about stays bare.
+        let undescribed = !(events + places).isEmpty && (events + places).allSatisfy { $0.about == nil }
+        let maxAge = events.isEmpty || bare || unlabelled || undescribed ? 600 : Self.maxAge
         if key == city, loading || Date.now.timeIntervalSince(fetchedAt) < maxAge { return }
         if key != city {
             city = key
@@ -72,7 +74,7 @@ final class Suggestions {
             loading = false
             guard let pool else { return }
             take(pool, for: key)
-            var coming = pool.eventsComing == true || pool.picturesComing == true || pool.categoriesComing == true
+            var coming = Self.stillComing(pool)
             var asks = 0
             while coming, asks < Self.followUps {
                 asks += 1
@@ -81,7 +83,7 @@ final class Suggestions {
                 guard let again = try? await ParseClient.suggestions(locality: home.locality, country: country) else { continue }
                 guard !Task.isCancelled, city == key else { return }
                 take(again, for: key)
-                coming = again.eventsComing == true || again.picturesComing == true || again.categoriesComing == true
+                coming = Self.stillComing(again)
             }
             findingEvents = false
         }
@@ -91,6 +93,11 @@ final class Suggestions {
     /// or naming what each pick is, ask again every 20 seconds, for up to
     /// five minutes: an event search takes two or three.
     private static let followUps = 15
+
+    private static func stillComing(_ pool: ParseClient.SuggestionPool) -> Bool {
+        pool.eventsComing == true || pool.picturesComing == true
+            || pool.categoriesComing == true || pool.descriptionsComing == true
+    }
 
     private func take(_ pool: ParseClient.SuggestionPool, for key: String) {
         events = pool.events

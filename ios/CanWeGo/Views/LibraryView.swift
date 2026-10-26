@@ -193,8 +193,12 @@ struct LibraryView: View {
     }
 
     private var showsOpenNow: Bool {
-        kind == Item.Kind.place && (openNow || base.contains(where: \.showsHours))
+        kind == Item.Kind.place && (openNow || (base.count > Self.shortList && base.contains(where: \.showsHours)))
     }
+
+    /// Up to this many saves in a tab, the list is too short to filter and
+    /// the home city's picks carry on under it as one more section.
+    private static let shortList = 2
 
     private var visible: [Item] {
         let list = Self.ordered(base.filter(matches), kind: kind)
@@ -810,6 +814,13 @@ struct LibraryView: View {
                 placeList
             }
 
+            if (1...Self.shortList).contains(base.count), query.isEmpty, category == nil, area == nil,
+               !openNow, !suggestionPicks.isEmpty || findingCity != nil {
+                suggestionChips
+                    .padding(.top, 4)
+                    .cardListRow()
+            }
+
             if visible.isEmpty && !been.isEmpty && query.isEmpty && category == nil && area == nil && !openNow {
                 EmptyState(
                     title: "Nothing coming up",
@@ -921,6 +932,10 @@ struct LibraryView: View {
         // Tapping the tab you're already on brings the list home.
         .scrollPosition($scrollPosition)
         .task(id: openNow) { if openNow { await checkOpenNow() } }
+        // The picks under a short list only show once they're in.
+        .task(id: base.count <= Self.shortList) {
+            if base.count <= Self.shortList, let home = suggestionHome { Suggestions.shared.load(for: home) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .cwgScrollToTop)) { _ in
             guard !mode.showMap else { return }
             if searchOpen { closeSearch() }
@@ -1022,30 +1037,42 @@ struct LibraryView: View {
     }
 
     private var firstPrompt: String {
-        let how = kind == Item.Kind.place
-            ? "Share it from Maps or Instagram, or tap + and type the name."
-            : "Share a link from anywhere, or tap + and type it."
-        return how + seenBy
+        howToAdd + seenBy
     }
 
-    /// A few things from the home city's pool under an empty tab. None
-    /// without a home, and none left once they're all saved.
+    private var howToAdd: String {
+        kind == Item.Kind.place
+            ? "Share it from Maps or Instagram, or tap + and type the name."
+            : "Share a link from anywhere, or tap + and type it."
+    }
+
+    private var suggestionHome: HomeStore.Home? {
+        HomeStore.shared.isSet ? HomeStore.shared.home : nil
+    }
+
+    private var suggestionPicks: [Suggestions.Pick] {
+        suggestionHome.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: library) } ?? []
+    }
+
+    /// The city whose events the server is still out finding, if any.
+    private var findingCity: String? {
+        kind == Item.Kind.event && Suggestions.shared.findingEvents ? suggestionHome?.locality : nil
+    }
+
+    /// A few things from the home city's pool under an empty or short tab.
+    /// None without a home, and none left once they're all saved.
     @ViewBuilder
     private var suggestionChips: some View {
-        let home = HomeStore.shared.isSet ? HomeStore.shared.home : nil
-        let picks = home.map { Suggestions.shared.picks(kind: kind, for: $0, excluding: library) } ?? []
-        let finding = kind == Item.Kind.event && Suggestions.shared.findingEvents ? home?.locality : nil
+        let home = suggestionHome
+        let picks = suggestionPicks
+        let finding = findingCity
         VStack(spacing: 0) {
-            if !picks.isEmpty || finding != nil {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(been.isEmpty ? "Or start with one of these" : "Or try one of these")
-                        .font(.caption.weight(.semibold))
-                        .textCase(.uppercase)
-                        .tracking(0.6)
-                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
+            if let home, !picks.isEmpty || finding != nil {
+                // The same gap as a section header above its first card.
+                VStack(alignment: .leading, spacing: 18) {
+                    SectionHeader(title: "Trending in \(home.locality)")
                     SuggestionChips(picks: picks, finding: finding)
                 }
-                .padding(.top, 12)
                 .transition(.opacity)
             }
         }
@@ -1089,10 +1116,7 @@ struct LibraryView: View {
         }
         // Alone, the invite is the next step; together, it's that the
         // others see it too.
-        let how = kind == Item.Kind.place
-            ? "Share it from Maps or Instagram, or tap + and type the name."
-            : "Share a link from anywhere, or tap + and type it."
-        return how + (sharedLibrary ? seenBy : " Invite someone from Settings to plan together.")
+        return howToAdd + (sharedLibrary ? seenBy : " Invite someone from Settings to plan together.")
     }
 
     /// More than one member on the card: saves are for everyone in it.
