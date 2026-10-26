@@ -40,7 +40,10 @@ struct CaptureView: View {
     @State private var early: Item?
     /// Set while the parser reads (and kept once its card is in): what it
     /// was sent. The input stage gives way to the capture drawer.
-    @State private var reading: CaptureInput?
+    /// A pick tapped in the library opens the sheet already reading it, so
+    /// the question is never drawn: laid out before the sheet has its
+    /// width, it would fade out as a column of single letters.
+    @State private var reading: CaptureInput? = CaptureGate.pendingPick == nil ? nil : .link
     /// The phone's own preview of the link, while the parser reads.
     @State private var peek: LinkPeek?
     @State private var parseTask: Task<Void, Never>?
@@ -211,9 +214,10 @@ struct CaptureView: View {
                 startParse()
             }
             // So is a suggestion chip tapped in the library.
+            // The sheet opened on it (see `reading`), so nothing to animate.
             if text.isEmpty, imageJPEG == nil, draft == nil, let suggestion = CaptureGate.takePick() {
                 text = suggestion.url
-                pick(suggestion)
+                pick(suggestion, animated: false)
             }
             // A save someone sent is already a card: nothing to read.
             if draft == nil, let card = CaptureGate.takeCard() {
@@ -328,7 +332,7 @@ struct CaptureView: View {
             picks: recommendations,
             loading: picksShown && suggestions.loading && imageJPEG == nil && !offlineMode,
             finding: suggestions.findingEvents,
-            onPick: pick
+            onPick: { pick($0) }
         )
         .padding(.top, 6)
         .animation(.easeOut(duration: 0.45), value: recommendations)
@@ -357,8 +361,8 @@ struct CaptureView: View {
     /// A recommendation is read straight away, like a shared link, with
     /// what it already knows standing in until the parser's fields land.
     /// One the server already looked up needs no reading.
-    private func pick(_ suggestion: ParseClient.Suggestion) {
-        withAnimation(reveal) {
+    private func pick(_ suggestion: ParseClient.Suggestion, animated: Bool = true) {
+        withAnimation(animated ? reveal : nil) {
             pickedLook = Item(suggestion: suggestion)
             reading = .link
         }
