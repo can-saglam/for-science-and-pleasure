@@ -1,0 +1,4 @@
+User-agent: *
+Disallow: /join/
+
+Sitemap: https://wegocan.com/sitemap.xml

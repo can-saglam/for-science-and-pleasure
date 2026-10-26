@@ -1,0 +1,19 @@
+# Cloudflare Pages response headers.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Frame-Options: DENY
+
+# iOS reads this to open /join/ and /s/ links in the app; it must be JSON.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/media/*
+  Cache-Control: public, max-age=604800
+
+/img/*
+  Cache-Control: public, max-age=604800

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- include partials/head.html -->
+<title>Can We Go? · {{tagline}}</title>
+<meta name="description" content="{{description}}">
+<link rel="canonical" href="{{domain}}/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{domain}}/">
+<meta property="og:title" content="Can We Go?">
+<meta property="og:description" content="{{tagline}}">
+<meta property="og:image" content="{{domain}}/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body class="home" data-bg="midnight">
+
+<main>
+  <section class="fan" aria-label="Screens from Can We Go?">
+    <figure class="device far" style="--i: -3"><img src="/img/shots/map.jpg" alt="Saved places on a map of London"></figure>
+    <figure class="device" style="--i: -2"><img src="/img/shots/sensual-mutual.jpg" alt="Sensual / Mutual at Auto Italia, 12 days left"></figure>
+    <figure class="device" style="--i: -1"><img src="/img/shots/salman-toor.jpg" alt="Salman Toor: Someone Like You at the Courtauld Gallery, 3 months left"></figure>
+    <figure class="device" style="--i: 0"><video src="/media/reel.mp4" poster="/img/shots/library.jpg" autoplay muted loop playsinline aria-label="Scrolling the library, adding Robert Ryman at the Barbican from a suggestion, saving it, then opening Anish Kapoor"></video></figure>
+    <figure class="device" style="--i: 1"><img src="/img/shots/anish-kapoor.jpg" alt="Anish Kapoor at the Hayward Gallery, 5 days left"></figure>
+    <figure class="device" style="--i: 2"><img src="/img/shots/places.jpg" alt="Places: restaurants, cafés and galleries to try, each with a photo"></figure>
+    <figure class="device far" style="--i: 3"><img src="/img/shots/composer.jpg" alt="Adding something new: “Where are we going?”"></figure>
+  </section>
+
+  <section class="lede">
+    <!-- include partials/logo.svg -->
+    <script src="/js/logo.js"></script>
+    <h1>{{tagline}}</h1>
+    <p>Can We Go is home to exhibitions, gigs, restaurants, bars or just anywhere you mean to get to. No more shared Notes or WhatsApp links that get lost in the ether. Share an event from Safari, Instagram, TikTok or Maps, take a photo of a poster IRL or use the app’s native search function to find the latest from the Tate.</p>
+    <p>Keep a list with your partner or a group of friends and get reminders of the things you can do: events ending soon rise to the top and the places you want to go live on a map. Forgot what you did last weekend? A record of your exploits lives in the archive.</p>
+    <p>I’m Can, and I built Can We Go for my partner and I to keep track of exhibitions and events in the city that we love. I hope it gets you to a few more of the places you said you’d go to, too.</p>
+    <a class="pill pill-ink" href="{{appStoreUrl}}">Download for iPhone</a>
+  </section>
+</main>
+
+<!-- include partials/footer.html -->
+<script>
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelector(".fan video").pause();
+</script>
+</body>
+</html>

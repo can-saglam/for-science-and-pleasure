@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["D3GR6PRXK7.com.cansaglam.CanWeGo"],
+        "components": [
+          { "/": "/join/*", "comment": "Group invites" },
+          { "/": "/s/*", "comment": "A shared save" }
+        ]
+      }
+    ]
+  }
+}

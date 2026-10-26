@@ -1,0 +1,8 @@
+{
+  "domain": "https://wegocan.com",
+  "email": "hello@wegocan.com",
+  "shareApi": "https://gvewzvcvmeztqyfwkgwa.supabase.co/functions/v1/share",
+  "appStoreId": "",
+  "tagline": "For all the places you’ll go!",
+  "description": "Save the exhibitions, gigs and restaurants you mean to go to. Can We Go? turns each link into a card with its dates, in a list you share with the people you go out with."
+}

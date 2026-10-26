@@ -1,0 +1,6 @@
+# Cloudflare Pages. Invite links (/join/KV7P2M) all serve the one join page,
+# which reads the code from the address. A placeholder, not a splat: /join/*
+# would match the page itself and Pages drops a rule that loops.
+/join/:code   /join/   200
+# A shared save (/s/k3J9xQ...) likewise serves the one card page.
+/s/:token     /s/      200

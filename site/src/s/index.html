@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- include partials/head.html -->
+<title>A save from Can We Go?</title>
+<meta name="description" content="Someone sent you something to go to, saved on Can We Go?.">
+<meta name="robots" content="noindex">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Something to go to, from Can We Go?">
+<meta property="og:description" content="Open it to see where and when, or save it to your own list.">
+<meta property="og:image" content="{{domain}}/img/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/css/join.css">
+<link rel="stylesheet" href="/css/save.css">
+<script type="module" src="/js/save.js"></script>
+</head>
+<body class="join-page save-page" data-api="{{shareApi}}">
+<main class="join">
+  <a class="join-mark" href="/" aria-label="Can We Go? home"><!-- include img/wordmark.svg --></a>
+
+  <p class="join-lede" data-loading>Opening…</p>
+  <p class="save-from" data-from hidden></p>
+
+  <article class="save-card" data-card hidden>
+    <a class="save-photo-link" data-photo-link hidden><img class="save-photo" data-photo alt=""></a>
+    <div class="save-body">
+      <h1 data-title></h1>
+      <p class="save-where" data-where hidden></p>
+      <p class="save-when" data-when hidden></p>
+      <p class="save-price" data-price hidden></p>
+      <p class="save-summary" data-summary hidden></p>
+      <p class="save-address" data-address hidden></p>
+      <nav class="save-links" aria-label="About this save">
+        <a class="save-link" data-page target="_blank" rel="noopener" hidden>Event page</a>
+        <a class="save-link" data-directions target="_blank" rel="noopener" hidden>Directions</a>
+        <a class="save-link" data-calendar hidden>Add to calendar</a>
+      </nav>
+    </div>
+  </article>
+
+  <div class="save-actions" data-actions hidden>
+    <a class="app-store" href="{{getAppUrl}}"><img src="/img/app-store-badge.svg" alt="Download on the App Store" width="180" height="60"></a>
+    <a class="save-open" data-iphone href="#" hidden>Already have it? Open in the app</a>
+    <p class="save-elsewhere" data-elsewhere hidden>Can We Go? is an iPhone app for the places and events you mean to go to. Open this link on an iPhone to save it to your own list. <a href="/">What’s Can We Go?</a></p>
+  </div>
+
+  <div data-missing hidden>
+    <h1>This save isn’t here</h1>
+    <p class="join-lede">The link may be incomplete. Ask whoever sent it to share it again.</p>
+    <a class="app-store" href="{{getAppUrl}}"><img src="/img/app-store-badge.svg" alt="Download on the App Store" width="180" height="60"></a>
+  </div>
+
+  <noscript><p class="join-lede">Open this link on your iPhone with Can We Go? installed to see the save.</p></noscript>
+</main>
+</body>
+</html>

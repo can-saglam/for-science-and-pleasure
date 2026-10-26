@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- include partials/head.html -->
+<title>Join me on Can We Go?</title>
+<meta name="description" content="You’ve been invited to share a Can We Go? list: the places and events you’ll go to together.">
+<meta name="robots" content="noindex">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Join me on Can We Go?">
+<meta property="og:description" content="Share a list of the places and events you’ll go to together.">
+<meta property="og:image" content="{{domain}}/img/og-join.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/css/join.css">
+<script src="/js/join.js" defer></script>
+</head>
+<body class="join-page">
+<main class="join">
+  <a class="join-mark" href="/" aria-label="Can We Go? home"><!-- include img/wordmark.svg --></a>
+
+  <div class="join-panel" data-join hidden>
+    <h1>You’re invited</h1>
+    <p class="join-lede">Someone wants to share their Can We Go? list with you: the exhibitions, gigs and restaurants you’ll go to together.</p>
+
+    <div class="join-code">
+      <span class="join-code-label">Your code</span>
+      <span class="join-code-value" data-code></span>
+      <button class="join-copy" type="button" data-copy>Copy</button>
+    </div>
+
+    <ol class="join-steps">
+      <li>
+        <b>Get Can We Go? for iPhone.</b>
+        <a class="pill pill-cream" href="{{appStoreUrl}}">Download for iPhone</a>
+      </li>
+      <li>
+        <b>Open it and sign in with Apple.</b>
+        When it asks whether you’re joining someone, enter the code. If you copied it, the app offers it for you.
+      </li>
+    </ol>
+
+    <a class="join-open" data-open href="#">Already have the app? Open the invite</a>
+    <p class="join-fine">Codes last seven days. If this one has expired, ask for a new one.</p>
+  </div>
+
+  <div class="join-panel" data-join-missing hidden>
+    <h1>This invite link is incomplete</h1>
+    <p class="join-lede">Ask whoever sent it for their six-character code, then enter it in Can We Go? under Settings → Join someone’s library.</p>
+    <a class="pill pill-cream" href="{{appStoreUrl}}">Download for iPhone</a>
+  </div>
+
+  <noscript><p class="join-lede">Open Can We Go? and enter the code from your invite under Settings → Join someone’s library.</p></noscript>
+</main>
+</body>
+</html>
