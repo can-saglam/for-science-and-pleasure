@@ -14,6 +14,9 @@ struct Recommendations: View {
     var finding = false
     /// The ticked picks' ids, when chips tick instead of opening.
     var ticked: Set<String>? = nil
+    /// The library's look: "Trending in <city>" as a section header over
+    /// wide chips that say what each pick is like.
+    var trending = false
     let onPick: (ParseClient.Suggestion) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -26,18 +29,24 @@ struct Recommendations: View {
     @ViewBuilder
     private var content: some View {
         if let city, !picks.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Or try one of these")
-                    .font(.caption.weight(.semibold))
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-                    .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
+            // The same gap as a section header above its first card.
+            VStack(alignment: .leading, spacing: trending ? 18 : 10) {
+                if trending {
+                    SectionHeader(title: "Trending in \(city)")
+                } else {
+                    Text("Or try one of these")
+                        .font(.caption.weight(.semibold))
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
+                }
                 PickStrip {
                     if finding { FindingChip(city: city) }
                     ForEach(picks) { pick in
                         PickChip(
                             pick: pick,
                             on: ticked?.contains(pick.id) == true,
+                            wide: trending,
                             hint: ticked == nil ? "Looks it up and makes the card" : "Saves it with your first saves"
                         ) { onPick(pick) }
                     }

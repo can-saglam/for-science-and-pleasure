@@ -332,6 +332,7 @@ struct CaptureView: View {
             picks: recommendations,
             loading: picksShown && suggestions.loading && imageJPEG == nil && !offlineMode,
             finding: suggestions.findingEvents,
+            trending: true,
             onPick: { pick($0) }
         )
         .padding(.top, 6)
