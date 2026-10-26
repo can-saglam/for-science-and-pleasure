@@ -24,7 +24,7 @@ Deno.test("a seed with nothing yet gets both kinds", () => {
 
 Deno.test("a city people use now refreshes when due, not before", () => {
   const c = city({ askers: 3, lastAsked: "2026-10-20" });
-  const plenty = [event("2026-11-30"), event("2026-11-30"), event("2026-11-30")];
+  const plenty = Array.from({ length: 5 }, () => event("2026-11-30"));
   const places = plenty.map((e) => ({ ...e, kind: "place", ends_on: null }));
   assertEquals(wanted(c, { event: pool(2, plenty), place: pool(5, places) }, ctx()), []);
   assertEquals(wanted(c, { event: pool(8, plenty), place: pool(31, places) }, ctx()), ["event", "place"]);

@@ -5,6 +5,9 @@ export interface Starter {
   title: string;
   url: string;
   kind: "event" | "place";
+  /// The chip's third line. Only the built-in list carries one; a model's
+  /// answer is labelled later with the suggestion pool.
+  category?: string;
 }
 
 export const STARTER_TTL_DAYS = 14;
@@ -14,104 +17,104 @@ export const STARTER_COUNT = 3;
 /// pages the parser can read. City-states also match on country.
 const FALLBACKS: Record<string, Starter[]> = {
   london: [
-    { title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk/", kind: "place" },
-    { title: "Sessions Arts Club", url: "https://sessionsartsclub.com/", kind: "place" },
-    { title: "Roundhouse", url: "https://www.roundhouse.org.uk/", kind: "place" },
+    { title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk/", kind: "place", category: "gallery" },
+    { title: "Sessions Arts Club", url: "https://sessionsartsclub.com/", kind: "place", category: "restaurant" },
+    { title: "Roundhouse", url: "https://www.roundhouse.org.uk/", kind: "place", category: "venue" },
   ],
   singapore: [
-    { title: "National Gallery", url: "https://www.nationalgallery.sg/", kind: "place" },
-    { title: "Atlas", url: "https://www.atlasbar.sg/", kind: "place" },
-    { title: "The Projector", url: "https://theprojector.sg/", kind: "place" },
+    { title: "National Gallery", url: "https://www.nationalgallery.sg/", kind: "place", category: "gallery" },
+    { title: "Atlas", url: "https://www.atlasbar.sg/", kind: "place", category: "drink" },
+    { title: "The Projector", url: "https://theprojector.sg/", kind: "place", category: "venue" },
   ],
   lisbon: [
-    { title: "MAAT", url: "https://www.maat.pt/", kind: "place" },
-    { title: "Cervejaria Ramiro", url: "https://www.cervejariaramiro.pt/", kind: "place" },
-    { title: "Lux Frágil", url: "https://www.luxfragil.com/", kind: "place" },
+    { title: "MAAT", url: "https://www.maat.pt/", kind: "place", category: "museum" },
+    { title: "Cervejaria Ramiro", url: "https://www.cervejariaramiro.pt/", kind: "place", category: "restaurant" },
+    { title: "Lux Frágil", url: "https://www.luxfragil.com/", kind: "place", category: "drink" },
   ],
   paris: [
-    { title: "Musée d'Orsay", url: "https://www.musee-orsay.fr/", kind: "place" },
-    { title: "Septime", url: "https://www.septime-charonne.fr/", kind: "place" },
-    { title: "Centre Pompidou", url: "https://www.centrepompidou.fr/", kind: "place" },
+    { title: "Musée d'Orsay", url: "https://www.musee-orsay.fr/", kind: "place", category: "museum" },
+    { title: "Septime", url: "https://www.septime-charonne.fr/", kind: "place", category: "restaurant" },
+    { title: "Centre Pompidou", url: "https://www.centrepompidou.fr/", kind: "place", category: "museum" },
   ],
   "new york": [
-    { title: "MoMA", url: "https://www.moma.org/", kind: "place" },
-    { title: "Katz's Delicatessen", url: "https://www.katzsdelicatessen.com/", kind: "place" },
-    { title: "Film Forum", url: "https://www.filmforum.org/", kind: "place" },
+    { title: "MoMA", url: "https://www.moma.org/", kind: "place", category: "museum" },
+    { title: "Katz's Delicatessen", url: "https://www.katzsdelicatessen.com/", kind: "place", category: "restaurant" },
+    { title: "Film Forum", url: "https://www.filmforum.org/", kind: "place", category: "venue" },
   ],
   tokyo: [
-    { title: "Mori Art Museum", url: "https://www.mori.art.museum/", kind: "place" },
-    { title: "teamLab Planets", url: "https://www.teamlab.art/e/planets/", kind: "place" },
-    { title: "Unit", url: "https://www.unit-tokyo.com/", kind: "place" },
+    { title: "Mori Art Museum", url: "https://www.mori.art.museum/", kind: "place", category: "museum" },
+    { title: "teamLab Planets", url: "https://www.teamlab.art/e/planets/", kind: "place", category: "museum" },
+    { title: "Unit", url: "https://www.unit-tokyo.com/", kind: "place", category: "venue" },
   ],
   berlin: [
-    { title: "Neue Nationalgalerie", url: "https://www.smb.museum/en/museums-institutions/neue-nationalgalerie/", kind: "place" },
-    { title: "Konnopke's Imbiss", url: "https://www.konnopke.de/", kind: "place" },
-    { title: "Babylon", url: "https://babylonberlin.eu/", kind: "place" },
+    { title: "Neue Nationalgalerie", url: "https://www.smb.museum/en/museums-institutions/neue-nationalgalerie/", kind: "place", category: "museum" },
+    { title: "Konnopke's Imbiss", url: "https://www.konnopke.de/", kind: "place", category: "restaurant" },
+    { title: "Babylon", url: "https://babylonberlin.eu/", kind: "place", category: "venue" },
   ],
   barcelona: [
-    { title: "Fundació Miró", url: "https://www.fmirobcn.org/", kind: "place" },
-    { title: "Cal Pep", url: "https://www.calpep.com/", kind: "place" },
-    { title: "CCCB", url: "https://www.cccb.org/", kind: "place" },
+    { title: "Fundació Miró", url: "https://www.fmirobcn.org/", kind: "place", category: "museum" },
+    { title: "Cal Pep", url: "https://www.calpep.com/", kind: "place", category: "restaurant" },
+    { title: "CCCB", url: "https://www.cccb.org/", kind: "place", category: "museum" },
   ],
   amsterdam: [
-    { title: "Stedelijk", url: "https://www.stedelijk.nl/", kind: "place" },
-    { title: "Foodhallen", url: "https://www.foodhallen.nl/", kind: "place" },
-    { title: "Eye Filmmuseum", url: "https://www.eyefilm.nl/", kind: "place" },
+    { title: "Stedelijk", url: "https://www.stedelijk.nl/", kind: "place", category: "museum" },
+    { title: "Foodhallen", url: "https://www.foodhallen.nl/", kind: "place", category: "restaurant" },
+    { title: "Eye Filmmuseum", url: "https://www.eyefilm.nl/", kind: "place", category: "museum" },
   ],
   melbourne: [
-    { title: "NGV", url: "https://www.ngv.vic.gov.au/", kind: "place" },
-    { title: "Cumulus Inc", url: "https://www.cumulusinc.com.au/", kind: "place" },
-    { title: "The Astor", url: "https://www.astortheatre.net.au/", kind: "place" },
+    { title: "NGV", url: "https://www.ngv.vic.gov.au/", kind: "place", category: "museum" },
+    { title: "Cumulus Inc", url: "https://www.cumulusinc.com.au/", kind: "place", category: "restaurant" },
+    { title: "The Astor", url: "https://www.astortheatre.net.au/", kind: "place", category: "venue" },
   ],
   "hong kong": [
-    { title: "M+", url: "https://www.mplus.org.hk/", kind: "place" },
-    { title: "Yardbird", url: "https://www.yardbirdrestaurant.com/", kind: "place" },
-    { title: "Broadway Cinematheque", url: "https://www.cinema.com.hk/", kind: "place" },
+    { title: "M+", url: "https://www.mplus.org.hk/", kind: "place", category: "museum" },
+    { title: "Yardbird", url: "https://www.yardbirdrestaurant.com/", kind: "place", category: "restaurant" },
+    { title: "Broadway Cinematheque", url: "https://www.cinema.com.hk/", kind: "place", category: "venue" },
   ],
   "san francisco": [
-    { title: "SFMOMA", url: "https://www.sfmoma.org/", kind: "place" },
-    { title: "Zuni Café", url: "https://zunicafe.com/", kind: "place" },
-    { title: "Roxie Theater", url: "https://roxie.com/", kind: "place" },
+    { title: "SFMOMA", url: "https://www.sfmoma.org/", kind: "place", category: "museum" },
+    { title: "Zuni Café", url: "https://zunicafe.com/", kind: "place", category: "restaurant" },
+    { title: "Roxie Theater", url: "https://roxie.com/", kind: "place", category: "venue" },
   ],
   sydney: [
-    { title: "MCA", url: "https://www.mca.com.au/", kind: "place" },
-    { title: "Icebergs", url: "https://www.idrb.com/", kind: "place" },
-    { title: "Sydney Opera House", url: "https://www.sydneyoperahouse.com/", kind: "place" },
+    { title: "MCA", url: "https://www.mca.com.au/", kind: "place", category: "museum" },
+    { title: "Icebergs", url: "https://www.idrb.com/", kind: "place", category: "restaurant" },
+    { title: "Sydney Opera House", url: "https://www.sydneyoperahouse.com/", kind: "place", category: "venue" },
   ],
   "los angeles": [
-    { title: "The Broad", url: "https://www.thebroad.org/", kind: "place" },
-    { title: "République", url: "https://republiquela.com/", kind: "place" },
-    { title: "New Beverly Cinema", url: "https://thenewbev.com/", kind: "place" },
+    { title: "The Broad", url: "https://www.thebroad.org/", kind: "place", category: "museum" },
+    { title: "République", url: "https://republiquela.com/", kind: "place", category: "restaurant" },
+    { title: "New Beverly Cinema", url: "https://thenewbev.com/", kind: "place", category: "venue" },
   ],
   chicago: [
-    { title: "Art Institute", url: "https://www.artic.edu/", kind: "place" },
-    { title: "Au Cheval", url: "https://www.auchevalchicago.com/", kind: "place" },
-    { title: "Music Box Theatre", url: "https://www.musicboxtheatre.com/", kind: "place" },
+    { title: "Art Institute", url: "https://www.artic.edu/", kind: "place", category: "museum" },
+    { title: "Au Cheval", url: "https://www.auchevalchicago.com/", kind: "place", category: "restaurant" },
+    { title: "Music Box Theatre", url: "https://www.musicboxtheatre.com/", kind: "place", category: "venue" },
   ],
   madrid: [
-    { title: "Reina Sofía", url: "https://www.museoreinasofia.es/", kind: "place" },
-    { title: "Sobrino de Botín", url: "https://www.botin.es/", kind: "place" },
-    { title: "Cine Doré", url: "https://www.filmotecanacional.es/", kind: "place" },
+    { title: "Reina Sofía", url: "https://www.museoreinasofia.es/", kind: "place", category: "museum" },
+    { title: "Sobrino de Botín", url: "https://www.botin.es/", kind: "place", category: "restaurant" },
+    { title: "Cine Doré", url: "https://www.filmotecanacional.es/", kind: "place", category: "venue" },
   ],
   rome: [
-    { title: "Galleria Borghese", url: "https://www.colosseo.it/en/galleria-borghese/", kind: "place" },
-    { title: "Armando al Pantheon", url: "https://www.armandoalpantheon.it/", kind: "place" },
-    { title: "Casa del Cinema", url: "https://www.casadelcinema.it/", kind: "place" },
+    { title: "Galleria Borghese", url: "https://www.colosseo.it/en/galleria-borghese/", kind: "place", category: "museum" },
+    { title: "Armando al Pantheon", url: "https://www.armandoalpantheon.it/", kind: "place", category: "restaurant" },
+    { title: "Casa del Cinema", url: "https://www.casadelcinema.it/", kind: "place", category: "venue" },
   ],
   dublin: [
-    { title: "IMMA", url: "https://imma.ie/", kind: "place" },
-    { title: "Kehoe's", url: "https://www.kehoesdublin.ie/", kind: "place" },
-    { title: "Lighthouse Cinema", url: "https://www.lighthousecinema.ie/", kind: "place" },
+    { title: "IMMA", url: "https://imma.ie/", kind: "place", category: "museum" },
+    { title: "Kehoe's", url: "https://www.kehoesdublin.ie/", kind: "place", category: "drink" },
+    { title: "Lighthouse Cinema", url: "https://www.lighthousecinema.ie/", kind: "place", category: "venue" },
   ],
   copenhagen: [
-    { title: "SMK", url: "https://www.smk.dk/", kind: "place" },
-    { title: "Noma", url: "https://noma.dk/", kind: "place" },
-    { title: "Grand Teatret", url: "https://www.grandteatret.dk/", kind: "place" },
+    { title: "SMK", url: "https://www.smk.dk/", kind: "place", category: "museum" },
+    { title: "Noma", url: "https://noma.dk/", kind: "place", category: "restaurant" },
+    { title: "Grand Teatret", url: "https://www.grandteatret.dk/", kind: "place", category: "venue" },
   ],
   toronto: [
-    { title: "AGO", url: "https://ago.ca/", kind: "place" },
-    { title: "St. Lawrence Market", url: "https://www.stlawrencemarket.com/", kind: "place" },
-    { title: "TIFF Lightbox", url: "https://www.tiff.net/", kind: "place" },
+    { title: "AGO", url: "https://ago.ca/", kind: "place", category: "museum" },
+    { title: "St. Lawrence Market", url: "https://www.stlawrencemarket.com/", kind: "place", category: "shop" },
+    { title: "TIFF Lightbox", url: "https://www.tiff.net/", kind: "place", category: "venue" },
   ],
 };
 

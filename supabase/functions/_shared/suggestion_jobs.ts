@@ -2,13 +2,20 @@
 // (suggestions) and the scheduled warm-up (warm-cities): one job per row at
 // a time, a search that replaces the pool, or pictures for a stored one.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { card, uncarded } from "./pick_cards.ts";
 import {
   type Refreshed,
   type Suggestion,
   type SuggestionKind,
+  describe,
   dress,
+  label,
   refreshEvents,
   refreshPlaces,
+  servePool,
+  undescribed,
+  undressed,
+  unlabelled,
 } from "./suggestions.ts";
 
 export interface City {
@@ -71,8 +78,17 @@ export function cityJobs(db: SupabaseClient, city: City, busy = () => false) {
     let stage = "started";
     try {
       await note(stage);
+      // The last pool's events still on carry over (see refreshEvents).
+      const keep = kind === "event"
+        ? servePool(
+          (await db.from("city_suggestions").select("payload").eq("key", key).eq("kind", kind).maybeSingle())
+            .data?.payload,
+          kind,
+          today,
+        )
+        : [];
       const result = kind === "event"
-        ? await refreshEvents(locality, country, today, (s) => note(stage = `${s} (${took()})`))
+        ? await refreshEvents(locality, country, today, (s) => note(stage = `${s} (${took()})`), keep)
         : await refreshPlaces(locality, country, today, quick);
       const summary = `kept ${result.items.length} of ${result.proposed} in ${took()}; ${stage}`;
       await record(kind, result.items.length === 0 ? "empty" : "kept", result, Date.now() - started);
@@ -103,9 +119,12 @@ export function cityJobs(db: SupabaseClient, city: City, busy = () => false) {
     }
   };
 
-  /// A pool stored before picks had pictures gets them once, without a
-  /// new search.
-  const redress = async (kind: SuggestionKind) => {
+  /// A pool stored before picks had pictures, before the chip named what
+  /// they are, or before it said what they're like, gets that once,
+  /// without a new search. Then the picks' cards (pick_cards.ts): always
+  /// for places, which cost nothing more; for events only with
+  /// `readEvents`, when someone in the city is asking.
+  const redress = async (kind: SuggestionKind, readEvents = false) => {
     if (!await claim(kind)) return;
     try {
       const { data } = await db
@@ -115,12 +134,21 @@ export function cityJobs(db: SupabaseClient, city: City, busy = () => false) {
         .eq("kind", kind)
         .maybeSingle();
       const stored = (data?.payload as { items?: unknown } | null)?.items;
-      const items = await dress(Array.isArray(stored) ? stored as Suggestion[] : [], locality, country);
-      await db
-        .from("city_suggestions")
-        .update({ payload: { items }, refreshing_since: null })
-        .eq("key", key)
-        .eq("kind", kind);
+      let items = Array.isArray(stored) ? stored as Suggestion[] : [];
+      const save = (refreshing_since: string | null) =>
+        db.from("city_suggestions").update({ payload: { items }, refreshing_since }).eq("key", key).eq("kind", kind);
+      const cards = uncarded(items) && (kind === "place" || readEvents);
+      if (undressed(items) || unlabelled(items) || undescribed(items)) {
+        if (undressed(items)) items = await dress(items, locality, country);
+        if (unlabelled(items)) items = await label(items);
+        if (undescribed(items)) items = await describe(items);
+        // Saved before the cards, which take longest, keeping the claim.
+        if (cards) await save(new Date().toISOString());
+      }
+      if (cards) {
+        items = await card(items, { locality, country, timezone: "UTC", lat: null, lng: null });
+      }
+      await save(null);
     } catch (error) {
       console.error("suggestions dress", kind, error);
       await db.from("city_suggestions").update({ refreshing_since: null }).eq("key", key).eq("kind", kind);

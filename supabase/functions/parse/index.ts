@@ -9,7 +9,9 @@
 //
 // A lookup counts against the day's allowance only once the model has
 // answered: a card, or its verdict that the input was a search. Errors,
-// timeouts and unreadable posts are free.
+// timeouts and unreadable posts are free. So is a link that's one of the
+// home city's picks: answered from its stored card when it has one, and
+// otherwise looked up and kept for the next tap (pick_cards.ts).
 import { internalErrorBody } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -28,7 +30,8 @@ import {
 } from "../_shared/extract.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
-import { groupHome } from "../_shared/home.ts";
+import { groupHome, homeToday } from "../_shared/home.ts";
+import { poolPick, storeCard } from "../_shared/pick_cards.ts";
 import {
   bumpVague,
   chargeQuota,
@@ -57,7 +60,7 @@ async function vague(userId: string, message: string) {
 }
 
 type Outcome =
-  | "card" | "vague" | "gate" | "social_unreadable" | "unreadable" | "slow" | "too_large" | "over_quota" | "error";
+  | "card" | "pool" | "vague" | "gate" | "social_unreadable" | "unreadable" | "slow" | "too_large" | "over_quota" | "error";
 
 /// A failed extraction as the app reads it. Anything the person can act
 /// on is a 422 with a sentence for them, which the app shows as is and
@@ -153,7 +156,36 @@ Deno.serve(async (req) => {
       return json({ error: String(limitErr) }, 413);
     }
 
-    if (!await hasQuota(admin(), caller.userId)) {
+    const home = await groupHome(caller.client, caller.groupId);
+    const link = text ? pageLink(text) : null;
+    const picked = link && text === link && !body.image_base64
+      ? await poolPick(admin(), home, link, homeToday(home)).catch(() => null)
+      : null;
+    if (picked?.pick.card) {
+      const card = picked.pick.card;
+      record(started, source, "pool", run, card);
+      if (body.stream !== "true") return json({ card });
+      const early = {
+        kind: card.kind,
+        title: card.title,
+        summary: card.summary,
+        venue: card.venue,
+        area: card.area,
+        category: card.category,
+        price: card.price,
+        starts_on: card.starts_on,
+        ends_on: card.ends_on,
+        showings: card.showings,
+        link: null,
+      };
+      const events = [["early", early], ["card", card]] as const;
+      return new Response(
+        events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join(""),
+        { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } },
+      );
+    }
+
+    if (!picked && !await hasQuota(admin(), caller.userId)) {
       record(started, source, "over_quota", run);
       return new Response(quotaResponse().body, {
         status: 429,
@@ -177,7 +209,6 @@ Deno.serve(async (req) => {
     // read the page itself says so and hears back before anything is
     // counted or spent, then sends the HTML: one save, read from its page
     // rather than searched for.
-    const link = text ? pageLink(text) : null;
     let read: { page: Page | null } | undefined;
     if (link && typeof body.page_html === "string") {
       read = { page: pageFromHtml(body.page_html, link) };
@@ -186,10 +217,14 @@ Deno.serve(async (req) => {
       if (!read.page) return json({ error: "page blocked", code: "page_blocked", url: link }, 409);
     }
 
-    const home = await groupHome(caller.client, caller.groupId);
-    const finish = async (outcome: Outcome, card?: { image_url: string | null; lat: number | null }) => {
-      if (answered(outcome)) await chargeQuota(admin(), caller.userId, "parse");
+    const finish = async (outcome: Outcome, card?: Awaited<ReturnType<typeof extractCard>>) => {
+      if (answered(outcome) && !picked) await chargeQuota(admin(), caller.userId, "parse");
       record(started, source, outcome, run, card);
+      if (picked && card) {
+        const keep = storeCard(admin(), picked.key, picked.pick, card);
+        // deno-lint-ignore no-explicit-any
+        (globalThis as any).EdgeRuntime?.waitUntil?.(keep);
+      }
     };
 
     if (body.stream === "true") {

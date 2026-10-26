@@ -9,6 +9,39 @@ import {
 
 const PAGE = "https://example.org/exhibition/show/";
 
+// Somerset House names a 56-wide thumbnail as og:image and in JSON-LD; the
+// picture at card size is only in its page data.
+const WAGTAIL = "https://admin.somersethouse.org.uk/images";
+const THUMBNAIL_PAGE = `
+  <meta content="${WAGTAIL}/5xjzD=/6322/width-56/2_-_v2.jpg" property="og:image"/>
+  <script type="application/ld+json">{"@type":"Event","image":["${WAGTAIL}/5xjzD=/6322/width-56/2_-_v2.jpg"]}</script>
+  <script>{"image":{"psrc":"${WAGTAIL}/LtIc=/6322/format-webp%7Cwidth-1600/2_-_v2.jpg",
+    "px2":"${WAGTAIL}/FXXB=/6322/format-webp%7Cwidth-3200/2_-_v2.jpg",
+    "src":"${WAGTAIL}/sq8l=/6322/width-1600/2_-_v2.jpg",
+    "x2":"${WAGTAIL}/49bj=/6322/width-3200/2_-_v2.jpg"},
+    "other":"${WAGTAIL}/zz=/7000/width-1600/someone_else.jpg"}</script>`;
+
+Deno.test("a thumbnail og:image gives way to the page's larger copy of it", () => {
+  assertEquals(heroImageFromHtml(THUMBNAIL_PAGE, PAGE), `${WAGTAIL}/sq8l=/6322/width-1600/2_-_v2.jpg`);
+});
+
+Deno.test("a larger copy is found in escaped page data too", () => {
+  const escaped = THUMBNAIL_PAGE.replace(/\{"image":\{[^}]*\}/, (m) => m.replaceAll("/", "\\/"));
+  assertEquals(heroImageFromHtml(escaped, PAGE), `${WAGTAIL}/sq8l=/6322/width-1600/2_-_v2.jpg`);
+});
+
+Deno.test("a thumbnail with no larger copy isn't the photo", () => {
+  const alone = `<meta content="${WAGTAIL}/5xjzD=/6322/width-56/2_-_v2.jpg" property="og:image"/>`;
+  assertEquals(heroImageFromHtml(alone, PAGE), null);
+  const withPicture = alone + `<img src="https://example.org/hero.jpg" width="1200">`;
+  assertEquals(heroImageFromHtml(withPicture, PAGE), "https://example.org/hero.jpg");
+});
+
+Deno.test("an og:image that says nothing of its size is taken as it is", () => {
+  const html = `<meta property="og:image" content="https://example.org/media/poster.jpg">`;
+  assertEquals(heroImageFromHtml(html, PAGE), "https://example.org/media/poster.jpg");
+});
+
 Deno.test("og:image still wins over everything else", () => {
   const html = `
     <meta property="og:image" content="/social.jpg">

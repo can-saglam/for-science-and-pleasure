@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, blockSummary, busyMatters, interleave, isDue, isTicketEventPage, lastListIn, leaseFree, readItems, servePool, shapeSuggestions, stillOn, triedRecently, undressed } from "./suggestions.ts";
+import { aboutEvent, answerText, applyAbouts, applyCategories, blockSummary, undescribed, busyMatters, interleave, isDue, isTicketEventPage, lastListIn, leaseFree, mergePicks, readItems, servePool, shapeSuggestions, stillOn, type Suggestion, triedRecently, undressed, unlabelled } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -43,6 +43,69 @@ Deno.test("events need a date and must still be on", () => {
   }, "event", today);
   assertEquals(got.map((s) => s.title), ["Amar Kanwar", "Tonight"]);
   assertEquals(got[0].kind, "event");
+});
+
+Deno.test("a category stays in that kind's vocabulary", () => {
+  const [event] = shapeSuggestions({
+    items: [{
+      title: "Pitchfork Music Festival London 2026",
+      category: "Festival",
+      starts_on: "2026-11-02",
+      ends_on: "2026-11-08",
+      url: "https://pitchforkmusicfestival.co.uk/",
+    }],
+  }, "event", today);
+  assertEquals(event.category, "festival");
+  const [place] = shapeSuggestions({
+    items: [{ title: "Serpentine", venue: "Kensington", category: "exhibition", url: "https://www.serpentinegalleries.org/" }],
+  }, "place", today);
+  assertEquals(place.category, "gallery");
+  const [bare] = shapeSuggestions({
+    items: [{ title: "Tonight", venue: "Cafe OTO", starts_on: "2026-09-26", ends_on: null, url: "https://www.cafeoto.co.uk/events/tonight/" }],
+  }, "event", today);
+  assertEquals(bare.category, undefined);
+});
+
+Deno.test("labelling writes a category onto picks that lack one", () => {
+  const pick = { title: "A", url: "https://a.org/", kind: "event" as const, venue: null, starts_on: today, ends_on: null };
+  assert(unlabelled([pick]));
+  assert(!unlabelled([{ ...pick, category: "gig" }]));
+  const labelled = applyCategories([pick], [{ url: "https://a.org/", category: "Gig" }]);
+  assertEquals(labelled[0].category, "gig");
+  const missed = applyCategories([pick], [{ url: "https://other.org/", category: "gig" }]);
+  assertEquals(missed[0].category, "other");
+  assertEquals(applyCategories([pick], []), [pick]);
+  const kept = applyCategories([{ ...pick, category: "talk" }], [{ url: pick.url, category: "gig" }]);
+  assertEquals(kept[0].category, "talk");
+});
+
+Deno.test("a pick keeps its line when it's short enough to be one", () => {
+  const [kept, long, none] = shapeSuggestions({
+    items: [
+      { title: "Hamlet", about: "  Shakespeare's\nbleakest play, done fast and loud. ", starts_on: today, ends_on: null, url: "https://www.barbican.org.uk/hamlet" },
+      { title: "Macbeth", about: "x".repeat(141), starts_on: today, ends_on: null, url: "https://www.barbican.org.uk/macbeth" },
+      { title: "Lear", starts_on: today, ends_on: null, url: "https://www.barbican.org.uk/lear" },
+    ],
+  }, "event", today);
+  assertEquals(kept.about, "Shakespeare's bleakest play, done fast and loud.");
+  assertEquals(long.about, undefined);
+  assertEquals(none.about, undefined);
+});
+
+Deno.test("describing writes a line onto picks that lack one", () => {
+  const pick = { title: "A", url: "https://a.org/", kind: "place" as const, venue: null, starts_on: null, ends_on: null };
+  assert(undescribed([pick]));
+  assert(!undescribed([{ ...pick, about: null }]));
+  const described = applyAbouts([pick], [{ url: "https://a.org/", about: "Tiny wine bar, big list." }]);
+  assertEquals(described[0].about, "Tiny wine bar, big list.");
+  assertEquals(applyAbouts([pick], [{ url: "https://other.org/", about: "Elsewhere." }])[0].about, null);
+  assertEquals(applyAbouts([pick], []), [pick]);
+  const kept = applyAbouts([{ ...pick, about: "Old line." }], [{ url: pick.url, about: "New line." }]);
+  assertEquals(kept[0].about, "Old line.");
+  const wordy = { ...pick, about: "y".repeat(120) };
+  assert(undescribed([wordy]));
+  assertEquals(applyAbouts([wordy], [{ url: pick.url, about: "Shorter." }])[0].about, "Shorter.");
+  assertEquals(applyAbouts([wordy], [{ url: pick.url, about: "z".repeat(120) }])[0].about, null);
 });
 
 Deno.test("a short title is kept only when it's shorter and short enough", () => {
@@ -124,6 +187,26 @@ Deno.test("refresh timing: weekly events, monthly places, sooner when thin", () 
   assert(isDue("2026-08-27T12:00:00Z", "place", 8, now));
   assert(isDue("2026-09-24T12:00:00Z", "event", 2, now));
   assert(!isDue("2026-09-26T06:00:00Z", "event", 2, now));
+  // Under five events is thin; places stay thin under three.
+  assert(isDue("2026-09-24T12:00:00Z", "event", 4, now));
+  assert(!isDue("2026-09-24T12:00:00Z", "event", 5, now));
+  assert(!isDue("2026-09-24T12:00:00Z", "place", 4, now));
+});
+
+Deno.test("a refresh's events come first, then the last pool's still on, each once", () => {
+  const ev = (title: string, url: string, ends_on: string): Suggestion => ({
+    title, url, kind: "event", venue: null, starts_on: "2026-09-01", ends_on,
+  });
+  const fresh = [ev("New Show", "https://a.org/new-show", "2026-11-01")];
+  const keep = [
+    { ...ev("Old Show", "https://b.org/old-show", "2026-11-01"), image: "https://b.org/old.jpg" },
+    ev("New show", "https://other.org/new-show-again", "2026-11-01"),
+    ev("Ended", "https://c.org/ended", "2026-09-20"),
+    ev("Same Link", "https://www.a.org/new-show/", "2026-11-01"),
+  ];
+  const merged = mergePicks([fresh, keep], "2026-09-26");
+  assertEquals(merged.map((s) => s.title), ["New Show", "Old Show"]);
+  assertEquals(merged[1].image, "https://b.org/old.jpg");
 });
 
 Deno.test("a busy city's events refresh every three days; places don't change", () => {

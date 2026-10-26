@@ -5,14 +5,19 @@
 // page loads and dates this run); a place's site has to answer. Pure
 // helpers first, then the two refreshes.
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
+import { EVENT_CATEGORIES, normaliseCategory, PLACE_CATEGORIES } from "./categories.ts";
 import { colorFromImageUrl, heroImageFromUrl } from "./color.ts";
-import { cleanLink, linkKey, ownPage } from "./extract.ts";
+import { cleanLink, type extractCard, linkKey, ownPage } from "./extract.ts";
 import type { Home } from "./home.ts";
 import { publicFetch } from "./netguard.ts";
-import { findPlace, photoUri, placePhotoLink } from "./places.ts";
+import { findPlace, isVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
 import { AGGREGATOR_RE } from "./starters.ts";
 
 export type SuggestionKind = "event" | "place";
+
+/// A pick's full card, the same as a lookup of its link returns, stored
+/// with the pick so tapping it needs no lookup of its own.
+export type PickCard = Awaited<ReturnType<typeof extractCard>>;
 
 export interface Suggestion {
   title: string;
@@ -23,16 +28,28 @@ export interface Suggestion {
   ends_on: string | null;
   /** What a friend would call it, when the title is long; null when not. */
   short_title?: string | null;
+  /** exhibition, restaurant, and the rest of that kind's vocabulary.
+   * Missing on picks stored before the chip said what they are. */
+  category?: string | null;
+  /** One line on what it is and why go, under the chip's when and where.
+   * Missing on picks stored before chips had one; null when none came. */
+  about?: string | null;
   /** The chip's picture: an event page's image, a place's photo link.
    * Missing on picks stored before pictures; null once tried. */
   image?: string | null;
   /** The picture's dominant colour, for the chip's tint. */
   color?: string | null;
+  /** The full card a tap saves. Missing until looked up (see pick_cards.ts);
+   * null when a lookup couldn't pin it, so a tap looks it up instead. */
+  card?: PickCard | null;
 }
 
 /// The add page shows two events a day in a new order each day, so a
 /// bigger event pool goes longer before it repeats; places barely change.
 export const POOL_SIZE: Record<SuggestionKind, number> = { event: 14, place: 8 };
+/// Fewer events than this and a refresh searches once more, and a pool
+/// thinned below it by events ending is due again the next day.
+export const MIN_EVENTS = 5;
 /// Places change slowly. Events weekly, or every three days in a city
 /// with enough people to notice the same ones coming round.
 const TTL_DAYS: Record<SuggestionKind, number> = { event: 7, place: 30 };
@@ -42,8 +59,8 @@ export const BUSY_CITY_PEOPLE = 20;
 const REFRESH_LEASE_MS = 5 * 60_000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-/// Stale by age, or thinned out by events ending: under three left and a
-/// day since the last try.
+/// Stale by age, or thin: under three left (under MIN_EVENTS for events)
+/// and a day since the last try.
 export function isDue(
   fetchedAt: string | null,
   kind: SuggestionKind,
@@ -54,7 +71,8 @@ export function isDue(
   if (!fetchedAt) return true;
   const age = now.getTime() - new Date(fetchedAt).getTime();
   const ttl = kind === "event" && busy ? BUSY_EVENT_TTL_DAYS : TTL_DAYS[kind];
-  return age >= ttl * 86_400_000 || (live < 3 && age >= 86_400_000);
+  const thin = live < (kind === "event" ? MIN_EVENTS : 3);
+  return age >= ttl * 86_400_000 || (thin && age >= 86_400_000);
 }
 
 /// Only an event pool between the busy and the normal age needs to know
@@ -120,6 +138,8 @@ export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: stri
     }
     const short = typeof e.short_title === "string" ? e.short_title.trim() : "";
     const shortTitle = short && short.length <= 30 && short.length < title.length ? short : null;
+    const category = normaliseCategory(kind, typeof e.category === "string" ? e.category : null);
+    const about = cleanAbout(e.about);
     const suggestion: Suggestion = {
       title,
       url,
@@ -128,6 +148,8 @@ export function shapeSuggestions(raw: unknown, kind: SuggestionKind, today: stri
       starts_on: starts,
       ends_on: ends,
       ...(shortTitle ? { short_title: shortTitle } : {}),
+      ...(category ? { category } : {}),
+      ...(about ? { about } : {}),
     };
     if (!stillOn(suggestion, today)) continue;
     seen.add(key);
@@ -186,6 +208,103 @@ export function undressed(items: Suggestion[]): boolean {
   return items.some((s) => s.image === undefined);
 }
 
+/// A pool stored before the chip named what each pick is.
+export function unlabelled(items: Suggestion[]): boolean {
+  return items.some((s) => s.category === undefined);
+}
+
+/// Write categories from a labelling answer onto the picks that lack one.
+/// An unreadable answer leaves them unlabelled, so the next ask tries again.
+/// A pick the answer skipped becomes "other" rather than being asked forever.
+export function applyCategories(items: Suggestion[], labeled: unknown): Suggestion[] {
+  const list = Array.isArray(labeled) ? labeled : [];
+  const byUrl = new Map<string, string>();
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.url !== "string" || typeof e.category !== "string") continue;
+    byUrl.set(e.url, e.category);
+  }
+  if (byUrl.size === 0) return items;
+  return items.map((s) => {
+    if (s.category !== undefined) return s;
+    return { ...s, category: normaliseCategory(s.kind, byUrl.get(s.url)) ?? "other" };
+  });
+}
+
+/// A place's card from its Google match, shaped as a lookup's would be.
+/// Null without a pin: a card that can't go on the map isn't worth keeping.
+export function placeCard(s: Suggestion, match: PlaceMatch, image: string | null, color: string | null): PickCard | null {
+  if (match.lat == null || match.lng == null) return null;
+  return {
+    kind: "place",
+    title: s.title,
+    summary: s.about ?? null,
+    venue: null,
+    area: s.venue,
+    address: match.address,
+    category: s.category ?? null,
+    price: null,
+    booking_url: null,
+    starts_on: null,
+    ends_on: null,
+    website: s.url,
+    showings: null,
+    url: s.url,
+    source: "link",
+    lat: match.lat,
+    lng: match.lng,
+    color,
+    image_url: image,
+    place_id: isVenue(match) ? match.id : null,
+    page_unread: false,
+  };
+}
+
+/// The chip has room for two short lines, about a hundred characters;
+/// anything longer would be cut off mid-thought, and goes.
+const ABOUT_MAX = 110;
+
+export function cleanAbout(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const about = raw.replace(/\s+/g, " ").trim();
+  return about && about.length <= ABOUT_MAX ? about : null;
+}
+
+/// Never described, or described before the line had a limit. One that
+/// comes back too long again is dropped to null, so it's asked once.
+function needsAbout(s: Suggestion): boolean {
+  return s.about === undefined || (typeof s.about === "string" && s.about.length > ABOUT_MAX);
+}
+
+/// A pool stored before chips said what each pick is like.
+export function undescribed(items: Suggestion[]): boolean {
+  return items.some(needsAbout);
+}
+
+/// Write lines from a describing answer onto the picks that lack one. An
+/// unreadable answer leaves them as they were, so the next ask tries
+/// again; a pick the answer skipped gets null rather than being asked
+/// forever.
+export function applyAbouts(items: Suggestion[], described: unknown): Suggestion[] {
+  const list = Array.isArray(described) ? described : [];
+  const byUrl = new Map<string, string>();
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const about = cleanAbout(e.about);
+    if (typeof e.url !== "string" || !about) continue;
+    byUrl.set(e.url, about);
+  }
+  if (list.length === 0) return items;
+  return items.map((s) => needsAbout(s) ? { ...s, about: byUrl.get(s.url) ?? null } : s);
+}
+
+const ABOUT_HINT =
+  "One short sentence, under 80 characters, on what it is and why it's worth going, the way a friend would put it, " +
+  "in the spirit of \"tiny wine bar with a short, brilliant small-plates menu\" but in your own words. " +
+  "Don't repeat the name, dates, prices or address, and only say what you're sure is true.";
+
 /// Each pick's picture and card colour, for the chips: an event's page
 /// image, or a place's Google photo as the same signed link saved places
 /// keep. Best-effort; a pick that's been tried keeps `image: null`, so a
@@ -219,13 +338,112 @@ async function dressOne(s: Suggestion, home: Home): Promise<Suggestion> {
       const image = await heroImageFromUrl(s.url);
       return { ...s, image, color: image ? await colorFromImageUrl(image) : null };
     }
+    // The search for its photo also finds its address, pin and Google
+    // place, which is all a place's card needs: kept, at no extra cost.
     const match = await findPlace(s.title, { area: s.venue }, home);
-    if (!match?.photo) return { ...s, image: null, color: null };
+    if (!match) return { ...s, image: null, color: null };
+    if (!match.photo) return { ...s, image: null, color: null, card: placeCard(s, match, null, null) };
     const [image, direct] = await Promise.all([placePhotoLink(match.id, match.credit), photoUri(match.photo, 400)]);
-    return { ...s, image, color: direct ? await colorFromImageUrl(direct) : null };
+    const color = direct ? await colorFromImageUrl(direct) : null;
+    return { ...s, image, color, card: placeCard(s, match, image, color) };
   } catch {
     return { ...s, image: null, color: null };
   }
+}
+
+/// Name the picks a pool stored before categories: one short call, no
+/// search. A miss leaves them unlabelled so the next ask tries again.
+export async function label(items: Suggestion[]): Promise<Suggestion[]> {
+  const pending = items.filter((s) => s.category === undefined);
+  if (pending.length === 0) return items;
+  const kind = pending[0].kind;
+  const vocab = kind === "place" ? PLACE_CATEGORIES : EVENT_CATEGORIES;
+  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const response = await anthropic.messages.create({
+    model: SUGGEST_MODEL,
+    max_tokens: 1024,
+    output_config: { format: { type: "json_schema", schema: labelSchema(kind) } },
+    messages: [{
+      role: "user",
+      content:
+        `Label each ${kind} with one category from: ${vocab.join(", ")}. ` +
+        `exhibition is a dated show; a gallery or museum building is gallery or museum, never exhibition. ` +
+        `cafe is a café or bakery; drink is a bar. Use each url unchanged.\n` +
+        pending.map((s) => [s.url, s.title, s.venue].filter(Boolean).join("\t")).join("\n"),
+    }],
+  });
+  const parsed = readItems(answerText(response.content));
+  return parsed ? applyCategories(items, parsed) : items;
+}
+
+/// A line for each pick in a pool stored before chips had one: one short
+/// call, no search. A miss leaves them as they were so the next ask tries
+/// again.
+export async function describe(items: Suggestion[]): Promise<Suggestion[]> {
+  const pending = items.filter(needsAbout);
+  if (pending.length === 0) return items;
+  const kind = pending[0].kind;
+  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const response = await anthropic.messages.create({
+    model: SUGGEST_MODEL,
+    max_tokens: 2048,
+    output_config: { format: { type: "json_schema", schema: DESCRIBE_SCHEMA } },
+    messages: [{
+      role: "user",
+      content:
+        `For each ${kind} below (url, name, ${kind === "event" ? "venue, dates" : "neighbourhood"}, category), write ${ABOUT_HINT} ` +
+        `If you don't know it, say plainly what kind of ${kind} it is. Use each url unchanged.\n` +
+        pending.map((s) =>
+          [s.url, s.title, s.venue, s.kind === "event" ? [s.starts_on, s.ends_on].filter(Boolean).join("–") : null, s.category]
+            .filter(Boolean).join("\t")
+        ).join("\n"),
+    }],
+  });
+  const parsed = readItems(answerText(response.content));
+  return parsed ? applyAbouts(items, parsed) : items;
+}
+
+const DESCRIBE_SCHEMA = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          url: { type: "string" },
+          about: { type: "string" },
+        },
+        required: ["url", "about"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["items"],
+  additionalProperties: false,
+} as const;
+
+function labelSchema(kind: SuggestionKind) {
+  const vocab = kind === "place" ? PLACE_CATEGORIES : EVENT_CATEGORIES;
+  return {
+    type: "object",
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            url: { type: "string" },
+            category: { type: "string", enum: [...vocab] },
+          },
+          required: ["url", "category"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["items"],
+    additionalProperties: false,
+  };
 }
 
 // MARK: - Refreshing
@@ -249,8 +467,16 @@ const EVENT_SCHEMA = {
           starts_on: { type: "string", description: "First day, yyyy-MM-dd" },
           ends_on: { type: ["string", "null"], description: "Last day of a run, yyyy-MM-dd; null for a one-night event" },
           url: { type: "string", description: "The event's own page on the venue's or organiser's site, exactly as seen in the search results" },
+          category: {
+            type: "string",
+            enum: EVENT_CATEGORIES,
+            description:
+              "What is on. exhibition is a dated show, gig a concert, film a screening or season, " +
+              "market a market, festival a festival. Never a place word such as gallery or restaurant.",
+          },
+          about: { type: "string", description: ABOUT_HINT },
         },
-        required: ["title", "short_title", "venue", "starts_on", "ends_on", "url"],
+        required: ["title", "short_title", "venue", "starts_on", "ends_on", "url", "category", "about"],
         additionalProperties: false,
       },
     },
@@ -270,8 +496,15 @@ const PLACE_SCHEMA = {
           title: { type: "string", description: "The place's own short name, in the local spelling" },
           venue: { type: ["string", "null"], description: "The neighbourhood" },
           url: { type: "string", description: "The place's own official https website" },
+          category: {
+            type: "string",
+            enum: PLACE_CATEGORIES,
+            description:
+              "What the place is. A gallery, museum or park is that, never exhibition. cafe is a café or bakery; drink is a bar.",
+          },
+          about: { type: "string", description: ABOUT_HINT },
         },
-        required: ["title", "venue", "url"],
+        required: ["title", "venue", "url", "category", "about"],
         additionalProperties: false,
       },
     },
@@ -358,6 +591,8 @@ const EVENT_FOCUSES = [
   "gigs, festivals, talks and markets",
   "food and drink events, supper clubs, pop-ups, comedy and club nights",
 ];
+/// The one more search a short refresh makes, open to any kind.
+const TOP_UP_FOCUS = "things on of any kind (exhibitions, theatre, film, gigs, talks, markets, food and drink)";
 
 async function searchEvents(
   anthropic: Anthropic,
@@ -365,7 +600,10 @@ async function searchEvents(
   locality: string,
   country: string,
   today: string,
+  avoid: string[] = [],
+  count = 6,
 ): Promise<{ raw: unknown[]; seen: [string, string][]; note: string; usage: Usage }> {
+  const others = avoid.length ? `Not these, already picked: ${avoid.join("; ")}. ` : "";
   const response = await anthropic.messages.create({
     model: SUGGEST_MODEL,
     // 8192 cut answers off mid-list after three searches' worth of reading.
@@ -376,8 +614,8 @@ async function searchEvents(
     messages: [{
       role: "user",
       content:
-        `Today is ${today}. Find 6 ${focus} in ${locality}, ${country} that are on now or open in the next six weeks, ` +
-        `worth going to with a friend: the interesting, new and talked-about, not tourist staples. ` +
+        `Today is ${today}. Find ${count} ${focus} in ${locality}, ${country} that are on now or open in the next six weeks, ` +
+        `worth going to with a friend: the interesting, new and talked-about, not tourist staples. ${others}` +
         `Start from what editors pick: first search ${GUIDES}. ` +
         `No permanent collections, tours or chains, and nothing that ends before today. ` +
         `Guides are where you find them, not what you return: the url must be that one event's own page on the ` +
@@ -437,47 +675,87 @@ export function blockSummary(content: ReadonlyArray<{ type: string; text?: strin
 }
 
 /// What's on now or soon, from a web search. Every link is opened: a page
-/// that's gone, or that dates another year's run, drops the event.
+/// that's gone, or that dates another year's run, drops the event. The
+/// last pool's events still on (`keep`) stay after the new ones, already
+/// checked and dressed; under MIN_EVENTS, one more search tops it up.
 export async function refreshEvents(
   locality: string,
   country: string,
   today: string,
   stage: (note: string) => unknown = () => {},
+  keep: Suggestion[] = [],
 ): Promise<Refreshed> {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
-  const searches = await Promise.allSettled(
-    EVENT_FOCUSES.map((focus) => searchEvents(anthropic, focus, locality, country, today)),
-  );
-  const lists: unknown[][] = [];
   // Every link the searches showed, with the title they showed it under.
   const seen = new Map<string, string>();
   const notes: string[] = [];
   let usage: Usage = { model: SUGGEST_MODEL, input_tokens: 0, output_tokens: 0, searches: 0 };
-  for (const s of searches) {
-    if (s.status === "fulfilled") {
-      lists.push(s.value.raw);
-      s.value.seen.forEach(([k, title]) => seen.set(k, title));
-      notes.push(s.value.note);
-      usage = addUsage(usage, s.value.usage);
-    } else {
-      notes.push(`failed: ${String(s.reason).slice(0, 120)}`);
+  const gather = (searches: PromiseSettledResult<Awaited<ReturnType<typeof searchEvents>>>[]) => {
+    const lists: unknown[][] = [];
+    for (const s of searches) {
+      if (s.status === "fulfilled") {
+        lists.push(s.value.raw);
+        s.value.seen.forEach(([k, title]) => seen.set(k, title));
+        notes.push(s.value.note);
+        usage = addUsage(usage, s.value.usage);
+      } else {
+        notes.push(`failed: ${String(s.reason).slice(0, 120)}`);
+      }
     }
-  }
-  // Every candidate is checked, and the cap applies to what passes.
-  const shaped = shapeSuggestions({ items: interleave(lists) }, "event", today, Infinity);
-  await stage(`searches: ${notes.join(" / ")}; checking ${shaped.length} links`);
-  const vouched = new Set(seen.keys());
-  const checked = await Promise.all(shaped.map(async (s) => {
-    const own = await ownPage(s.url, vouched, [s.starts_on, s.ends_on].filter((d): d is string => !!d));
-    if (!own) return null;
-    const shown = seen.get(linkKey(s.url) ?? "");
-    return aboutEvent(s.title, own.html, own.url, shown) ? { ...s, url: own.url } : null;
-  }));
-  return {
-    items: checked.filter((s): s is Suggestion => s !== null).slice(0, POOL_SIZE.event),
-    proposed: shaped.length,
-    usage,
+    return shapeSuggestions({ items: interleave(lists) }, "event", today, Infinity);
   };
+  // Every candidate is checked, and the cap applies to what passes.
+  const check = async (shaped: Suggestion[]) => {
+    const vouched = new Set(seen.keys());
+    const checked = await Promise.all(shaped.map(async (s) => {
+      const own = await ownPage(s.url, vouched, [s.starts_on, s.ends_on].filter((d): d is string => !!d));
+      if (!own) return null;
+      const shown = seen.get(linkKey(s.url) ?? "");
+      return aboutEvent(s.title, own.html, own.url, shown) ? { ...s, url: own.url } : null;
+    }));
+    // One already in the pool stays as it is there: dressed, described,
+    // carded.
+    return checked.filter((s): s is Suggestion => s !== null).map((s) => keep.find((k) => samePick(k, s)) ?? s);
+  };
+
+  const shaped = gather(await Promise.allSettled(
+    EVENT_FOCUSES.map((focus) => searchEvents(anthropic, focus, locality, country, today)),
+  ));
+  await stage(`searches: ${notes.join(" / ")}; checking ${shaped.length} links`);
+  const found = await check(shaped);
+  const kept = mergePicks([found, keep], today);
+  let proposed = shaped.length;
+  let topped: Suggestion[] = [];
+  if (kept.length < MIN_EVENTS) {
+    await stage(`searches: ${notes.join(" / ")}; ${found.length} new and ${kept.length - found.length} kept, topping up`);
+    const more = gather(await Promise.allSettled([
+      searchEvents(anthropic, TOP_UP_FOCUS, locality, country, today, kept.map((s) => s.title), 8),
+    ]));
+    proposed += more.length;
+    topped = await check(more);
+  }
+  const items = mergePicks([found, topped, keep], today);
+  await stage(
+    `searches: ${notes.join(" / ")}; ${found.length + topped.length} new` +
+      (topped.length ? ` (${topped.length} topping up)` : "") + `, ${items.length - found.length - topped.length} kept`,
+  );
+  return { items: items.slice(0, POOL_SIZE.event), proposed, usage };
+}
+
+/// One event, by its link or its name.
+function samePick(a: Suggestion, b: Suggestion): boolean {
+  return (linkKey(a.url) ?? a.url) === (linkKey(b.url) ?? b.url) ||
+    a.title.trim().toLowerCase() === b.title.trim().toLowerCase();
+}
+
+/// Lists in order of preference, as one: each event once, and only while
+/// it's on.
+export function mergePicks(lists: Suggestion[][], today: string): Suggestion[] {
+  const out: Suggestion[] = [];
+  for (const s of lists.flat()) {
+    if (stillOn(s, today) && !out.some((o) => samePick(o, s))) out.push(s);
+  }
+  return out;
 }
 
 /// Alternate the lists so the pool's cap doesn't cut one kind.

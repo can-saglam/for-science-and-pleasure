@@ -225,11 +225,56 @@ function jsonLdImages(
   }
 }
 
+/// Narrower than this, a picture is a thumbnail: across a card it's a blur.
+const THUMBNAIL_WIDTH = 300;
+
+export function isThumbnail(url: string): boolean {
+  const width = widthFromUrl(url);
+  return width > 0 && width < THUMBNAIL_WIDTH;
+}
+
+/// The same picture at a card's size, when the page names a thumbnail as
+/// its photo but carries bigger copies too (Somerset House: og:image and
+/// JSON-LD at `width-56`, `width-1600` in its page data). A copy is the
+/// same file name with a larger width in its URL; a JPEG or PNG is
+/// preferred, and the largest up to 2000 wide.
+function largerCopy(html: string, small: string, pageUrl: string): string | null {
+  let name: string;
+  try {
+    name = decodeURIComponent(new URL(small).pathname.split("/").pop() ?? "");
+  } catch {
+    return null;
+  }
+  if (name.length < 5 || !/\.[a-z0-9]{3,4}$/i.test(name)) return null;
+  let best: { url: string; width: number; score: number } | null = null;
+  for (const m of html.matchAll(/https?:(?:\\?\/){2}[^\s"'<>()\\]+(?:\\\/[^\s"'<>()\\]+)*/g)) {
+    const url = imageUrl(m[0].replace(/\\\//g, "/"), pageUrl);
+    if (!url) continue;
+    let file: string;
+    try {
+      file = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+    } catch {
+      continue;
+    }
+    if (file !== name) continue;
+    const width = widthFromUrl(url);
+    if (width < THUMBNAIL_WIDTH) continue;
+    const score = (/webp|avif/i.test(url) ? 0 : 2) + (width <= 2000 ? 1 : 0);
+    const better = !best || score > best.score ||
+      (score === best.score && (width <= 2000 ? width > best.width : width < best.width));
+    if (better) best = { url, width, score };
+  }
+  return best?.url ?? null;
+}
+
 /// Best photo for a page: og:image, then JSON-LD, then the largest content
-/// <img> — small venue sites often skip social meta tags entirely.
+/// <img> — small venue sites often skip social meta tags entirely. A
+/// thumbnail counts only through a larger copy of it on the page.
 export function heroImageFromHtml(html: string, pageUrl: string): string | null {
   const og = ogImageFromHtml(html, pageUrl);
-  if (og) return og;
+  if (og && !isThumbnail(og)) return og;
+  const ogCopy = og ? largerCopy(html, og, pageUrl) : null;
+  if (ogCopy) return ogCopy;
 
   const ld: { url: string; rank: number }[] = [];
   for (const block of html.matchAll(
@@ -244,7 +289,10 @@ export function heroImageFromHtml(html: string, pageUrl: string): string | null 
   // Stable: ties keep document order.
   for (const { url } of ld.sort((a, b) => a.rank - b.rank)) {
     const resolved = imageUrl(url, pageUrl);
-    if (resolved) return resolved;
+    if (!resolved) continue;
+    if (!isThumbnail(resolved)) return resolved;
+    const copy = largerCopy(html, resolved, pageUrl);
+    if (copy) return copy;
   }
 
   let best: { src: string; width: number } | null = null;
@@ -330,11 +378,13 @@ export function largestImageCandidate(
 }
 
 /// What a file's URL says about its own width: a `?w=` / `?width=` query,
-/// the WordPress size suffix (`-800x530.jpg`, `-scaled.jpg`), or Wix's
+/// a Wagtail rendition (`/width-1600/`, `format-webp|max-800x600`), the
+/// WordPress size suffix (`-800x530.jpg`, `-scaled.jpg`), or Wix's
 /// transform path (`/v1/fill/w_638,h_646,…/`). Zero when it says nothing.
 function widthFromUrl(src: string): number {
   return Number(
     src.match(/[?&](?:w|width)=(\d+)/i)?.[1] ??
+      src.match(/(?:\/|\||%7C)(?:width|max|fill|min)-(\d{2,4})(?=[x/|%-]|$)/i)?.[1] ??
       src.match(/-(\d{3,4})x\d{3,4}\.(?:jpe?g|png|webp|avif)/i)?.[1] ??
       src.match(/\/(?:fill|fit)\/(?:[^/]*,)?w_(\d+)(?:,|\/)/i)?.[1] ??
       (/-scaled\.(?:jpe?g|png|webp)/i.test(src) ? 1000 : 0),

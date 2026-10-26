@@ -12,6 +12,7 @@ import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { consumeQuota } from "../_shared/quota.ts";
 import { fallbackStarters, starterKey } from "../_shared/starters.ts";
+import { uncarded } from "../_shared/pick_cards.ts";
 import { cityJobs } from "../_shared/suggestion_jobs.ts";
 import {
   BUSY_CITY_PEOPLE,
@@ -21,7 +22,9 @@ import {
   leaseFree,
   triedRecently,
   servePool,
+  undescribed,
   undressed,
+  unlabelled,
 } from "../_shared/suggestions.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -126,14 +129,25 @@ Deno.serve(async (req) => {
       refreshing.has(kind) || !leaseFree(stored?.refreshing_since ?? null);
     const eventsComing = events.length === 0 && busyRow("event", eventRow);
     let picturesComing = false;
+    let categoriesComing = false;
+    let descriptionsComing = false;
+    let cardsComing = false;
     for (const [kind, pool, stored] of [["event", events, eventRow], ["place", places, placeRow]] as const) {
-      if (!undressed(pool)) continue;
-      if (busyRow(kind, stored)) {
-        picturesComing = true;
-      } else if (stored) {
-        later.push(redress(kind));
-        picturesComing = true;
+      const needsDress = undressed(pool);
+      const needsLabel = unlabelled(pool);
+      const needsAbout = undescribed(pool);
+      // Someone is asking, so this city is in use: its events are read
+      // up front too (pick_cards.ts).
+      const needsCards = uncarded(pool);
+      if (!needsDress && !needsLabel && !needsAbout && !needsCards) continue;
+      if (!busyRow(kind, stored)) {
+        if (!stored) continue;
+        later.push(redress(kind, true));
       }
+      if (needsDress) picturesComing = true;
+      if (needsLabel) categoriesComing = true;
+      if (needsAbout) descriptionsComing = true;
+      if (needsCards) cardsComing = true;
     }
     if (later.length > 0) {
       const work = Promise.all(later);
@@ -149,7 +163,15 @@ Deno.serve(async (req) => {
         ends_on: null,
       }));
     }
-    return json({ events, places, events_coming: eventsComing, pictures_coming: picturesComing });
+    return json({
+      events,
+      places,
+      events_coming: eventsComing,
+      pictures_coming: picturesComing,
+      categories_coming: categoriesComing,
+      descriptions_coming: descriptionsComing,
+      cards_coming: cardsComing,
+    });
   } catch (e) {
     console.error(e);
     return json({ error: "internal error" }, 500);
