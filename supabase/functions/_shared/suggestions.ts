@@ -317,7 +317,7 @@ export async function dress(
   withinMs?: number,
 ): Promise<Suggestion[]> {
   const home: Home = { locality, country, timezone: "UTC", lat: null, lng: null };
-  let timer: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeUp = withinMs === undefined
     ? null
     : new Promise<null>((done) => timer = setTimeout(() => done(null), withinMs));
