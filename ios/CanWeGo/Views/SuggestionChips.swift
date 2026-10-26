@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// A few things to go to in the home city, in one row that scrolls
-/// sideways. A tap opens the add sheet on the link and reads it, the same
-/// as sharing it in.
+/// sideways. A tap opens the add sheet on it: its stored card when the
+/// server has one, otherwise its link, read as if shared in.
 struct SuggestionChips: View {
     let picks: [ParseClient.Suggestion]
     /// Set while the city's events are still being searched for.
@@ -18,7 +18,7 @@ struct SuggestionChips: View {
     }
 
     static func open(_ s: ParseClient.Suggestion) {
-        CaptureGate.pendingLink = s.url
+        CaptureGate.pendingPick = s
         NotificationCenter.default.post(name: .cwgCaptureImage, object: nil)
     }
 }

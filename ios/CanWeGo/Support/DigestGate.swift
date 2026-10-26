@@ -7,13 +7,13 @@ enum ItemGate {
     static var pending: UUID?
 }
 
-/// A picture sent from Visual Intelligence, or a suggestion's link, to be
+/// A picture sent from Visual Intelligence, or a tapped suggestion, to be
 /// looked up and saved, or a card someone sent, parked until the composer
 /// opens and takes it.
 /// `pendingOpen` is the Control Center button: the composer, empty.
 enum CaptureGate {
     static var pendingImage: Data?
-    static var pendingLink: String?
+    static var pendingPick: ParseClient.Suggestion?
     static var pendingOpen = false
     /// A save someone sent: its card, ready to save as it is.
     static var pendingCard: ParseClient.Card?
@@ -28,9 +28,9 @@ enum CaptureGate {
         return pendingImage
     }
 
-    static func takeLink() -> String? {
-        defer { pendingLink = nil }
-        return pendingLink
+    static func takePick() -> ParseClient.Suggestion? {
+        defer { pendingPick = nil }
+        return pendingPick
     }
 }
 

@@ -210,10 +210,10 @@ struct CaptureView: View {
                 imageJPEG = picture
                 startParse()
             }
-            // So is a suggestion chip's link.
-            if text.isEmpty, imageJPEG == nil, draft == nil, let link = CaptureGate.takeLink() {
-                text = link
-                startParse()
+            // So is a suggestion chip tapped in the library.
+            if text.isEmpty, imageJPEG == nil, draft == nil, let suggestion = CaptureGate.takePick() {
+                text = suggestion.url
+                pick(suggestion)
             }
             // A save someone sent is already a card: nothing to read.
             if draft == nil, let card = CaptureGate.takeCard() {
@@ -356,12 +356,32 @@ struct CaptureView: View {
 
     /// A recommendation is read straight away, like a shared link, with
     /// what it already knows standing in until the parser's fields land.
+    /// One the server already looked up needs no reading.
     private func pick(_ suggestion: ParseClient.Suggestion) {
         withAnimation(reveal) {
             pickedLook = Item(suggestion: suggestion)
             reading = .link
         }
-        startParse(link: suggestion.url)
+        if let card = suggestion.card {
+            parseTask?.cancel()
+            parseTask = Task { await show(card, link: suggestion.url) }
+        } else {
+            startParse(link: suggestion.url)
+        }
+    }
+
+    /// A pick's stored card, as a finished read would show it.
+    private func show(_ card: ParseClient.Card, link: String) async {
+        busy = true
+        defer { busy = false }
+        if let url = card.image_url.flatMap(URL.init(string:)) {
+            await ImageStore.warm(url, variant: .hero, limit: .milliseconds(900))
+        }
+        guard !Task.isCancelled else { return }
+        text = link
+        let parsed = item(from: card)
+        loadLibrary()
+        withAnimation(reveal) { draft = parsed }
     }
 
     /// With the phone's quick read, the save goes into the library now and

@@ -2214,7 +2214,7 @@ struct OnboardingView: View {
         if preview { advance(); return }
         let picks = tickedPicks.map(Item.init(suggestion:))
         guard insert([item] + picks) else { return }
-        enrich(picks)
+        enrich(unread(picks))
         advance()
     }
 
@@ -2224,7 +2224,12 @@ struct OnboardingView: View {
         let picks = tickedPicks.map(Item.init(suggestion:))
         guard preview || insert(picks) else { return }
         savedPicks = picks
-        enrich(picks)
+        enrich(unread(picks))
+    }
+
+    /// The saved picks whose card the server hadn't stored yet.
+    private func unread(_ picks: [Item]) -> [Item] {
+        zip(tickedPicks, picks).filter { $0.0.card == nil }.map(\.1)
     }
 
     private func insert(_ items: [Item]) -> Bool {

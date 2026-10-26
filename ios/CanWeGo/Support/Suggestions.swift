@@ -97,6 +97,7 @@ final class Suggestions {
     private static func stillComing(_ pool: ParseClient.SuggestionPool) -> Bool {
         pool.eventsComing == true || pool.picturesComing == true
             || pool.categoriesComing == true || pool.descriptionsComing == true
+            || pool.cardsComing == true
     }
 
     private func take(_ pool: ParseClient.SuggestionPool, for key: String) {

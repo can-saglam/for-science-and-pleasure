@@ -60,7 +60,8 @@ struct Recommendations: View {
 
 extension Item {
     /// What a recommendation already knows, for the capture drawer to
-    /// show while the parser reads its page, or a first save to start from.
+    /// show while the parser reads its page, or a first save to start from:
+    /// all of it when the server stored its card.
     convenience init(suggestion: ParseClient.Suggestion) {
         self.init()
         kind = suggestion.kind
@@ -72,6 +73,7 @@ extension Item {
         url = suggestion.url
         imageUrl = suggestion.image
         colorHex = suggestion.color
+        if let card = suggestion.card { take(card) }
     }
 
     /// Everything a lookup found, over whatever was there.

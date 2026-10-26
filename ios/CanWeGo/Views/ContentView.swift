@@ -588,13 +588,13 @@ struct ContentView: View {
     /// picture or link opens the composer on it; a search moves to its
     /// tab, where the list opens it.
     private func takeVisualHandoff() {
-        if CaptureGate.pendingImage != nil || CaptureGate.pendingLink != nil || CaptureGate.pendingCard != nil
+        if CaptureGate.pendingImage != nil || CaptureGate.pendingPick != nil || CaptureGate.pendingCard != nil
             || CaptureGate.pendingOpen {
             CaptureGate.pendingOpen = false
             if captureOpen {
                 // A composer already open keeps what's being typed there.
                 CaptureGate.pendingImage = nil
-                CaptureGate.pendingLink = nil
+                CaptureGate.pendingPick = nil
                 CaptureGate.pendingCard = nil
             } else {
                 deepLinked = nil

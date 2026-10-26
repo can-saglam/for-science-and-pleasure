@@ -6,7 +6,7 @@ import StoreKit
 ///
 /// Credentials come from Secrets.plist (gitignored; see Secrets.example.plist).
 enum ParseClient {
-    struct Card: Decodable {
+    struct Card: Codable, Hashable {
         let kind: String
         let title: String
         let summary: String?
@@ -303,10 +303,14 @@ enum ParseClient {
         /// The chip's picture and its dominant colour, when the pick has one.
         var image: String?
         var color: String?
+        /// Its full card, as a lookup of its link would give, stored with
+        /// the pool so a tap saves it without one. Missing until the server
+        /// has looked it up.
+        var card: Card?
         var id: String { url }
 
         enum CodingKeys: String, CodingKey {
-            case title, url, kind, venue, image, color, category, about
+            case title, url, kind, venue, image, color, category, about, card
             case startsOn = "starts_on"
             case endsOn = "ends_on"
             case shortTitle = "short_title"
@@ -324,6 +328,8 @@ enum ParseClient {
         var categoriesComing: Bool?
         /// Stored picks are getting their one-line descriptions.
         var descriptionsComing: Bool?
+        /// Stored picks are being looked up for their cards.
+        var cardsComing: Bool?
 
         enum CodingKeys: String, CodingKey {
             case events, places
@@ -331,6 +337,7 @@ enum ParseClient {
             case picturesComing = "pictures_coming"
             case categoriesComing = "categories_coming"
             case descriptionsComing = "descriptions_coming"
+            case cardsComing = "cards_coming"
         }
     }
 
@@ -435,5 +442,24 @@ enum ParseClient {
         }
         struct Envelope: Decodable { let proposals: [LocationProposal] }
         return try JSONDecoder().decode(Envelope.self, from: data).proposals
+    }
+}
+
+extension ParseClient.Suggestion {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        url = try c.decode(String.self, forKey: .url)
+        kind = try c.decode(String.self, forKey: .kind)
+        venue = try c.decodeIfPresent(String.self, forKey: .venue)
+        startsOn = try c.decodeIfPresent(String.self, forKey: .startsOn)
+        endsOn = try c.decodeIfPresent(String.self, forKey: .endsOn)
+        shortTitle = try c.decodeIfPresent(String.self, forKey: .shortTitle)
+        category = try c.decodeIfPresent(String.self, forKey: .category)
+        about = try c.decodeIfPresent(String.self, forKey: .about)
+        image = try c.decodeIfPresent(String.self, forKey: .image)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        // A card this build can't read is just a tap that looks it up.
+        card = (try? c.decodeIfPresent(ParseClient.Card.self, forKey: .card)) ?? nil
     }
 }
