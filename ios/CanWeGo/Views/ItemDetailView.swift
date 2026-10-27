@@ -171,7 +171,15 @@ struct ItemDetailView: View {
                                 Label("Edit", systemImage: "pencil")
                             }
                             Divider()
-                            ShareMenuItems(item: item, send: share)
+                            ShareMenuItems(item: item)
+                            if let address = copyableAddress {
+                                Button {
+                                    Haptics.success()
+                                    UIPasteboard.general.string = address
+                                } label: {
+                                    Label("Copy address", systemImage: "mappin.and.ellipse")
+                                }
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 Haptics.tap()
@@ -184,6 +192,9 @@ struct ItemDetailView: View {
                         } label: {
                             Image(systemName: "ellipsis")
                         }
+                        // Edit nearest the button, Delete furthest, wherever
+                        // the menu opens.
+                        .menuOrder(.fixed)
                         .accessibilityLabel("More")
                     }
                 }
@@ -511,6 +522,16 @@ struct ItemDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 14, style: .continuous))
         }
+    }
+
+    /// "South London Gallery, 65 Peckham Road, London SE5 8UH": the name
+    /// first, so it pastes as somewhere, not just a street.
+    private var copyableAddress: String? {
+        guard let address = item.address?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty
+        else { return nil }
+        let name = (item.isPlace ? item.title : item.venue)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let name, !name.isEmpty, !address.localizedCaseInsensitiveContains(name) else { return address }
+        return "\(name), \(address)"
     }
 
     private func share() {

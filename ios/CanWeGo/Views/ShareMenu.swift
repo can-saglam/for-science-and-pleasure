@@ -6,14 +6,17 @@ import UIKit
 /// page's own link copied (or a map without one).
 struct ShareMenuItems: View {
     let item: Item
-    let send: () -> Void
+    /// Nil where the paper plane already sits beside the menu.
+    var send: (() -> Void)?
 
     var body: some View {
-        Button {
-            Haptics.tap()
-            send()
-        } label: {
-            Label("Share with a friend", systemImage: "paperplane")
+        if let send {
+            Button {
+                Haptics.tap()
+                send()
+            } label: {
+                Label("Share with a friend", systemImage: "paperplane")
+            }
         }
         if let url = item.shareURL {
             let page = item.sharesPage
