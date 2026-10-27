@@ -111,8 +111,9 @@ final class Suggestions {
         }
     }
 
-    /// Up to `count` for one tab: nothing that's ended, nothing already
-    /// saved, and a new order each day that holds steady within it.
+    /// Up to `count` for one tab: only pictured ones, nothing that's ended,
+    /// nothing already saved, and a new order each day that holds steady
+    /// within it.
     func picks(kind: String, for home: HomeStore.Home, excluding saved: [Item], count: Int = 6) -> [Pick] {
         guard city == Self.key(for: home) else { return [] }
         let today = DayString.today()
@@ -125,6 +126,9 @@ final class Suggestions {
         let pool = kind == Item.Kind.event ? events : places
         return pool
             .filter { s in
+                // A chip without its photo reads as broken; the server only
+                // sends pictured ones, this catches a pool kept from before.
+                if s.image?.isEmpty ?? true { return false }
                 if s.kind == Item.Kind.event, (s.endsOn ?? s.startsOn ?? "") < today { return false }
                 if let link = Self.linkKey(s.url), savedLinks.contains(link) { return false }
                 return !savedTitles.contains(s.title.lowercased())

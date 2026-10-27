@@ -13,7 +13,7 @@ struct ShareMenuItems: View {
             Haptics.tap()
             send()
         } label: {
-            Label("Send to a friend", systemImage: "paperplane")
+            Label("Share with a friend", systemImage: "paperplane")
         }
         if let url = item.shareURL {
             let page = item.sharesPage

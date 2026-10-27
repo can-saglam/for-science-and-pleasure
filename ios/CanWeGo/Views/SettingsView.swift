@@ -10,7 +10,7 @@ import UserNotifications
 struct SettingsView: View {
     /// The pages one tap in from the first.
     enum Page: String, Hashable {
-        case group, preferences, account
+        case group, plus, account
     }
 
     @State private var path: [Page] = []
@@ -69,6 +69,8 @@ struct SettingsView: View {
     @AppStorage(CalendarChoice.key) private var calendarID = ""
     @State private var calendarAccess = EKEventStore.authorizationStatus(for: .event)
     @State private var calendars: [CalendarChoice.Option] = []
+    /// The iPhone's default calendar; only full access can see which.
+    @State private var defaultCalendarID: String?
     @State private var calendarRefused = false
     /// iOS's own Live Activities switch for this app, in the Settings app.
     @State private var activitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
@@ -87,10 +89,37 @@ struct SettingsView: View {
         NavigationStack(path: $path) {
             List {
                 if auth.signedIn {
-                    groupCard
+                    groupHeader
+                    Section {
+                        homeCityRow
+                    } header: {
+                        SettingsSectionHeader("Finding things")
+                    }
+                    .listRowBackground(Self.rowBackground)
                 } else {
                     signInCard
                 }
+
+                Section {
+                    #if !APP_EXTENSION
+                    calendarRow
+                    #endif
+                    menuRow("Get directions with") {
+                        Picker(selection: $transportApp) {
+                            ForEach(TransportApp.allCases) { app in
+                                Text(app.name).tag(app.rawValue)
+                            }
+                        } label: { EmptyView() }
+                    }
+                    .sensoryFeedback(.selection, trigger: transportApp)
+                } header: {
+                    SettingsSectionHeader("Making plans")
+                }
+                .listRowBackground(Self.rowBackground)
+
+                #if !APP_EXTENSION
+                onTheDay
+                #endif
 
                 Section {
                     // The same one-tap swatch row as the first run: the
@@ -99,34 +128,33 @@ struct SettingsView: View {
                         theme.wrappedValue = option
                     }
                     .padding(.vertical, 6)
+                } header: {
+                    SettingsSectionHeader("Look")
                 }
                 .listRowBackground(Self.rowBackground)
 
-                Section {
-                    door("Preferences", icon: "slider.horizontal.3", subtitle: preferencesSummary) {
-                        path.append(.preferences)
-                    }
-                    if auth.signedIn {
-                        door("Plus", icon: "star.fill", subtitle: PlusSection.status(for: group.card?.forScreenshots)) {
-                            showPlus = true
+                if auth.signedIn {
+                    Section {
+                        pageRow("Plus", value: group.card?.forScreenshots.isPlus == true ? "On" : "Free") {
+                            path.append(.plus)
                         }
-                        door(
+                        pageRow(
                             "Account",
-                            icon: "person.fill",
-                            subtitle: syncStatus.problem != nil ? "Sync issue" : (auth.email ?? "Signed in"),
-                            warning: syncStatus.problem != nil,
-                            isAddress: syncStatus.problem == nil
+                            subtitle: syncStatus.problem != nil ? "Sync issue" : auth.email,
+                            warning: syncStatus.problem != nil
                         ) {
                             path.append(.account)
                         }
+                    } header: {
+                        SettingsSectionHeader("You")
                     }
+                    .listRowBackground(Self.rowBackground)
                 }
-                .listRowBackground(Self.rowBackground)
 
                 #if !APP_EXTENSION
                 // Temporary, for testing builds. Remove before release.
                 Section {
-                    door("Replay onboarding", icon: "arrow.counterclockwise", subtitle: "Every page, nothing saved") {
+                    pageRow("Replay onboarding", subtitle: "Every page, nothing saved") {
                         showOnboardingPreview = true
                     }
                 }
@@ -143,7 +171,7 @@ struct SettingsView: View {
             .navigationDestination(for: Page.self) { page in
                 switch page {
                 case .group: groupPage
-                case .preferences: preferencesPage
+                case .plus: PlusPage(manage: $manageSubscription).settingsPage("Plus")
                 case .account: accountPage
                 }
             }
@@ -234,9 +262,9 @@ struct SettingsView: View {
             .modifier(GroupPresentations(ui: groupUI))
             .sheet(isPresented: $showPlus) { PlusPaywall() }
             .manageSubscriptionsSheet(isPresented: $manageSubscription)
-            // CWG_SETTINGS=plus / export are only set by automated test runs.
+            // CWG_SETTINGS=paywall / export are only set by automated test runs.
             .task {
-                if ProcessInfo.processInfo.environment["CWG_SETTINGS"] == "plus" {
+                if ProcessInfo.processInfo.environment["CWG_SETTINGS"] == "paywall" {
                     try? await Task.sleep(for: .seconds(1.5))
                     showPlus = true
                 }
@@ -253,19 +281,48 @@ struct SettingsView: View {
 
     // MARK: - First page
 
-    /// Who shares the library, before anything else.
-    @ViewBuilder private var groupCard: some View {
-        Section {
-            if let card = group.card?.forScreenshots {
-                GroupHeroCard(card: card, ui: groupUI) { path.append(.group) }
-            } else if group.loaded {
-                GroupLoadFailed()
-            } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 200)
+    /// Who shares the library, as a title line rather than a card: it's
+    /// something you know, not something you change often.
+    @ViewBuilder private var groupHeader: some View {
+        if let card = group.card?.forScreenshots {
+            Section {
+                GroupHeader(card: card, ui: groupUI) { path.append(.group) }
             }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
+        } else if group.loaded {
+            Section {
+                GroupLoadFailed()
+            }
+            .listRowBackground(Self.rowBackground)
+        } else {
+            Section {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 56)
+            }
+            .listRowBackground(Color.clear)
         }
-        .listRowBackground(Self.rowBackground)
+    }
+
+    /// The group's city: what picks are for and where the map opens.
+    private var homeCityRow: some View {
+        let home = group.card?.forScreenshots.homeLocality.flatMap { $0.isEmpty ? nil : $0 }
+        return Button {
+            Haptics.tap()
+            groupUI.editingHome = true
+        } label: {
+            HStack {
+                SettingsRow(title: "Home city", subtitle: "Where we look for picks, and where the map opens")
+                Spacer(minLength: 8)
+                Text(home ?? "Not set")
+                    .foregroundStyle(AppBackground.secondaryInk)
+                    .lineLimit(1)
+                chevron
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Changes the city your picks and map use")
     }
 
     /// Signed out, the brand and the one thing to do.
@@ -294,76 +351,73 @@ struct SettingsView: View {
         .listRowBackground(Self.rowBackground)
     }
 
-    /// What's set, like the Plus and Account rows: "Directions in Citymapper
-    /// · Plans in Home". The Lock Screen is only mentioned once it's off.
-    private var preferencesSummary: String {
-        #if APP_EXTENSION
-        "Maps"
-        #else
-        var parts: [String] = []
-        if let app = TransportApp(rawValue: transportApp) {
-            parts.append("Directions in \(app.name)")
-        }
-        // Without the account: "Home · iCloud" would read as two parts.
-        if let calendar = calendars.first(where: { $0.id == calendarID }),
-           let name = calendar.name.components(separatedBy: " · ").first {
-            parts.append("Plans in \(name)")
-        }
-        if !liveActivities || !activitiesAllowed {
-            parts.append("Lock Screen off")
-        }
-        return parts.isEmpty ? "Maps, calendar and Lock Screen" : parts.joined(separator: " · ")
-        #endif
-    }
-
-    /// A way one level in: a plain glyph, the name, and what's behind it.
-    /// An email address keeps both ends when it's too long; anything else
-    /// wraps.
-    private func door(
-        _ title: String, icon: String, subtitle: String, warning: Bool = false, isAddress: Bool = false,
+    /// A way one level in: the name, what's behind it, and a chevron. An
+    /// email address keeps both ends when it's too long.
+    private func pageRow(
+        _ title: String, subtitle: String? = nil, value: String? = nil, warning: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button {
             Haptics.tap()
             action()
         } label: {
-            HStack(spacing: 14) {
-                // Modern-settings style: a small squircle in the theme's
-                // badge colour, the glyph in its contrasting ink.
-                Image(systemName: icon)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AppBackground.badgeGlyph)
-                    .frame(width: 28, height: 28)
-                    .background(AppBackground.badge.gradient, in: .rect(cornerRadius: 7, style: .continuous))
-                    .accessibilityHidden(true)
+            HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .foregroundStyle(AppBackground.ink)
-                    Text(subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(warning ? AppBackground.warning : AppBackground.secondaryInk)
-                        .lineLimit(isAddress ? 1 : 2)
-                        .truncationMode(isAddress ? .middle : .tail)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(warning ? AppBackground.warning : AppBackground.secondaryInk)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppBackground.ink.opacity(0.45))
-                    .accessibilityHidden(true)
+                if let value {
+                    Text(value)
+                        .foregroundStyle(AppBackground.secondaryInk)
+                }
+                chevron
             }
-            .padding(.vertical, 4)
             .contentShape(.rect)
         }
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
     }
 
-    /// The brand signs off, with the legal pages and the version.
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(AppBackground.ink.opacity(0.45))
+            .accessibilityHidden(true)
+    }
+
+    /// The website's own words, kept in step with wegocan.com.
+    private static let about = [
+        "Can We Go is home to exhibitions, gigs, restaurants, bars or just anywhere you mean to get to. No more shared Notes or WhatsApp links that get lost in the ether. Share an event from Safari, Instagram, TikTok or Maps, take a photo of a poster IRL or use the app\u{2019}s native search function to find the latest from the Tate.",
+        "Keep a list with your partner or a group of friends and get reminders of the things you can do: events ending soon rise to the top and the places you want to go live on a map. Forgot what you did last weekend? A record of your exploits lives in the archive.",
+        "I\u{2019}m Can, and I built Can We Go for my partner and I to keep track of exhibitions and events in the city that we love. I hope it gets you to a few more of the places you said you\u{2019}d go to, too.",
+    ]
+
+    /// The brand signs off: what the app is for, in the website's words,
+    /// then the legal pages and the version.
     private var footer: some View {
         Section {
             VStack(spacing: 12) {
                 if auth.signedIn {
                     LogoTitle(height: 26, writes: .settings)
                 }
+                VStack(spacing: 8) {
+                    ForEach(Self.about, id: \.self) { paragraph in
+                        Text(paragraph)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
                 HStack(spacing: 8) {
                     Button("Privacy") {
                         Haptics.tap()
@@ -403,79 +457,59 @@ struct SettingsView: View {
             GroupSection(ui: groupUI)
         }
         // Alone, there's no group yet: it's your library, waiting for someone.
-        .settingsPage(group.card?.forScreenshots.members.count == 1 ? "Your library" : "Group")
+        .settingsPage(groupTitle)
     }
 
-    private var preferencesPage: some View {
-        List {
-            Section {
-                menuRow("Directions in") {
-                    Picker(selection: $transportApp) {
-                        ForEach(TransportApp.allCases) { app in
-                            Text(app.name).tag(app.rawValue)
-                        }
-                    } label: { EmptyView() }
-                }
-                .sensoryFeedback(.selection, trigger: transportApp)
-                #if !APP_EXTENSION
-                calendarRow
-                #endif
-            } header: {
-                Text("Directions and calendar")
-            }
-            .listRowBackground(Self.rowBackground)
+    private var groupTitle: String {
+        guard let card = group.card?.forScreenshots else { return "Group" }
+        return card.members.count == 1 ? "Your library" : card.name
+    }
 
-            #if !APP_EXTENSION
-            Section {
-                notificationsRow
+    #if !APP_EXTENSION
+    @ViewBuilder private var onTheDay: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { liveActivities && activitiesAllowed },
+                set: { liveActivities = $0 }
+            )) {
+                SettingsRow(
+                    title: "Use Live Activities",
+                    subtitle: "Plans and reminders stay on your Lock Screen on the day, instead of a notification."
+                )
             }
-            .listRowBackground(Self.rowBackground)
-
-            Section {
-                Toggle(isOn: Binding(
-                    get: { liveActivities && activitiesAllowed },
-                    set: { liveActivities = $0 }
-                )) {
-                    SettingsRow(title: "Live Activity")
-                }
-                .disabled(!activitiesAllowed)
-                .tint(AppBackground.toggleTint)
-                .sensoryFeedback(.selection, trigger: liveActivities)
-                .onChange(of: liveActivities) { _, on in
-                    Task { await LiveDay.set(on) }
-                }
-            } header: {
-                Text("On the day")
-            } footer: {
-                // Footers here (and in GroupSection) spell out `.footnote`:
-                // when a menu picker opens or closes, the List re-measures
-                // the visible footers without its own footer styling —
-                // body-sized text, an extra line, and everything below
-                // jumps ~33pt for one frame. With the font explicit both
-                // passes agree and nothing moves.
-                if activitiesAllowed {
-                    Text("On the day of a reminder or a plan, the save stays on your Lock Screen instead of sending a notification.")
+            .disabled(!activitiesAllowed)
+            .tint(AppBackground.toggleTint)
+            .sensoryFeedback(.selection, trigger: liveActivities)
+            .onChange(of: liveActivities) { _, on in
+                Task { await LiveDay.set(on) }
+            }
+            notificationsRow
+        } header: {
+            SettingsSectionHeader("On the day")
+        } footer: {
+            // Footers here (and in GroupSection) spell out `.footnote`:
+            // when a menu picker opens or closes, the List re-measures
+            // the visible footers without its own footer styling —
+            // body-sized text, an extra line, and everything below
+            // jumps ~33pt for one frame. With the font explicit both
+            // passes agree and nothing moves.
+            if !activitiesAllowed {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Live Activities are off for Can We Go in iPhone Settings.")
                         .font(.footnote)
                         .foregroundStyle(AppBackground.secondaryInk)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Live Activities are off for Can We Go in iPhone Settings.")
-                            .font(.footnote)
-                            .foregroundStyle(AppBackground.secondaryInk)
-                        Button("Open Settings") {
-                            Haptics.tap()
-                            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
-                        }
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(themes.current.ink)
+                    Button("Open Settings") {
+                        Haptics.tap()
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                     }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(themes.current.ink)
                 }
             }
-            .listRowBackground(Self.rowBackground)
-            #endif
         }
-        .settingsPage("Preferences")
+        .listRowBackground(Self.rowBackground)
     }
+    #endif
 
     #if !APP_EXTENSION
     /// Never asked: the tap asks. Otherwise it opens this app's page in
@@ -494,7 +528,11 @@ struct SettingsView: View {
         } label: {
             HStack {
                 SettingsRow(title: "Notifications", subtitle: notificationSummary)
-                Spacer()
+                Spacer(minLength: 8)
+                if notificationStatus != nil {
+                    Text(notificationsOn ? "On" : "Off")
+                        .foregroundStyle(AppBackground.secondaryInk)
+                }
                 Image(systemName: notificationStatus == .notDetermined ? "bell.badge" : "arrow.up.forward")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppBackground.ink.opacity(0.45))
@@ -505,11 +543,15 @@ struct SettingsView: View {
         .task { await refreshNotificationStatus() }
     }
 
+    private var notificationsOn: Bool {
+        [.authorized, .provisional, .ephemeral].contains(notificationStatus)
+    }
+
     private var notificationSummary: String? {
         switch notificationStatus {
-        case .authorized, .provisional, .ephemeral: "On: reminders, plans and what your group adds"
-        case .denied: "Off. Turn them on in iPhone Settings."
-        case .notDetermined: "Off. Tap to turn on."
+        case .authorized, .provisional, .ephemeral: "Reminders, plans and what your group adds"
+        case .denied: "Turn them on in iPhone Settings"
+        case .notDetermined: "Tap to turn them on"
         default: nil
         }
     }
@@ -585,14 +627,14 @@ struct SettingsView: View {
                                 .foregroundStyle(AppBackground.ink.opacity(0.45))
                         }
                     }
+                } header: {
+                    SettingsSectionHeader("Your saves")
                 } footer: {
-                    Text("Your saves as a spreadsheet, a calendar file and a readable list.")
+                    Text("A spreadsheet, a calendar file and a readable list, to keep or move elsewhere.")
                         .font(.footnote)
                         .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .listRowBackground(Self.rowBackground)
-
-                PlusSection(manage: $manageSubscription)
 
                 Section {
                     Button(role: .destructive) {
@@ -669,15 +711,18 @@ struct SettingsView: View {
     /// A Settings-style value row: the title on the left, a menu picker as
     /// the small trailing value, matching the system Settings app.
     private func menuRow<P: View>(
-        _ title: String, @ViewBuilder picker: () -> P
+        _ title: String, subtitle: String? = nil, @ViewBuilder picker: () -> P
     ) -> some View {
-        LabeledContent {
+        // Not LabeledContent: with a subtitle it drops the menu onto a
+        // line of its own.
+        HStack(spacing: 8) {
+            SettingsRow(title: title, subtitle: subtitle)
+                .frame(maxWidth: .infinity, alignment: .leading)
             picker()
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .tint(themes.current.ink)
-        } label: {
-            SettingsRow(title: title)
+                .tint(AppBackground.secondaryInk)
+                .fixedSize()
         }
         // The menu button is UIKit-backed and asks the cell for ~34pt via
         // Auto Layout, over SwiftUI's head; meet it, and trim the row insets
@@ -694,9 +739,16 @@ struct SettingsView: View {
     /// someone who taps here asking for them.
     @ViewBuilder private var calendarRow: some View {
         if calendarAccess == .fullAccess {
-            menuRow("Add events to") {
-                Picker(selection: $calendarID) {
-                    Text("iPhone default").tag("")
+            menuRow("Calendar", subtitle: Self.calendarNote) {
+                // Unset follows the iPhone's default, shown by its name;
+                // only a pick writes the setting.
+                Picker(selection: Binding(
+                    get: { calendarID.isEmpty ? (defaultCalendarID ?? "") : calendarID },
+                    set: { calendarID = $0 }
+                )) {
+                    if defaultCalendarID == nil {
+                        Text("Default").tag("")
+                    }
                     ForEach(calendars) { calendar in
                         Text(calendar.name).tag(calendar.id)
                     }
@@ -715,13 +767,13 @@ struct SettingsView: View {
                 // Dressed as the picker it turns into once allowed.
                 LabeledContent {
                     HStack(spacing: 5) {
-                        Text("iPhone default")
+                        Text("Default")
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.footnote.weight(.medium))
                     }
-                    .foregroundStyle(themes.current.ink)
+                    .foregroundStyle(AppBackground.secondaryInk)
                 } label: {
-                    SettingsRow(title: "Add events to")
+                    SettingsRow(title: "Calendar", subtitle: Self.calendarNote)
                 }
             }
             .buttonStyle(.plain)
@@ -731,11 +783,16 @@ struct SettingsView: View {
         }
     }
 
+    private static let calendarNote = "Where plans go when you add them to your calendar"
+
     /// A calendar that's gone falls back to the default, so the picker
     /// never shows a blank value.
     private func refreshCalendars() {
         calendarAccess = EKEventStore.authorizationStatus(for: .event)
         calendars = CalendarChoice.options()
+        let fallback = calendarAccess == .fullAccess
+            ? EKEventStore().defaultCalendarForNewEvents?.calendarIdentifier : nil
+        defaultCalendarID = calendars.contains { $0.id == fallback } ? fallback : nil
         if calendarAccess == .fullAccess, !calendarID.isEmpty,
            !calendars.contains(where: { $0.id == calendarID }) {
             calendarID = ""

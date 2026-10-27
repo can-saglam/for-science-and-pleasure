@@ -859,11 +859,11 @@ struct LibraryView: View {
                     ) {
                         suggestionChips
                     }
-                    // Centred between the header and the tab bar, less the
-                    // bottom content margin. The tip row (a sliver even
-                    // with no tip) comes off both ends, so the centre
-                    // stays put whether or not a tip shows.
-                    .frame(minHeight: max(listHeight - 24 - 2 * tipHeight, 0))
+                    // Down by the tab bar, leaving the space above for an
+                    // illustration. The tip row (a sliver even with no tip)
+                    // comes off both ends, so it stays put whether or not a
+                    // tip shows.
+                    .frame(minHeight: max(listHeight - 24 - 2 * tipHeight, 0), alignment: .bottom)
                     .padding(.bottom, tipHeight)
                     .cardListRow()
                 } else if askQuestion == nil {

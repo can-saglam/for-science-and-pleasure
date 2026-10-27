@@ -39,6 +39,9 @@ export interface Suggestion {
   image?: string | null;
   /** The picture's dominant colour, for the chip's tint. */
   color?: string | null;
+  /** An event whose page gave no picture has had its venue looked up on
+   * Google for one. Missing until then. */
+  venue_photo?: boolean;
   /** The full card a tap saves. Missing until looked up (see pick_cards.ts);
    * null when a lookup couldn't pin it, so a tap looks it up instead. */
   card?: PickCard | null;
@@ -200,12 +203,45 @@ export function aboutEvent(title: string, html: string | null, url: string, show
 /// The stored pool as the app gets it: ended events gone.
 export function servePool(payload: unknown, kind: SuggestionKind, today: string): Suggestion[] {
   const items = Array.isArray((payload as { items?: unknown })?.items) ? (payload as { items: Suggestion[] }).items : [];
-  return items.filter((s) => s && s.kind === kind && typeof s.url === "string" && stillOn(s, today));
+  return items
+    .filter((s) => s && s.kind === kind && typeof s.url === "string" && stillOn(s, today))
+    .map(withCardPhoto);
 }
 
-/// A pool with picks that have never been looked at for a picture.
+/// A page that turns robots away leaves the chip without a picture, though
+/// the card a tap saves found one (often the venue's, from Wikipedia).
+/// The chip wears that rather than a bare ticket.
+export function withCardPhoto(s: Suggestion): Suggestion {
+  if (s.image !== null || !s.card?.image_url) return s;
+  return { ...s, image: s.card.image_url, color: s.color ?? s.card.color ?? null };
+}
+
+/// Never looked at for a picture, or an event with none yet whose venue
+/// hasn't been tried.
+export function needsPicture(s: Suggestion): boolean {
+  if (s.image === undefined) return true;
+  return s.kind === "event" && !s.image && !s.card?.image_url && namedVenue(s.venue) !== null &&
+    s.venue_photo === undefined;
+}
+
+/// A pool with picks still to be looked at for a picture.
 export function undressed(items: Suggestion[]): boolean {
-  return items.some((s) => s.image === undefined);
+  return items.some(needsPicture);
+}
+
+/// What the phone is sent: only picks with a picture. A chip is a photo
+/// and a line or two; without the photo it reads as broken. Picks still
+/// being dressed join once they have one (`pictures_coming`).
+export function forPhone(items: Suggestion[]): Suggestion[] {
+  return items.filter((s) => typeof s.image === "string" && s.image.length > 0);
+}
+
+/// A venue worth finding on a map: not "Various venues", "Online", "TBA".
+export function namedVenue(venue: string | null | undefined): string | null {
+  const v = venue?.trim();
+  if (!v || v.length < 3) return null;
+  if (/^(various|multiple|several|online|virtual|tba|tbc|secret|across|all over)\b/i.test(v)) return null;
+  return v;
 }
 
 /// A pool stored before the chip named what each pick is.
@@ -323,7 +359,7 @@ export async function dress(
     : new Promise<null>((done) => timer = setTimeout(() => done(null), withinMs));
   try {
     return await Promise.all(items.map(async (s): Promise<Suggestion> => {
-      if (s.image !== undefined) return s;
+      if (!needsPicture(s)) return s;
       const dressed = dressOne(s, home);
       return (timeUp ? await Promise.race([dressed, timeUp]) : await dressed) ?? s;
     }));
@@ -335,8 +371,13 @@ export async function dress(
 async function dressOne(s: Suggestion, home: Home): Promise<Suggestion> {
   try {
     if (s.kind === "event") {
-      const image = await heroImageFromUrl(s.url);
-      return { ...s, image, color: image ? await colorFromImageUrl(image) : null };
+      if (s.image === undefined) {
+        const image = await heroImageFromUrl(s.url);
+        if (image) return { ...s, image, color: await colorFromImageUrl(image) };
+      }
+      const fromCard = withCardPhoto({ ...s, image: null, color: s.color ?? null });
+      if (fromCard.image) return fromCard;
+      return await venuePhoto(fromCard, home);
     }
     // The search for its photo also finds its address, pin and Google
     // place, which is all a place's card needs: kept, at no extra cost.
@@ -349,6 +390,18 @@ async function dressOne(s: Suggestion, home: Home): Promise<Suggestion> {
   } catch {
     return { ...s, image: null, color: null };
   }
+}
+
+/// A page that turns robots away (Resident Advisor, Cloudflare) leaves an
+/// event bare; the venue's Google photo stands in, as a place's does.
+async function venuePhoto(s: Suggestion, home: Home): Promise<Suggestion> {
+  const venue = namedVenue(s.venue);
+  if (!venue) return { ...s, venue_photo: true };
+  const match = await findPlace(venue, { area: home.locality }, home);
+  if (!match?.photo) return { ...s, venue_photo: true };
+  const [image, direct] = await Promise.all([placePhotoLink(match.id, match.credit), photoUri(match.photo, 400)]);
+  const color = direct ? await colorFromImageUrl(direct) : null;
+  return { ...s, image, color: s.color ?? color, venue_photo: true };
 }
 
 /// Name the picks a pool stored before categories: one short call, no

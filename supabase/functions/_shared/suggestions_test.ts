@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { aboutEvent, answerText, applyAbouts, applyCategories, blockSummary, undescribed, busyMatters, interleave, isDue, isTicketEventPage, lastListIn, leaseFree, mergePicks, readItems, servePool, shapeSuggestions, stillOn, type Suggestion, triedRecently, undressed, unlabelled } from "./suggestions.ts";
+import { aboutEvent, answerText, applyAbouts, applyCategories, blockSummary, undescribed, busyMatters, interleave, isDue, isTicketEventPage, lastListIn, leaseFree, mergePicks, readItems, servePool, shapeSuggestions, stillOn, type Suggestion, triedRecently, undressed, unlabelled, withCardPhoto, forPhone, namedVenue, needsPicture } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {
   const listing = (t: string) => `<html><head><title>${t}</title></head><body><h1>${t}</h1><p>An Oak Tree, Darbar Festival, Pitchfork</p></body></html>`;
@@ -307,4 +307,45 @@ Deno.test("a block summary says where the output went", () => {
     blockSummary([{ type: "thinking", thinking: "x".repeat(2500) }, { type: "server_tool_use" }, { type: "server_tool_use" }]),
     "thinking×1 2.5k, server_tool_use×2",
   );
+});
+
+Deno.test("withCardPhoto: a chip the page turned away wears its card's picture", () => {
+  const pick = { title: "Lover Girl", url: "https://a.org/e", kind: "event", venue: "Soho Theatre", starts_on: null, ends_on: null } as Suggestion;
+  const card = { image_url: "https://upload.wikimedia.org/soho.jpg", color: "#553311" } as unknown as Suggestion["card"];
+  assertEquals(withCardPhoto({ ...pick, image: null, color: null, card }).image, "https://upload.wikimedia.org/soho.jpg");
+  assertEquals(withCardPhoto({ ...pick, image: null, color: null, card }).color, "#553311");
+  // Its own picture stays; one not yet looked for stays unlooked.
+  assertEquals(withCardPhoto({ ...pick, image: "https://a.org/own.jpg", card }).image, "https://a.org/own.jpg");
+  assertEquals(withCardPhoto({ ...pick, card }).image, undefined);
+  assertEquals(withCardPhoto({ ...pick, image: null, card: null }).image, null);
+});
+
+Deno.test("forPhone: only picks with a picture reach the phone", () => {
+  const base = { url: "https://a.org/x", kind: "event", venue: null, starts_on: null, ends_on: null } as const;
+  const shown = forPhone([
+    { ...base, title: "Pictured", image: "https://a.org/p.jpg" },
+    { ...base, title: "Tried, none", image: null },
+    { ...base, title: "Not looked at yet" },
+    { ...base, title: "Empty", image: "" },
+  ] as Suggestion[]);
+  assertEquals(shown.map((s) => s.title), ["Pictured"]);
+});
+
+Deno.test("needsPicture: a bare event at a named venue gets one venue try", () => {
+  const bare = { title: "Dom Dolla", url: "https://ra.co/e/1", kind: "event", venue: "Marina Bay Sands", starts_on: null, ends_on: null, image: null } as Suggestion;
+  assert(needsPicture(bare));
+  assert(!needsPicture({ ...bare, venue_photo: true }));
+  assert(!needsPicture({ ...bare, venue: "Various venues" }));
+  assert(!needsPicture({ ...bare, image: "https://a.org/p.jpg" }));
+  assert(!needsPicture({ ...bare, card: { image_url: "https://a.org/c.jpg" } as unknown as Suggestion["card"] }));
+  assert(needsPicture({ ...bare, image: undefined, venue_photo: true }));
+  assert(!needsPicture({ ...bare, kind: "place" }));
+});
+
+Deno.test("namedVenue: somewhere on a map, not a vague answer", () => {
+  assertEquals(namedVenue("Pasir Panjang Power Station"), "Pasir Panjang Power Station");
+  assertEquals(namedVenue("Various London venues"), null);
+  assertEquals(namedVenue("Online"), null);
+  assertEquals(namedVenue("  "), null);
+  assertEquals(namedVenue(null), null);
 });

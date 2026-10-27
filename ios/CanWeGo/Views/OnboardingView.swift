@@ -1930,56 +1930,6 @@ struct OnboardingView: View {
 
     // MARK: First save
 
-    /// Instant chips while the server answers — and the fallback if it
-    /// doesn't. Same cities as `_shared/starters.ts`.
-    private static let cityStarters: [String: [ParseClient.Suggestion]] = [
-        "london": [
-            .init(title: "Photographers' Gallery", url: "https://thephotographersgallery.org.uk", kind: "place", category: "gallery"),
-            .init(title: "Sessions Arts Club", url: "https://sessionsartsclub.com", kind: "place", category: "restaurant"),
-            .init(title: "Roundhouse", url: "https://www.roundhouse.org.uk", kind: "place", category: "venue"),
-        ],
-        "singapore": [
-            .init(title: "National Gallery", url: "https://www.nationalgallery.sg", kind: "place", category: "gallery"),
-            .init(title: "Atlas", url: "https://www.atlasbar.sg", kind: "place", category: "drink"),
-            .init(title: "The Projector", url: "https://theprojector.sg", kind: "place", category: "venue"),
-        ],
-        "lisbon": [
-            .init(title: "MAAT", url: "https://www.maat.pt", kind: "place", category: "museum"),
-            .init(title: "Cervejaria Ramiro", url: "https://www.cervejariaramiro.pt", kind: "place", category: "restaurant"),
-            .init(title: "Lux Frágil", url: "https://www.luxfragil.com", kind: "place", category: "drink"),
-        ],
-        "paris": [
-            .init(title: "Musée d'Orsay", url: "https://www.musee-orsay.fr", kind: "place", category: "museum"),
-            .init(title: "Septime", url: "https://www.septime-charonne.fr", kind: "place", category: "restaurant"),
-            .init(title: "Centre Pompidou", url: "https://www.centrepompidou.fr", kind: "place", category: "museum"),
-        ],
-        "new york": [
-            .init(title: "MoMA", url: "https://www.moma.org", kind: "place", category: "museum"),
-            .init(title: "Katz's Delicatessen", url: "https://www.katzsdelicatessen.com", kind: "place", category: "restaurant"),
-            .init(title: "Film Forum", url: "https://www.filmforum.org", kind: "place", category: "venue"),
-        ],
-        "tokyo": [
-            .init(title: "Mori Art Museum", url: "https://www.mori.art.museum", kind: "place", category: "museum"),
-            .init(title: "teamLab Planets", url: "https://www.teamlab.art/e/planets/", kind: "place", category: "museum"),
-            .init(title: "Unit", url: "https://www.unit-tokyo.com", kind: "place", category: "venue"),
-        ],
-        "hong kong": [
-            .init(title: "M+", url: "https://www.mplus.org.hk", kind: "place", category: "museum"),
-            .init(title: "Yardbird", url: "https://www.yardbirdrestaurant.com", kind: "place", category: "restaurant"),
-            .init(title: "Broadway Cinematheque", url: "https://www.cinema.com.hk", kind: "place", category: "venue"),
-        ],
-        "san francisco": [
-            .init(title: "SFMOMA", url: "https://www.sfmoma.org", kind: "place", category: "museum"),
-            .init(title: "Zuni Café", url: "https://zunicafe.com", kind: "place", category: "restaurant"),
-            .init(title: "Roxie Theater", url: "https://roxie.com", kind: "place", category: "venue"),
-        ],
-        "los angeles": [
-            .init(title: "The Broad", url: "https://www.thebroad.org", kind: "place", category: "museum"),
-            .init(title: "République", url: "https://republiquela.com", kind: "place", category: "restaurant"),
-            .init(title: "New Beverly Cinema", url: "https://thenewbev.com", kind: "place", category: "venue"),
-        ],
-    ]
-
     /// Only a home that was actually chosen counts; `HomeStore.home` falls
     /// back to London when nothing is set, and that must not show London
     /// starters to someone in Lisbon who hasn't picked yet.
@@ -1987,31 +1937,11 @@ struct OnboardingView: View {
         picked ?? (HomeStore.shared.isSet ? HomeStore.shared.home : nil)
     }
 
-    /// The chips: the city's own from the server (things on first, then
-    /// places), then the built-in set for that city (so Singapore isn't a
-    /// blank wait), nothing if we have no home and no fallback.
+    /// The chips: the city's own from the server, things on first, then
+    /// places. Nothing without a home; "Looking up…" while they come.
     private var starterChips: [ParseClient.Suggestion] {
-        if let home = chosenHome {
-            let pool = suggestions.mixed(for: home, count: 8)
-            if !pool.isEmpty { return pool }
-        }
-        return Self.fallbackStarters(for: chosenHome)
-    }
-
-    private static func fallbackStarters(for home: HomeStore.Home?) -> [ParseClient.Suggestion] {
-        guard let home else { return [] }
-        let aliases = [
-            "new york city": "new york", "nyc": "new york",
-            "sf": "san francisco", "la": "los angeles",
-            "republic of singapore": "singapore",
-        ]
-        let city = aliases[home.locality.lowercased()] ?? home.locality.lowercased()
-        let country = aliases[home.country.lowercased()] ?? home.country.lowercased()
-        if let chips = cityStarters[city] { return chips }
-        if ["singapore", "hong kong", "monaco"].contains(country) {
-            return cityStarters[country] ?? []
-        }
-        return []
+        guard let home = chosenHome else { return [] }
+        return suggestions.mixed(for: home, count: 8)
     }
 
     /// The city the chips are about. The pool only answers for the chosen
@@ -2404,7 +2334,9 @@ struct OnboardingView: View {
             return ShowcaseSave(pick)
         }
         let today = DayString.today()
-        let local = suggestions.events.filter { ($0.endsOn ?? $0.startsOn).map { $0 >= today } ?? false }
+        let local = suggestions.events.filter {
+            $0.image?.isEmpty == false && ($0.endsOn ?? $0.startsOn).map { $0 >= today } ?? false
+        }
         let pick = local.first { $0.endsOn != nil && $0.endsOn != $0.startsOn } ?? local.first
         return pick.map(ShowcaseSave.init) ?? .toor
     }

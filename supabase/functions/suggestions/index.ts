@@ -21,6 +21,7 @@ import {
   isDue,
   leaseFree,
   triedRecently,
+  forPhone,
   servePool,
   undescribed,
   undressed,
@@ -164,8 +165,8 @@ Deno.serve(async (req) => {
       }));
     }
     return json({
-      events,
-      places,
+      events: forPhone(events),
+      places: forPhone(places),
       events_coming: eventsComing,
       pictures_coming: picturesComing,
       categories_coming: categoriesComing,

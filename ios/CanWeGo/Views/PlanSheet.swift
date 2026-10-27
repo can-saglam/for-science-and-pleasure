@@ -1,3 +1,4 @@
+import EventKit
 import SwiftData
 import SwiftUI
 
@@ -187,6 +188,10 @@ struct PlanSheet: View {
     @State private var listing: Bool
     /// They want a time of their own on a showing day, not one of its times.
     @State private var ownTime: Bool
+    /// Kept on this phone: someone who wants plans in Calendar wants them
+    /// all there.
+    @AppStorage("plansToCalendar") private var addsToCalendar = false
+    @State private var calendarRefused = false
 
     private let showings: [Showing]
     private let pages: [DayPage]
@@ -392,6 +397,8 @@ struct PlanSheet: View {
 
                         timeSection
                     }
+
+                    calendarToggle
 
                     notes
                 }
@@ -821,6 +828,52 @@ struct PlanSheet: View {
         .accessibilityElement(children: .combine)
     }
 
+    // MARK: - Calendar
+
+    private var calendarToggle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Add to Calendar", isOn: Binding(
+                get: { addsToCalendar },
+                set: { on in
+                    withAnimation(.snappy) {
+                        addsToCalendar = on
+                        calendarRefused = false
+                    }
+                    if on { Task { await askForCalendar() } }
+                }
+            ))
+            if calendarRefused {
+                if let settings = URL(string: UIApplication.openSettingsURLString) {
+                    Link("Allow calendar access in Settings to add plans.", destination: settings)
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.warning)
+                }
+            } else if addsToCalendar, let day, item.isInCalendar(day: day, time: timed ? clock : nil) {
+                Text("Already in your calendar.")
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.secondaryInk)
+            }
+        }
+        .tint(AppBackground.toggleTint)
+        .padding(12)
+        .background(AppBackground.wash(0.07), in: .rect(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Asked when switched on, so a no turns it back off here rather than
+    /// failing quietly after Save.
+    private func askForCalendar() async {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .writeOnly, .fullAccess: return
+        case .notDetermined:
+            if (try? await EKEventStore().requestWriteOnlyAccessToEvents()) == true { return }
+        default: break
+        }
+        withAnimation(.snappy) {
+            addsToCalendar = false
+            calendarRefused = true
+        }
+    }
+
     // MARK: - What it means
 
     @ViewBuilder
@@ -904,6 +957,9 @@ struct PlanSheet: View {
         if let plan {
             item.setPlan(day: plan.day, time: plan.time)
             item.clearReminder()
+            if addsToCalendar, !item.isInCalendar {
+                Task { [item] in try? await item.addToCalendar() }
+            }
             #if !APP_EXTENSION
             PushRegistrar.register()
             #endif

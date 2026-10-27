@@ -61,6 +61,74 @@ private struct Plan: Identifiable {
         Plan(id: PlusStore.productIDs[0], name: "Yearly", price: "£21.99", unit: "year", perMonth: "£1.83 a month", amount: 21.99),
         Plan(id: PlusStore.productIDs[1], name: "Monthly", price: "£2.99", unit: "month", perMonth: nil, amount: 2.99),
     ]
+
+    /// Yearly against twelve months of monthly, rounded down.
+    static func yearlySaving(_ plans: [Plan]) -> Int? {
+        guard let yearly = plans.first(where: \.isYearly),
+              let monthly = plans.first(where: { !$0.isYearly }), monthly.amount > 0 else { return nil }
+        let ratio = NSDecimalNumber(decimal: yearly.amount / (monthly.amount * 12)).doubleValue
+        let saving = Int(((1 - ratio) * 100).rounded(.down))
+        return saving > 0 ? saving : nil
+    }
+
+    static func cta(_ plan: Plan?, trial: Int?) -> String {
+        if let trial { return "Try it free for \(trial) days" }
+        if let plan { return "Subscribe for \(plan.price) a \(plan.unit)" }
+        return "Subscribe"
+    }
+
+    /// What's charged after the trial, legible next to the button that
+    /// offers the trial (App Review guideline 3.1.2).
+    static func terms(_ plan: Plan?, trial: Int?) -> String {
+        guard let plan else { return " " }
+        let price = "\(plan.price) a \(plan.unit)"
+        let lead = trial.map { "Free for \($0) days, then \(price)." } ?? "\(price)."
+        return "\(lead) Renews automatically. Cancel any time in your Apple Account subscriptions."
+    }
+}
+
+/// Buying, shared by the paywall and the Plus page in Settings.
+@MainActor
+private enum Checkout {
+    /// Free-trial length per product, when this Apple ID is eligible.
+    static func trials(_ products: [Product]) async -> [String: Int] {
+        var days: [String: Int] = [:]
+        for product in products {
+            guard let subscription = product.subscription,
+                  let offer = subscription.introductoryOffer, offer.paymentMode == .freeTrial,
+                  await subscription.isEligibleForIntroOffer else { continue }
+            let period = offer.period
+            days[product.id] = switch period.unit {
+            case .day: period.value
+            case .week: period.value * 7
+            case .month: period.value * 30
+            case .year: period.value * 365
+            @unknown default: period.value
+            }
+        }
+        return days
+    }
+
+    /// Nil once it's through or cancelled; otherwise what to say.
+    static func buy(_ product: Product, with purchase: PurchaseAction) async -> String? {
+        // The buyer's account id rides on the purchase, so the server can
+        // tell whose subscription it is without trusting the phone.
+        var options: Set<Product.PurchaseOption> = []
+        if let me = SupabaseAuth.shared.userId { options.insert(.appAccountToken(me)) }
+        do {
+            switch try await purchase(product, options: options) {
+            case .success(let verification):
+                await PlusStore.shared.handle(verification)
+            case .pending:
+                return "Waiting for approval. Plus switches on as soon as it\u{2019}s through."
+            default:
+                break
+            }
+        } catch {
+            return "The purchase didn\u{2019}t go through. Please try again."
+        }
+        return nil
+    }
 }
 
 /// The one paywall: Settings, the My group card, a full category, a full
@@ -459,14 +527,7 @@ struct PlusPaywall: View {
         }
     }
 
-    /// Yearly against twelve months of monthly, rounded down.
-    private var yearlySaving: Int? {
-        guard let yearly = plans.first(where: \.isYearly),
-              let monthly = plans.first(where: { !$0.isYearly }), monthly.amount > 0 else { return nil }
-        let ratio = NSDecimalNumber(decimal: yearly.amount / (monthly.amount * 12)).doubleValue
-        let saving = Int(((1 - ratio) * 100).rounded(.down))
-        return saving > 0 ? saving : nil
-    }
+    private var yearlySaving: Int? { Plan.yearlySaving(plans) }
 
     private func planTile(_ plan: Plan) -> some View {
         let isOn = chosen?.id == plan.id
@@ -556,18 +617,9 @@ struct PlusPaywall: View {
         return chosen.flatMap { trialDays[$0.id] }
     }
 
-    private var ctaTitle: String {
-        if let trial { return "Try it free for \(trial) days" }
-        if let chosen { return "Subscribe for \(chosen.price) a \(chosen.unit)" }
-        return "Subscribe"
-    }
+    private var ctaTitle: String { Plan.cta(chosen, trial: trial) }
 
-    private var renewalTerms: String {
-        guard let chosen else { return " " }
-        let price = "\(chosen.price) a \(chosen.unit)"
-        let lead = trial.map { "Free for \($0) days, then \(price)." } ?? "\(price)."
-        return "\(lead) Renews automatically. Cancel any time in your Apple Account subscriptions."
-    }
+    private var renewalTerms: String { Plan.terms(chosen, trial: trial) }
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
@@ -667,39 +719,11 @@ struct PlusPaywall: View {
         buying = true
         defer { buying = false }
         message = nil
-        // The buyer's account id rides on the purchase, so the server can
-        // tell whose subscription it is without trusting the phone.
-        var options: Set<Product.PurchaseOption> = []
-        if let me { options.insert(.appAccountToken(me)) }
-        do {
-            switch try await purchase(product, options: options) {
-            case .success(let verification):
-                await plus.handle(verification)
-            case .pending:
-                message = "Waiting for approval. Plus switches on as soon as it\u{2019}s through."
-            default:
-                break
-            }
-        } catch {
-            message = "The purchase didn\u{2019}t go through. Please try again."
-        }
+        message = await Checkout.buy(product, with: purchase)
     }
 
     private func loadTrials() async {
-        for product in plus.products {
-            guard let subscription = product.subscription,
-                  let offer = subscription.introductoryOffer, offer.paymentMode == .freeTrial,
-                  await subscription.isEligibleForIntroOffer else { continue }
-            let period = offer.period
-            let days = switch period.unit {
-            case .day: period.value
-            case .week: period.value * 7
-            case .month: period.value * 30
-            case .year: period.value * 365
-            @unknown default: period.value
-            }
-            trialDays[product.id] = days
-        }
+        trialDays = await Checkout.trials(plus.products)
     }
 }
 
@@ -825,78 +849,377 @@ struct BusyDaySheet: View {
 
 // MARK: - Settings
 
-/// Settings' way in, unprompted: the paywall, and the two rows App Review
-/// looks for — Restore Purchases and Manage Subscription.
-/// The Settings rows for Plus. Its sheets hang off the Settings list: one
-/// attached to a list section tears Settings down along with it.
-/// The purchase plumbing, on the Account page; Plus itself is a row on
-/// the first page of Settings.
-struct PlusSection: View {
+/// Plus in Settings, for someone who came looking: the free plan and Plus
+/// side by side, then whose subscription it's on, or the plans. The
+/// paywall is for the moments a limit is met. Restore Purchases and
+/// Manage Subscription, which App Review looks for, are both here.
+struct PlusPage: View {
     @Binding var manage: Bool
-    @State private var plus = PlusStore.shared
-    @State private var restoring = false
-    @State private var note: String?
 
-    /// One line for the Plus row: whose subscription it's on, or what it adds.
-    static func status(for card: GroupCard?) -> String {
-        guard let card else { return "No cap on lists, and room for four" }
-        guard card.isPlus else { return "Free plan. Plus lifts the caps and makes room for four" }
-        let holders = card.members.filter(\.isPlus)
-        if holders.contains(where: { $0.userId == SupabaseAuth.shared.userId }) {
-            if let renewal = PlusStore.shared.renewal {
-                return "Active until \(renewal.day)"
-            }
-            return card.members.count == 1 ? "Active" : "Active for the whole group"
-        }
-        if let first = holders.first { return "Active for the whole group, through \(first.name)\u{2019}s subscription" }
-        return "Active for the whole group"
+    @Environment(\.purchase) private var purchase
+    @State private var group = GroupStore.shared
+    @State private var plus = PlusStore.shared
+    @State private var selected = PlusStore.productIDs[0]
+    @State private var trialDays: [String: Int] = [:]
+    @State private var buying = false
+    @State private var restoring = false
+    @State private var message: String?
+    @State private var legal: LegalPage?
+
+    /// CWG_PLUS (screenshot runs): `free` photographs the page with the
+    /// plans, `mine` a subscription of your own.
+    private static let screenshot = ProcessInfo.processInfo.environment["CWG_PLUS"]
+    private var me: UUID? { SupabaseAuth.shared.userId }
+    private var card: GroupCard? { group.card?.forScreenshots }
+    private var isPlus: Bool { Self.screenshot == "free" ? false : card?.isPlus == true }
+    private var solo: Bool { (card?.members.count ?? 1) == 1 }
+
+    private var plans: [Plan] {
+        if !plus.products.isEmpty { return plus.products.map(Plan.init) }
+        return Self.screenshot != nil ? Plan.samples : []
+    }
+
+    private var chosen: Plan? { plans.first { $0.id == selected } ?? plans.first }
+
+    private var trial: Int? {
+        if Self.screenshot != nil, plus.products.isEmpty { return 7 }
+        return chosen.flatMap { trialDays[$0.id] }
+    }
+
+    private var renewal: PlusStore.Renewal? {
+        plus.renewal ?? (Self.screenshot == "mine" ? .sample : nil)
     }
 
     var body: some View {
-        if SupabaseAuth.shared.signedIn {
+        List {
             Section {
-                if plus.subscribed {
-                    Button {
-                        Haptics.tap()
-                        manage = true
+                header
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
+
+            Section {
+                comparison
+            } header: {
+                SettingsSectionHeader("Free and Plus")
+            } footer: {
+                note("One subscription covers everyone in your library.")
+            }
+            .listRowBackground(SettingsView.rowBackground)
+
+            if isPlus {
+                subscription
+            } else {
+                checkout
+            }
+        }
+        .sheet(item: $legal) { LegalSheet(page: $0) }
+        .task {
+            await plus.loadProducts()
+            trialDays = await Checkout.trials(plus.products)
+        }
+        .onChange(of: card?.isPlus) { _, now in
+            if now == true { Haptics.success() }
+        }
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(isPlus ? "Plus is on" : "You\u{2019}re on Free")
+                .font(.displaySmallBold(28, relativeTo: .title2))
+                .foregroundStyle(AppBackground.ink)
+                .accessibilityAddTraits(.isHeader)
+            Text(isPlus ? payer : "Plus gives your library more room, and space for two more people.")
+                .font(.footnote)
+                .foregroundStyle(AppBackground.secondaryInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+
+    /// Whose subscription it's on, so nobody pays twice without knowing.
+    private var payer: String {
+        let holders = (card?.members ?? []).filter(\.isPlus)
+        let mine = plus.subscribed || Self.screenshot == "mine" || holders.contains { $0.userId == me }
+        let others = holders.filter { $0.userId != me }.map(\.name)
+        if mine && others.isEmpty {
+            return solo ? "On your subscription." : "On your subscription, for everyone in \(card?.name ?? "your library")."
+        }
+        if mine {
+            return "You and \(ListFormatter.localizedString(byJoining: others)) both pay. One subscription is enough for everyone."
+        }
+        if let first = others.first, others.count == 1 {
+            return "On \(first)\u{2019}s subscription. Nothing for you to pay."
+        }
+        return "On your group\u{2019}s subscription. Nothing for you to pay."
+    }
+
+    // MARK: Free and Plus
+
+    private var comparison: some View {
+        let rows: [(String, String, String)] = [
+            ("People in a library", "2", "4"),
+            ("Saves per category", "\(CategoryCap.limit)", "No limit"),
+            ("New saves a day", "\(DailyCap.free)", "\(DailyCap.plus)"),
+            ("Picks, the map and reminders", "\u{2713}", "\u{2713}"),
+        ]
+        return VStack(spacing: 12) {
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                planHeading("Free", current: !isPlus)
+                planHeading("Plus", current: isPlus)
+            }
+            ForEach(rows, id: \.0) { row in
+                HStack(spacing: 0) {
+                    Text(row.0)
+                        .font(.subheadline)
+                        .foregroundStyle(AppBackground.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(row.1)
+                        .font(.subheadline)
+                        .foregroundStyle(AppBackground.secondaryInk)
+                        .frame(width: 76)
+                    Text(row.2)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppBackground.ink)
+                        .frame(width: 76)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(row.0): free, \(row.1 == "\u{2713}" ? "included" : row.1); Plus, \(row.2 == "\u{2713}" ? "included" : row.2)")
+            }
+        }
+        .monospacedDigit()
+        .padding(.vertical, 8)
+    }
+
+    /// The plan you're on is filled in.
+    private func planHeading(_ name: String, current: Bool) -> some View {
+        Text(name)
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(current ? AppBackground.base : AppBackground.secondaryInk)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(current ? AppBackground.ink : .clear, in: .capsule)
+            .frame(width: 76)
+            .accessibilityLabel(current ? "\(name), your plan" : name)
+    }
+
+    // MARK: Subscribed
+
+    @ViewBuilder private var subscription: some View {
+        let yours = plus.subscribed || Self.screenshot == "mine"
+        Section {
+            if yours {
+                if let renewal {
+                    LabeledContent {
+                        Text(renewal.renews ? "Renews \(renewal.day)" : "Ends \(renewal.day)")
+                            .foregroundStyle(AppBackground.secondaryInk)
                     } label: {
-                        HStack {
-                            SettingsRow(title: "Manage subscription")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(AppBackground.ink.opacity(0.45))
-                        }
+                        SettingsRow(title: renewal.yearly ? "Yearly plan" : "Monthly plan")
                     }
                 }
                 Button {
                     Haptics.tap()
-                    Task {
-                        restoring = true
-                        note = await plus.restore()
-                        restoring = false
-                    }
+                    manage = true
                 } label: {
                     HStack {
-                        SettingsRow(title: "Restore purchases")
+                        SettingsRow(title: "Manage subscription")
                         Spacer()
-                        if restoring { ProgressView() }
+                        Image(systemName: "arrow.up.forward")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppBackground.ink.opacity(0.45))
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+            restoreRow
+        } header: {
+            SettingsSectionHeader(yours ? "Your subscription" : "Purchases")
+        } footer: {
+            if let problem = message ?? plus.problem {
+                warning(problem)
+            } else {
+                note(yours
+                    ? "Billed through your Apple Account. You can also change or cancel it in the App Store: tap your photo, then Subscriptions."
+                    : "Paid for Plus before on this Apple ID? Restore it here.")
+            }
+        }
+        .listRowBackground(SettingsView.rowBackground)
+    }
+
+    // MARK: Free
+
+    @ViewBuilder private var checkout: some View {
+        Section {
+            if plans.isEmpty {
+                unavailable
+            } else {
+                ForEach(plans) { planRow($0) }
+            }
+        } header: {
+            SettingsSectionHeader("Choose a plan")
+        }
+        .listRowBackground(SettingsView.rowBackground)
+
+        Section {
+            VStack(spacing: 10) {
+                Button {
+                    Task { await buy() }
+                } label: {
+                    ZStack {
+                        Text(Plan.cta(chosen, trial: trial)).opacity(buying ? 0 : 1)
+                        if buying { ProgressView() }
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                }
+                .prominentGlass()
+                .controlSize(.large)
+                .disabled(chosen == nil || buying)
+
+                Text(Plan.terms(chosen, trial: trial))
+                    .font(.footnote)
+                    .foregroundStyle(AppBackground.secondaryInk)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4))
+
+        Section {
+            restoreRow
+        } footer: {
+            VStack(alignment: .leading, spacing: 8) {
+                if let problem = message ?? plus.problem {
+                    warning(problem)
+                }
+                HStack(spacing: 8) {
+                    Button("Terms") {
+                        Haptics.tap()
+                        legal = .terms
+                    }
+                    Text("\u{00B7}").accessibilityHidden(true)
+                    Button("Privacy") {
+                        Haptics.tap()
+                        legal = .privacy
                     }
                 }
-                .disabled(restoring)
-            } header: {
-                Text("Plus")
-            } footer: {
-                if let note = note ?? plus.problem {
-                    Text(note)
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.warning)
-                } else if plus.subscribed {
-                    Text(PlusPaywall.appleNote(plus.renewal))
-                        .font(.footnote)
-                }
+                .buttonStyle(.plain)
+                .font(.footnote)
+                .foregroundStyle(AppBackground.secondaryInk)
             }
-            .listRowBackground(SettingsView.rowBackground)
         }
+        .listRowBackground(SettingsView.rowBackground)
+    }
+
+    private func planRow(_ plan: Plan) -> some View {
+        let isOn = chosen?.id == plan.id
+        return Button {
+            Haptics.selection()
+            withAnimation(.snappy) { selected = plan.id }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(plan.name)
+                            .foregroundStyle(AppBackground.ink)
+                        if plan.isYearly, let saving = Plan.yearlySaving(plans) {
+                            Text("Save \(saving)%")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(AppBackground.base)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(AppBackground.ink, in: .capsule)
+                        }
+                    }
+                    Text(plan.perMonth ?? "Billed every month")
+                        .font(.footnote)
+                        .foregroundStyle(AppBackground.secondaryInk)
+                }
+                Spacer(minLength: 8)
+                Text("\(plan.price) a \(plan.unit)")
+                    .monospacedDigit()
+                    .foregroundStyle(AppBackground.ink)
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(AppBackground.ink)
+                    .opacity(isOn ? 1 : 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+
+    /// No plans yet: still loading, or the App Store is out of reach.
+    @ViewBuilder private var unavailable: some View {
+        if plus.productsLoaded {
+            Button {
+                Haptics.tap()
+                Task {
+                    await plus.loadProducts()
+                    trialDays = await Checkout.trials(plus.products)
+                }
+            } label: {
+                HStack {
+                    SettingsRow(title: "Couldn\u{2019}t reach the App Store", subtitle: "Tap to try again")
+                    Spacer()
+                    Image(systemName: "arrow.clockwise")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppBackground.secondaryInk)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity, minHeight: 52)
+        }
+    }
+
+    private var restoreRow: some View {
+        Button {
+            Haptics.tap()
+            Task {
+                restoring = true
+                message = await plus.restore()
+                restoring = false
+            }
+        } label: {
+            HStack {
+                SettingsRow(title: "Restore purchases")
+                Spacer()
+                if restoring { ProgressView() }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(restoring)
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(AppBackground.secondaryInk)
+    }
+
+    private func warning(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(AppBackground.warning)
+    }
+
+    private func buy() async {
+        guard let product = chosen?.product else { return }
+        buying = true
+        defer { buying = false }
+        message = nil
+        message = await Checkout.buy(product, with: purchase)
     }
 }

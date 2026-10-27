@@ -7,7 +7,8 @@
 // required; work runs as the service role.
 import { corsHeaders } from "../_shared/extract.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { admin } from "../_shared/groups.ts";
+import { admin, displayName } from "../_shared/groups.ts";
+import { notifyGroupOfMember } from "../_shared/notify.ts";
 import { revokeAppleAccess, type RevokeOutcome } from "../_shared/siwa.ts";
 
 /// A solo library's cover photos live under its group's folder.
@@ -62,6 +63,8 @@ Deno.serve(async (req) => {
       const others = (count ?? 1) - 1;
 
       if (others > 0) {
+        // Read before the profile goes, so the ping still has their name.
+        const name = await displayName(db, uid, email);
         await db.from("group_members").delete().eq("user_id", uid);
         // Codes they handed out stop letting people into a library they've left.
         await db.from("group_invites").delete().eq("group_id", mem.group_id).eq("created_by", uid);
@@ -69,6 +72,7 @@ Deno.serve(async (req) => {
           .from("groups")
           .update({ feed_token: crypto.randomUUID().replaceAll("-", "") })
           .eq("id", mem.group_id);
+        await notifyGroupOfMember(db, { groupId: mem.group_id, userId: uid, name, change: "left" });
       } else {
         await removeGroupPhotos(db, mem.group_id);
         await db.from("live_activity_runs").delete().eq("group_id", mem.group_id);

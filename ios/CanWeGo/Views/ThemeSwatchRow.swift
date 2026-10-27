@@ -11,6 +11,7 @@ struct ThemeSwatchRow: View {
     let onPick: (AppTheme) -> Void
 
     @State private var themes = ThemeStore.shared
+    @State private var shown: AppTheme?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -25,20 +26,22 @@ struct ThemeSwatchRow: View {
                     .contentTransition(.numericText())
                     .animation(.snappy, value: themes.current)
             }
-            // More discs than fit: open scrolled to the one in use.
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
-                        ForEach(AppTheme.allCases) { option in
-                            swatch(option).id(option)
-                        }
+            // More discs than fit: open scrolled to the one in use. A scroll
+            // position, not a ScrollViewReader: `scrollTo` also scrolls the
+            // list around it, and Settings would open at its bottom.
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(AppTheme.allCases) { option in
+                        swatch(option).id(option)
                     }
-                    .padding(.horizontal, 2)
                 }
-                .scrollIndicators(.hidden)
-                .scrollClipDisabled()
-                .onAppear { proxy.scrollTo(themes.current, anchor: .center) }
+                .padding(.horizontal, 2)
+                .scrollTargetLayout()
             }
+            .scrollIndicators(.hidden)
+            .scrollClipDisabled()
+            .scrollPosition(id: $shown, anchor: .center)
+            .onAppear { shown = themes.current }
         }
     }
 

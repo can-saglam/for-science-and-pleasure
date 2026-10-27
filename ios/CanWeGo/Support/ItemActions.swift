@@ -162,6 +162,11 @@ extension Item {
     /// or time reads as not added.
     var isInCalendar: Bool { Self.calendarLog[id.uuidString] == calendarKey }
 
+    /// The same, for a plan not saved yet.
+    func isInCalendar(day: String, time: String?) -> Bool {
+        Self.calendarLog[id.uuidString] == [day, time ?? ""].joined(separator: "|")
+    }
+
     private var calendarKey: String {
         let plan = upcomingPlan
         return [plan ?? startsOn, plan == nil ? endsOn : planTime].map { $0 ?? "" }.joined(separator: "|")

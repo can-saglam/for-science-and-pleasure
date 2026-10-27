@@ -20,8 +20,6 @@ struct ItemDetailView: View {
     /// straight into the live model re-rendered the entire list under the
     /// sheet on every keystroke — that was the intermittent typing lag.
     @State private var scratch: Item?
-    @State private var calendarState: CalendarState = .idle
-    @State private var confirmCalendarAgain = false
     // CWG_DETENT is only set by automated screenshot runs.
     @State private var detent: PresentationDetent =
         ProcessInfo.processInfo.environment["CWG_DETENT"] == "large" ? .large : .medium
@@ -34,9 +32,6 @@ struct ItemDetailView: View {
     @State private var hoursLoading = false
     /// A showing tapped in the details, opening the plan on it.
     @State private var planShowing: Showing?
-    private enum CalendarState {
-        case idle, added, failed
-    }
 
     /// "Added by Can" and "edited by Joyce yesterday" (just "edited
     /// yesterday" when it's the saver's own edit). The edit only shows once
@@ -113,25 +108,14 @@ struct ItemDetailView: View {
             .ignoresSafeArea(edges: showsHero ? .top : [])
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !editing && DetailActionCluster.hasActions(item, done: done) {
+                if !editing {
                     DetailActionCluster(
                         item: item,
                         done: done,
-                        calendarAdded: calendarState == .added || item.isInCalendar,
-                        addToCalendar: addToCalendar,
+                        share: share,
                         went: confirmWent,
                         putBack: putBack
                     )
-                    .confirmationDialog(
-                        "Already in your calendar",
-                        isPresented: $confirmCalendarAgain,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Add again") { addToCalendarNow() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("It was added from this phone for these dates. Add it again if you\u{2019}ve removed it from Calendar.")
-                    }
                 }
             }
             // Without a photo, the item's color breathes at the top instead.
@@ -187,9 +171,7 @@ struct ItemDetailView: View {
                                 Label("Edit", systemImage: "pencil")
                             }
                             Divider()
-                            ShareMenuItems(item: item) {
-                                Task { sharing = await ShareItems.sending(item) }
-                            }
+                            ShareMenuItems(item: item, send: share)
                             Divider()
                             Button(role: .destructive) {
                                 Haptics.tap()
@@ -529,42 +511,10 @@ struct ItemDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppBackground.wash(0.06), in: .rect(cornerRadius: 14, style: .continuous))
         }
-
-        if calendarState == .failed {
-            if let settings = URL(string: UIApplication.openSettingsURLString) {
-                Link("Couldn't add. Allow calendar access in Settings.", destination: settings)
-                    .font(.footnote)
-                    .foregroundStyle(AppBackground.destructive)
-            } else {
-                Text("Couldn't add. Allow calendar access in Settings.")
-                    .font(.footnote)
-                    .foregroundStyle(AppBackground.destructive)
-            }
-        }
     }
 
-    /// Once added, the icon stays a check. A second tap asks first: the
-    /// event may have been deleted in Calendar, or this would be a twin.
-    private func addToCalendar() {
-        if item.isInCalendar, calendarState != .added {
-            confirmCalendarAgain = true
-            return
-        }
-        addToCalendarNow()
-    }
-
-    private func addToCalendarNow() {
-        Task {
-            do {
-                try await item.addToCalendar()
-                Haptics.success()
-                calendarState = .added
-                try? await Task.sleep(for: .seconds(1.6))
-                if calendarState == .added { calendarState = .idle }
-            } catch {
-                withAnimation(.snappy) { calendarState = .failed }
-            }
-        }
+    private func share() {
+        Task { sharing = await ShareItems.sending(item) }
     }
 
     private func putBack() {

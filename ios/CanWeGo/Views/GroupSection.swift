@@ -23,6 +23,22 @@ struct SettingsRow: View {
     }
 }
 
+/// A Settings section's name: in the ink, sentence case, a step above
+/// the system's small caps.
+struct SettingsSectionHeader: View {
+    let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(AppBackground.ink)
+            .textCase(nil)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// What the "My group" rows can open — alerts, the invite sheet, the leave
 /// confirm — and the actions behind them. Sheets and the "you've left"
 /// alert hang off the Settings list (always in the hierarchy). The leave
@@ -155,7 +171,6 @@ struct GroupSection: View {
             ForEach(card.members) { member in
                 memberRow(member)
             }
-            cityRow(card)
         }
         .listRowBackground(SettingsView.rowBackground)
 
@@ -195,28 +210,6 @@ struct GroupSection: View {
         }
     }
 
-    private func cityRow(_ card: GroupCard) -> some View {
-        Button {
-            Haptics.tap()
-            ui.editingHome = true
-        } label: {
-            HStack {
-                if let home = card.homeLocality, !home.isEmpty {
-                    SettingsRow(title: "City")
-                    Spacer()
-                    Text(home)
-                        .foregroundStyle(AppBackground.secondaryInk)
-                        .lineLimit(1)
-                } else {
-                    SettingsRow(title: "Set a home city")
-                    Spacer()
-                }
-                chevron
-            }
-        }
-        .accessibilityHint("Changes the city your cards and map use")
-    }
-
     /// Present until the group is at four.
     private func inviteRow(_ card: GroupCard) -> some View {
         let pending = card.invites.first
@@ -224,7 +217,8 @@ struct GroupSection: View {
             Haptics.tap()
             ui.startInvite(for: card)
         } label: {
-            HStack {
+            HStack(spacing: 12) {
+                EmptySeat(size: 28)
                 SettingsRow(title: card.members.count == 1 ? "Invite someone" : "Invite people")
                     .fontWeight(.semibold)
                 Spacer()
@@ -421,101 +415,87 @@ struct GroupLoadFailed: View {
     }
 }
 
-/// The top of Settings: everyone who shares this library, a seat to
-/// invite into while there's room, and the way to the rest of the group.
-struct GroupHeroCard: View {
+/// The top of Settings: who shares this library, as a title line. The
+/// line opens the group; the button invites while you're on your own.
+struct GroupHeader: View {
     let card: GroupCard
     @Bindable var ui: GroupUI
     let manage: () -> Void
 
-    private var me: UUID? { SupabaseAuth.shared.userId }
     private var solo: Bool { card.members.count == 1 }
 
     var body: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 14) {
-                ForEach(card.members) { member in
-                    seat(member)
-                }
-                if !card.isFull || card.needsPlusToGrow {
-                    inviteSeat
-                }
-            }
-            // Alone, your own name over your own library reads oddly; the
-            // card says what it is instead, and the button what's next.
-            Text(solo ? "Your library" : card.name)
-                .font(.displaySmallBold(30, relativeTo: .title2))
-                .foregroundStyle(AppBackground.ink)
-                .multilineTextAlignment(.center)
-                .accessibilityAddTraits(.isHeader)
+        HStack(spacing: 12) {
             Button {
                 Haptics.tap()
                 manage()
             } label: {
-                Text(solo ? "Invite or join someone" : "Manage group")
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .controlSize(.large)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-    }
-
-    private func seat(_ member: GroupCard.Member) -> some View {
-        let isMe = member.userId == me
-        return VStack(spacing: 6) {
-            Text(member.initial)
-                .font(.title3.weight(.bold))
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                // Per-swatch ink, the same as Join: white on the deep
-                // swatches, black on the light ones.
-                .foregroundStyle(AvatarColour.initial(member.avatarColour))
-                .frame(width: 56, height: 56)
-                .background(AvatarColour.color(member.avatarColour), in: .circle)
-            Text(isMe ? "You" : member.name)
-                .font(.footnote)
-                .foregroundStyle(AppBackground.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(width: 66)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(member.name)\(isMe ? ", you" : "")\(member.isPlus ? ", has Plus" : "")")
-    }
-
-    private var inviteSeat: some View {
-        Button {
-            Haptics.tap()
-            ui.startInvite(for: card)
-        } label: {
-            VStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(AppBackground.ink.opacity(0.4), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                    if ui.inviting {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.title3.weight(.semibold))
-                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                    }
+                HStack(spacing: 14) {
+                    faces
+                    Text(solo ? "Your library" : card.name)
+                        .font(.displaySmallBold(24, relativeTo: .title3))
+                        .foregroundStyle(AppBackground.ink)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: 0)
                 }
-                .frame(width: 56, height: 56)
-                Text("Invite")
-                    .font(.footnote)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                .contentShape(.rect)
             }
-            .foregroundStyle(AppBackground.ink)
-            .frame(width: 66)
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint(solo ? "Shows your library" : "Shows who\u{2019}s in the group")
+
+            Button {
+                Haptics.tap()
+                if solo { ui.startInvite(for: card) } else { manage() }
+            } label: {
+                ZStack {
+                    Text(solo ? "Invite" : "Manage").opacity(ui.inviting ? 0 : 1)
+                    if ui.inviting { ProgressView().controlSize(.small) }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppBackground.ink)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(AppBackground.wash(0.14), in: .capsule)
+            }
+            .buttonStyle(.plain)
+            .disabled(ui.inviting)
+            .accessibilityHint(solo ? "Shares an invite code" : "Shows who\u{2019}s in the group")
         }
-        .buttonStyle(.plain)
-        .disabled(ui.inviting)
-        .accessibilityLabel(solo ? "Invite someone" : "Invite people")
-        .accessibilityHint(card.needsPlusToGrow ? "Opens Plus, which adds two more seats" : "Shares an invite code")
+        .padding(.vertical, 4)
+    }
+
+    /// Overlapping, each ringed in the sheet so the edges read.
+    private var faces: some View {
+        HStack(spacing: -12) {
+            ForEach(card.members.prefix(4)) { member in
+                Text(member.initial)
+                    .font(.headline.weight(.bold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    // Per-swatch ink, the same as Join: white on the deep
+                    // swatches, black on the light ones.
+                    .foregroundStyle(AvatarColour.initial(member.avatarColour))
+                    .frame(width: 40, height: 40)
+                    .background(AvatarColour.color(member.avatarColour), in: .circle)
+                    .overlay(Circle().strokeBorder(AppBackground.sheet, lineWidth: 2.5))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// A seat waiting for someone: a dashed ring with a plus.
+struct EmptySeat: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image(systemName: "plus")
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(AppBackground.ink.opacity(0.8))
+            .frame(width: size, height: size)
+            .overlay(Circle().strokeBorder(AppBackground.ink.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])))
+            .accessibilityHidden(true)
     }
 }
 

@@ -19,8 +19,17 @@
 // error; only malformed requests and missing auth are 4xx.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/extract.ts";
-import { admin } from "../_shared/groups.ts";
+import { admin, displayName } from "../_shared/groups.ts";
+import { notifyGroupOfMember } from "../_shared/notify.ts";
 import { formatCode, inviteMessage, isAction, NEEDS_CODE, normaliseCode } from "../_shared/membership.ts";
+
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
+
+/** Member pings go out after the reply, so joining never waits on APNs. */
+function afterReply(work: Promise<unknown>) {
+  const safe = work.catch((e) => console.error("member ping", e));
+  if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(safe);
+}
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -40,6 +49,34 @@ async function callerId(req: Request): Promise<string | null> {
   const { data, error } = await client.auth.getUser();
   if (error || !data?.user) return null;
   return data.user.id;
+}
+
+/** The group the caller is in right now, before a join or leave moves them. */
+async function currentGroup(db: ReturnType<typeof admin>, userId: string): Promise<string | null> {
+  const { data } = await db.from("group_members").select("group_id").eq("user_id", userId).maybeSingle();
+  return data?.group_id ?? null;
+}
+
+/** Whether anyone is still in a group someone just left. */
+async function hasMembers(db: ReturnType<typeof admin>, groupId: string): Promise<boolean> {
+  const { count } = await db
+    .from("group_members")
+    .select("user_id", { count: "exact", head: true })
+    .eq("group_id", groupId);
+  return (count ?? 0) > 0;
+}
+
+/** The people already in the group hear who arrived; when the joiner left a
+ *  shared group to come, the ones left behind hear that too. */
+async function announceJoin(db: ReturnType<typeof admin>, userId: string, before: string | null, moved: number) {
+  const name = await displayName(db, userId);
+  const joined = await currentGroup(db, userId);
+  if (joined) {
+    await notifyGroupOfMember(db, { groupId: joined, userId, name, change: "joined", broughtSaves: moved > 0 });
+  }
+  if (before && before !== joined && await hasMembers(db, before)) {
+    await notifyGroupOfMember(db, { groupId: before, userId, name, change: "left" });
+  }
 }
 
 Deno.serve(async (req) => {
@@ -126,6 +163,7 @@ Deno.serve(async (req) => {
         return json(data);
       }
       case "join": {
+        const before = await currentGroup(db, userId);
         const { data, error } = await db.rpc("membership_join", {
           p_user: userId,
           p_code: code,
@@ -142,11 +180,20 @@ Deno.serve(async (req) => {
           code,
           ok: data?.joined === true,
         });
+        if (data?.joined === true) afterReply(announceJoin(db, userId, before, Number(data.moved ?? 0)));
         return json(data);
       }
       case "leave": {
+        const before = await currentGroup(db, userId);
         const { data, error } = await db.rpc("membership_leave", { p_user: userId, p_keep_copy: keepCopy });
         if (error) throw error;
+        if (data?.left === true && before) {
+          afterReply(
+            displayName(db, userId).then((name) =>
+              notifyGroupOfMember(db, { groupId: before, userId, name, change: "left" })
+            ),
+          );
+        }
         return json(data);
       }
       case "rename": {
