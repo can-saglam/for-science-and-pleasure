@@ -896,6 +896,7 @@ struct SettingsButton: View {
             Image(systemName: "gearshape")
                 .fontWeight(.semibold)
                 .foregroundStyle(AppBackground.ink.opacity(0.72))
+                .redrawnPerTheme()
         }
         .accessibilityLabel("Settings")
         // Explicit accent: this sheet is presented from inside the nav bar's

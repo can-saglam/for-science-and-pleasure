@@ -651,7 +651,8 @@ struct LibraryView: View {
                 message: "It opens here, with its map, dates and plans, while the list stays put."
             )
             .padding(24)
-            .frame(maxHeight: .infinity)
+            // Down by the tabs, where the list's own empty state sits.
+            .frame(maxHeight: .infinity, alignment: .bottom)
             .background { ThemeFill(color: AppBackground.sheet) }
         }
     }
@@ -662,6 +663,7 @@ struct LibraryView: View {
         Image(systemName: name)
             .fontWeight(.semibold)
             .foregroundStyle(AppBackground.ink.opacity(0.72))
+            .redrawnPerTheme()
     }
 
     /// The glass search row that drops in under the header when the

@@ -76,6 +76,12 @@ extension ToolbarContent {
 }
 
 extension View {
+    /// A new view for each theme. On iPhone Duo's side bar, recoloring a
+    /// group's icons in place can leave the group's glass drawn empty.
+    func redrawnPerTheme() -> some View {
+        id(AppBackground.theme)
+    }
+
     /// The edge the bars run down on iPhone Duo, or nil while they're at
     /// the top and bottom as usual. Read inside a navigation stack.
     func onBarsEdgeChange(_ action: @escaping (HorizontalEdge?) -> Void) -> some View {
