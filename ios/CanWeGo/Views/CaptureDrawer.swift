@@ -46,6 +46,9 @@ struct CaptureDrawer<Actions: View>: View {
     /// The photo grows down from the top on arrival rather than being
     /// there already: the add page has no photo to hand over.
     var growsIn = false
+    /// The side safe areas the photo runs under (the camera, held
+    /// sideways), kept clear by everything else.
+    var sideInsets = EdgeInsets()
     @ViewBuilder var actions: () -> Actions
 
     @State private var choosingPhoto = false
@@ -110,6 +113,8 @@ struct CaptureDrawer<Actions: View>: View {
                     if !typeSize.isAccessibilitySize {
                         heading
                             .padding(.horizontal, 20)
+                            .padding(.leading, sideInsets.leading)
+                            .padding(.trailing, sideInsets.trailing)
                             .padding(.bottom, 6)
                     }
                 }
@@ -121,6 +126,8 @@ struct CaptureDrawer<Actions: View>: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 4)
                         .padding(.bottom, 6)
+                        .padding(.leading, sideInsets.leading)
+                        .padding(.trailing, sideInsets.trailing)
                 }
             } else {
                 // Clears the floating close button, like the detail
@@ -128,6 +135,8 @@ struct CaptureDrawer<Actions: View>: View {
                 heading
                     .padding(.horizontal, 20)
                     .padding(.top, 92)
+                    .padding(.leading, sideInsets.leading)
+                    .padding(.trailing, sideInsets.trailing)
             }
 
             VStack(alignment: .leading, spacing: 20) {
@@ -150,6 +159,8 @@ struct CaptureDrawer<Actions: View>: View {
                 }
             }
             .padding(20)
+            .padding(.leading, sideInsets.leading)
+            .padding(.trailing, sideInsets.trailing)
         }
         .onChange(of: draft != nil) { _, ready in
             if ready { AccessibilityNotification.Announcement("Ready").post() }
@@ -294,7 +305,6 @@ struct CaptureDrawer<Actions: View>: View {
                 line("map", fields.areaLine, order: 4)
                 line("banknote", fields.price, order: 5)
                 if let draft {
-                    line("camera", draft.photoCredit, order: early == nil ? 6 : 0)
                     if photoURL == nil, pageURL(draft) != nil {
                         gap("photo", "No photo found", fix: "Pick one") { choosingPhoto = true }
                             .transition(finishing(6))

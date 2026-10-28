@@ -181,12 +181,36 @@ extension View {
     /// Puts the wordmark at the leading edge of the navigation bar; all
     /// the controls group at the trailing end. No glass behind it — the
     /// system capsule would squeeze the wide mark into a circle.
-    func logoTitle(refreshing: Bool = false, pull: PullDistance? = nil) -> some View {
+    ///
+    /// `width` stretches the item across the content, with today's date at
+    /// the far end: for when the bars run down the side (iPhone Duo) and
+    /// leave that end of the header empty.
+    func logoTitle(refreshing: Bool = false, pull: PullDistance? = nil, width: CGFloat? = nil) -> some View {
         toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                LogoTitle(refreshing: refreshing, pull: pull, writes: .library)
+                HStack(spacing: 12) {
+                    LogoTitle(refreshing: refreshing, pull: pull, writes: .library)
+                    if width != nil {
+                        Spacer(minLength: 0)
+                        TodayLabel()
+                    }
+                }
+                .frame(width: width)
             }
             .sharedBackgroundVisibility(.hidden)
+        }
+    }
+}
+
+/// Today, styled as a section header ("On now"), turning over at midnight.
+private struct TodayLabel: View {
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            let date = context.date
+            Text("\(date.formatted(.dateTime.weekday(.wide))), \(date.formatted(.dateTime.day().month(.wide)))")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AppBackground.ink.opacity(SectionHeader.titleOpacity))
+                .lineLimit(1)
         }
     }
 }

@@ -11,6 +11,9 @@ import UIKit
 /// Edit, in the toolbar's More menu, flips the whole sheet into an edit form.
 struct ItemDetailView: View {
     @Bindable var item: Item
+    /// Set when the save sits in the library's side pane rather than a
+    /// sheet: closing hands the pane back instead of dismissing anything.
+    var onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -79,6 +82,19 @@ struct ItemDetailView: View {
 
     private var showsHero: Bool { heroURL != nil && !editing }
 
+    /// The side safe areas when the bars run down the side (iPhone Duo),
+    /// in the side pane or the drawer, on whichever side they are: the
+    /// photo runs on under them to the edge, everything else stops short.
+    @State private var sideInsets = EdgeInsets()
+    @State private var rowFloor: CGFloat?
+    @State private var barsEdge: HorizontalEdge?
+    private var photoUnderBar: Bool { showsHero && (onClose != nil || barsEdge != nil) }
+    private var barClearance: EdgeInsets { photoUnderBar ? sideInsets : EdgeInsets() }
+    /// As a drawer with the bar down the right (iPhone Duo's outer
+    /// display), the actions sit in the corner below the bar's buttons.
+    /// Beside the library's list, the side bar's Add has that corner.
+    private var rowIntoBarColumn: Bool { onClose == nil && barsEdge == .trailing && sideInsets.trailing > 48 }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -101,11 +117,13 @@ struct ItemDetailView: View {
                         }
                     }
                     .padding(20)
+                    .padding(.leading, barClearance.leading)
+                    .padding(.trailing, barClearance.trailing)
                     .task(id: item.showsHours ? item.placeId : nil) { await loadHours() }
                 }
             }
             // With a hero, the photo runs edge-to-edge under the controls.
-            .ignoresSafeArea(edges: showsHero ? .top : [])
+            .ignoresSafeArea(edges: photoUnderBar ? [.top, .horizontal] : showsHero ? .top : [])
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !editing {
@@ -116,6 +134,8 @@ struct ItemDetailView: View {
                         went: confirmWent,
                         putBack: putBack
                     )
+                    .ignoresSafeArea(edges: rowIntoBarColumn ? .trailing : [])
+                    .environment(\.floatingRowTrailing, rowIntoBarColumn ? max(sideInsets.trailing - 48, 0) / 2 : nil)
                 }
             }
             // Without a photo, the item's color breathes at the top instead.
@@ -131,10 +151,19 @@ struct ItemDetailView: View {
                 }
             }
             .background { ThemeFill(color: AppBackground.sheet) }
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: {
+                sideInsets = EdgeInsets(top: 0, leading: $0.leading, bottom: 0, trailing: $0.trailing)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { rowFloor = $0 }
+            .environment(\.floatingRowFloor, rowFloor)
+            .onBarsEdgeChange { barsEdge = $0 }
             #if !APP_EXTENSION
             .appEntityIdentifier(EntityIdentifier(for: SaveEntity.self, identifier: item.id))
             #endif
             .toolbarBackground(.hidden, for: .navigationBar)
+            // In the side pane the buttons live in the app's side bar, so
+            // nothing up top needs the photo frosted behind it.
+            .scrollEdgeEffectHidden(onClose != nil, for: .top)
             .toolbar {
                 if editing {
                     ToolbarItem(placement: .topBarLeading) {
@@ -185,7 +214,7 @@ struct ItemDetailView: View {
                                 Haptics.tap()
                                 UndoBin.shared.stash(item.snapshot)
                                 item.softDelete()
-                                dismiss()
+                                close()
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -198,14 +227,19 @@ struct ItemDetailView: View {
                         .accessibilityLabel("More")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Haptics.tap()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
+                .keptVisible(.high)
+                // Beside the list there's nothing to close: picking another
+                // save replaces this one, as in Mail.
+                if onClose == nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Haptics.tap()
+                            close()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel("Close")
                     }
-                    .accessibilityLabel("Close")
                 }
             }
         }
@@ -230,6 +264,10 @@ struct ItemDetailView: View {
         .onDisappear { commitDoneIfNeeded() }
     }
 
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
+    }
+
     /// Same button, new label, then the drawer leaves. `markDone` waits
     /// so Remind and the library don't reshuffle under the success state.
     private func confirmWent() {
@@ -239,7 +277,7 @@ struct ItemDetailView: View {
         Task {
             try? await Task.sleep(for: .seconds(1))
             commitDoneIfNeeded()
-            dismiss()
+            close()
         }
     }
 
@@ -428,22 +466,24 @@ struct ItemDetailView: View {
     private func heroHeader(_ url: URL) -> some View {
         if typeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 4) {
-                HeroPhoto(url: url, placeholder: item.accentColor)
+                HeroPhoto(url: url, placeholder: item.accentColor, fadesLeading: onClose != nil)
                 header
                     .padding(.horizontal, 20)
+                    .padding(.leading, barClearance.leading)
+                    .padding(.trailing, barClearance.trailing)
                     .padding(.bottom, 6)
             }
         } else {
-            HeroPhoto(url: url, placeholder: item.accentColor)
+            HeroPhoto(url: url, placeholder: item.accentColor, fadesLeading: onClose != nil)
                 .overlay(alignment: .bottomLeading) {
                     header
                         .padding(.horizontal, 20)
+                        .padding(.leading, barClearance.leading)
+                        .padding(.trailing, barClearance.trailing)
                         .padding(.bottom, 6)
                 }
         }
     }
-
-    private var photoCredit: String? { showsHero ? item.photoCredit : nil }
 
     private var areaLine: String? { item.areaLine }
 
@@ -508,7 +548,6 @@ struct ItemDetailView: View {
             metaRow("map", areaLine)
             metaRow("banknote", item.price)
             whoRow
-            metaRow("camera", photoCredit)
         }
 
         PlanOrRemind(item: item)
@@ -594,6 +633,9 @@ struct HeroPhoto: View {
     var image: UIImage? = nil
     let placeholder: Color
     var height: CGFloat = 230
+    /// Beside the library list (iPhone Duo open): the leading edge melts
+    /// into the pane, as the bottom does, instead of a hard line by the list.
+    var fadesLeading = false
 
     var body: some View {
         Color.clear
@@ -652,6 +694,39 @@ struct HeroPhoto: View {
             .overlay(alignment: .bottom) {
                 AppBackground.sheet.frame(height: 3).offset(y: 1)
             }
+            .modifier(LeadingFade(on: fadesLeading))
+    }
+}
+
+/// The hero's leading edge melting into the pane. Off, nothing is
+/// applied: a mask would also clip the strip that hides the photo's
+/// bottom pixel row.
+private struct LeadingFade: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on {
+            content.mask {
+                HStack(spacing: 0) {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .black.opacity(0.06), location: 0.15),
+                            .init(color: .black.opacity(0.3), location: 0.35),
+                            .init(color: .black.opacity(0.7), location: 0.65),
+                            .init(color: .black.opacity(0.94), location: 0.85),
+                            .init(color: .black, location: 1),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 110)
+                    Color.black
+                }
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -736,17 +811,5 @@ extension Item {
         let squash = { (s: String) in s.lowercased().filter { $0.isLetter || $0.isNumber } }
         if let venue, venue != title, squash(venue).contains(squash(area)) { return nil }
         return area
-    }
-
-    /// Google's photos have to name who took them wherever they're shown
-    /// large. The parser puts the name on the link (`by`).
-    var photoCredit: String? {
-        guard let raw = imageUrl, raw.contains("/functions/v1/place-photo"),
-              let parts = URLComponents(string: raw)
-        else { return nil }
-        // Form encoding: "+" is a space (a real plus arrives as %2B).
-        let by = parts.percentEncodedQueryItems?.first { $0.name == "by" }?.value?
-            .replacingOccurrences(of: "+", with: "%20").removingPercentEncoding ?? ""
-        return by.isEmpty ? "Photo from Google Maps" : "Photo by \(by) on Google Maps"
     }
 }

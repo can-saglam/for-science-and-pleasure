@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { CODE_ALPHABET, formatCode, inviteMessage, isAction, normaliseCode } from "./membership.ts";
+import { CODE_ALPHABET, formatCode, inviteLink, inviteMessage, isAction, normaliseCode } from "./membership.ts";
 
 Deno.test("normaliseCode: accepts dashes, spaces and lower-case", () => {
   assertEquals(normaliseCode("kv7-p2m"), "KV7P2M");
@@ -33,10 +33,7 @@ Deno.test("isAction", () => {
   assert(!isAction(42));
 });
 
-Deno.test("inviteMessage", () => {
-  assertEquals(inviteMessage("KV7P2M", "Joyce", null), "Join Joyce on Can We Go? Your code is KV7-P2M");
-  assertEquals(
-    inviteMessage("KV7P2M", null, "https://apps.apple.com/x"),
-    "Join me on Can We Go? Your code is KV7-P2M https://apps.apple.com/x",
-  );
+Deno.test("inviteMessage is a link to the invite", () => {
+  assertEquals(inviteMessage("KV7P2M"), "Join me on Can We Go? https://wegocan.com/join/KV7P2M");
+  assertEquals(inviteLink("kv7-p2m"), "https://wegocan.com/join/KV7P2M");
 });

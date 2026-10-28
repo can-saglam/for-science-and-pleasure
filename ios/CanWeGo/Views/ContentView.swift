@@ -13,7 +13,23 @@ final class PlusButtonFrame {
     /// A ghost laid out with the bar's known metrics, in case the read
     /// ever comes back empty.
     var fallback: CGRect = .zero
+    var screen: CGRect = .zero
     var best: CGRect { measured != .zero ? measured : fallback }
+
+    /// The Add circle when the bars run down the side (iPhone Duo). A
+    /// reading left over from the bottom bar, or from before a fold or a
+    /// turn, gives way to the side bar's known metrics.
+    var side: CGRect {
+        let fresh = measured.height > 0 && measured.height < 56 && abs(screen.maxY - measured.maxY) < 40
+        return fresh ? measured : Self.sideGhost(in: screen)
+    }
+
+    /// The side bar's Add circle by its metrics: 48 pt, 24 pt in from the
+    /// trailing edge and the bottom of the screen.
+    static func sideGhost(in screen: CGRect) -> CGRect {
+        let side: CGFloat = 48, inset: CGFloat = 24
+        return CGRect(x: screen.maxX - inset - side, y: screen.maxY - inset - side, width: side, height: side)
+    }
 
     /// The bar's Add circle by its known metrics: 62 pt, 21 pt in from the
     /// trailing edge and the bottom of the screen.
@@ -29,12 +45,24 @@ final class PlusButtonFrame {
 /// (which is the tab's title).
 private struct TabBarAddButtonReader: UIViewRepresentable {
     let title: String
+    /// Anything that changes with the screen. Unfolding iPhone Duo or
+    /// turning it moves the bar without laying this view out again, so a
+    /// new screen reads again.
+    let screen: CGRect
 
     func makeUIView(context: Context) -> ReaderView { ReaderView(title: title) }
-    func updateUIView(_ view: ReaderView, context: Context) { view.scheduleRead() }
+
+    func updateUIView(_ view: ReaderView, context: Context) {
+        view.scheduleRead()
+        if view.screen != screen {
+            view.screen = screen
+            view.readAfterBarSettles()
+        }
+    }
 
     final class ReaderView: UIView {
         private let title: String
+        var screen: CGRect = .zero
 
         init(title: String) {
             self.title = title
@@ -61,12 +89,24 @@ private struct TabBarAddButtonReader: UIViewRepresentable {
             DispatchQueue.main.async { [weak self] in self?.read() }
         }
 
+        /// The bar animates to its new place; a read straight away can
+        /// catch it on the way.
+        func readAfterBarSettles() {
+            for delay in [0.4, 1.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.read() }
+            }
+        }
+
         private func read() {
+            // iPhone Duo's bar down the side isn't a UITabBar, so failing
+            // that, any button-sized view carrying the tab's title.
             guard let window,
-                  let bar = window.firstDescendant(where: { $0 is UITabBar }),
-                  let add = bar.firstDescendant(where: {
-                      $0.accessibilityLabel == title && $0.bounds.width >= 40
-                  })
+                  let add = window.firstDescendant(where: { $0 is UITabBar })?
+                      .firstDescendant(where: { $0.accessibilityLabel == title && $0.bounds.width >= 40 })
+                    ?? window.firstDescendant(where: {
+                        $0.accessibilityLabel == title && (40...90).contains($0.bounds.width)
+                            && abs($0.bounds.width - $0.bounds.height) < 8
+                    })
             else { return }
             let rect = add.convert(add.bounds, to: nil)
             guard rect.width > 0, rect != PlusButtonFrame.shared.measured else { return }
@@ -139,10 +179,11 @@ struct ContentView: View {
                     height: frame.height + safe.top + safe.bottom
                 )
             } action: { screen in
+                PlusButtonFrame.shared.screen = screen
                 PlusButtonFrame.shared.fallback = PlusButtonFrame.ghost(in: screen)
             }
             .background {
-                TabBarAddButtonReader(title: Self.addTitle)
+                TabBarAddButtonReader(title: Self.addTitle, screen: PlusButtonFrame.shared.fallback)
                     .frame(width: 0, height: 0)
             }
             .allowsHitTesting(false)

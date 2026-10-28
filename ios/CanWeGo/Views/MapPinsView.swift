@@ -18,6 +18,8 @@ struct MapPinsView: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var span: MKCoordinateSpan?
     @State private var locations = LocationStore.shared
+    /// Where the bars run on iPhone Duo; nil when they're top and bottom.
+    @State private var barsEdge: HorizontalEdge?
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Lets the locate-me control live outside the default top-right stack.
@@ -259,7 +261,7 @@ struct MapPinsView: View {
                     }
                     .padding(.leading, Self.barInset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(.bottom, max(local.maxY - plus.minY + 12, 0))
+                    .padding(.bottom, max(local.maxY - (barsEdge == nil ? plus.minY - 12 : plus.maxY), 0))
                     .transition(.opacity)
                 }
             }
@@ -304,9 +306,14 @@ struct MapPinsView: View {
                     .glassEffect(.regular.interactive(), in: .circle)
                     .accessibilityLabel("Show my location")
                     .accessibilityHint(locations.denied ? "Location is off. Opens Settings." : "")
+                    // With the bars down the side (iPhone Duo), above Add is
+                    // the tab buttons, and the map may end at the side pane
+                    // well short of Add: the map's own corner, level with Add.
                     .position(
-                        x: plus.midX - local.minX,
-                        y: plus.minY - 12 - plus.height / 2 - local.minY
+                        x: barsEdge == nil ? plus.midX - local.minX
+                            : geo.size.width - Self.barInset - plus.width / 2,
+                        y: barsEdge == nil ? plus.minY - 12 - plus.height / 2 - local.minY
+                            : min(plus.midY - local.minY, geo.size.height - Self.barInset - plus.height / 2)
                     )
                     .transition(.opacity)
                 }
@@ -314,6 +321,7 @@ struct MapPinsView: View {
         }
         .mapScope(mapScope)
         .ignoresSafeArea(edges: .bottom)
+        .onBarsEdgeChange { barsEdge = $0 }
     }
 
     /// "12 open · 3 not yet" with a switch to let the not-yet-open ones

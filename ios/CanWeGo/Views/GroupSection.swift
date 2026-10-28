@@ -560,7 +560,7 @@ struct InviteSheet: View {
     @State private var copied = false
 
     private var message: String {
-        invite.message ?? "Join me on Can We Go? \u{2014} code \(invite.code)"
+        invite.message ?? "Join me on Can We Go? \(GroupStore.inviteLink(invite.code))"
     }
 
     var body: some View {
@@ -588,18 +588,18 @@ struct InviteSheet: View {
                         .prominentGlass()
                         .controlSize(.large)
                         Button {
-                            UIPasteboard.general.string = invite.code
+                            UIPasteboard.general.url = URL(string: GroupStore.inviteLink(invite.code))
                             Haptics.success()
                             withAnimation(.snappy) { copied = true }
                         } label: {
-                            Label(copied ? "Copied" : "Copy code", systemImage: copied ? "checkmark" : "doc.on.doc")
+                            Label(copied ? "Copied" : "Copy link", systemImage: copied ? "checkmark" : "link")
                                 .frame(maxWidth: .infinity)
                                 .contentTransition(.symbolEffect(.replace))
                         }
                         .buttonStyle(.glass)
                         .controlSize(.large)
                     }
-                    Text("Anyone with this code can join until it expires or you cancel it. Their saves come with them.")
+                    Text("Anyone with this link or code can join until it expires or you cancel it. Their saves come with them.")
                         .font(.footnote)
                         .foregroundStyle(AppBackground.secondaryInk)
                         .multilineTextAlignment(.center)

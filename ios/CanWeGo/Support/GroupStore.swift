@@ -133,12 +133,27 @@ final class GroupStore {
         return c.count == 6 ? "\(c.prefix(3))-\(c.suffix(3))" : c
     }
 
-    /// "kv7-p2m", " KV7 P2M ", a whole share message → "KV7P2M". Nil when
-    /// nothing in the string can be a code, so the join screen can say so
-    /// without a round-trip. Looks for a standalone 6-character token so
-    /// "Can We Go" itself doesn't look like a code.
+    /// wegocan.com/join/KV7P2M: what the share sheet sends, so it can be
+    /// read across a table as easily as tapped.
+    nonisolated static func inviteLink(_ code: String) -> String {
+        "https://\(OwnLink.domain)/join/\(code.filter { $0 != "-" })"
+    }
+
+    /// "kv7-p2m", " KV7 P2M ", an invite link, a whole share message →
+    /// "KV7P2M". Nil when nothing in the string can be a code, so the join
+    /// screen can say so without a round-trip. An invite link wins over
+    /// loose words (a message led by "Salman Toor" has "SALMAN" in it);
+    /// otherwise it looks for a standalone 6-character token so "Can We Go"
+    /// itself doesn't look like a code, and any other link is never one.
     nonisolated static func normaliseCode(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let r = trimmed.range(of: "/join/", options: .caseInsensitive) {
+            let c = trimmed[r.upperBound...]
+                .prefix { $0.isLetter || $0.isNumber || $0 == "-" }
+                .uppercased().filter { $0 != "-" }
+            if c.count == 6, c.allSatisfy(codeAlphabet.contains) { return c }
+        }
+        if trimmed.contains("://"), !trimmed.contains(where: \.isWhitespace) { return nil }
         let compact = trimmed.uppercased().filter { $0 != "-" && !$0.isWhitespace }
         if compact.count == 6, compact.allSatisfy(codeAlphabet.contains) {
             return compact

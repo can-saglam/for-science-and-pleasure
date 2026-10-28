@@ -25,6 +25,17 @@ struct LibraryView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var widthClass
+    // Seeded from the window, so a cold open on iPhone Duo held sideways
+    // has both columns from the first frame; layout corrects them after.
+    @State private var screenWidth: CGFloat = Foldable.launchSize.width
+    @State private var paneOpen = Foldable.opensWide(Foldable.launchSize)
+    /// `sideBySide` as last laid out. The drawer's binding outlives the
+    /// view value it was made from, size class and all, so it reads this.
+    @State private var paneTakesOver = false
+    @State private var contentWidth: CGFloat = 0
+    /// Where the bars run on iPhone Duo; nil when they're top and bottom.
+    @State private var barsEdge: HorizontalEdge? = Foldable.opensWide(Foldable.launchSize) ? .trailing : nil
     /// The stale-sync pill's sideways drag, on its way to being dismissed.
     @State private var staleDrag: CGFloat = 0
     @Query(sort: \Item.createdAt, order: .reverse) private var items: [Item]
@@ -458,6 +469,9 @@ struct LibraryView: View {
                         .transition(.opacity)
                 }
             }
+            // The list column alone: narrower than the screen when the side
+            // pane is open.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
             // A quiet word after pull-to-refresh, either way, just above
             // the tab bar.
             .overlay(alignment: .bottom) {
@@ -474,7 +488,11 @@ struct LibraryView: View {
             // No navigation title: the wordmark owns the leading edge, and
             // the bottom bar already says which tab you're on.
             .navigationBarTitleDisplayMode(.inline)
-            .logoTitle(refreshing: refreshing, pull: pull)
+            .logoTitle(refreshing: refreshing, pull: pull, width: barsEdge == nil ? nil : max(contentWidth - 40, 0))
+            .onBarsEdgeChange {
+                barsEdge = $0
+                SideBars.shared.edge = $0
+            }
             // Our own search control, not `.searchable`: the system pins
             // its search item to the far trailing end and won't hide it on
             // the map — this one sits left of the group and steps aside, so
@@ -500,6 +518,7 @@ struct LibraryView: View {
                         }
                         .accessibilityLabel("Search")
                     }
+                    .keptVisible(.high)
                 }
                 // Nothing to pin, no map; on the map, always the way back.
                 if mode.showMap || visible.contains(where: { $0.coordinate != nil }) {
@@ -517,12 +536,14 @@ struct LibraryView: View {
                         }
                         .accessibilityLabel(mode.showMap ? "Show list" : "Show map")
                     }
+                    .keptVisible(.high)
                 }
                 // Settings holds the far end: the gear is the one control
                 // that isn't about the list in front of you.
                 ToolbarItem(placement: .topBarTrailing) {
                     SettingsButton()
                 }
+                .keptVisible(.low)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if searchOpen && !mode.showMap {
@@ -540,7 +561,32 @@ struct LibraryView: View {
             .onReceive(NotificationCenter.default.publisher(for: .cwgSearchSaves)) { _ in
                 takeSearch()
             }
-            .sheet(item: $selected) { ItemDetailView(item: $0) }
+            // Wide (iPhone Duo open in landscape): the save opens
+            // beside the list, the way Mail shows a message. Narrow: the
+            // drawer. The selection outlives the switch, so a save open on
+            // one display is still open on the other.
+            .environment(\.openSaveID, sideBySide ? selected?.id : nil)
+            .sheet(item: drawerItem) { ItemDetailView(item: $0) }
+            .inspector(isPresented: $paneOpen) {
+                sidePane
+                    .inspectorColumnWidth(min: 340, ideal: 400, max: 460)
+            }
+            // Measured outside the pane, so opening it can't shrink the
+            // width that decided to open it.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { screenWidth = $0 }
+            // The system closes the pane itself while the phone turns; if
+            // there's still room once it settles, it comes straight back.
+            // The pane is part of the layout, not something that arrives:
+            // no slide in at launch, or after a turn.
+            .onChange(of: sideBySide, initial: true) { _, wide in
+                paneTakesOver = wide
+                setPane(wide)
+            }
+            .onChange(of: paneOpen) { _, open in
+                if !open && sideBySide {
+                    Task { if sideBySide { setPane(true) } }
+                }
+            }
             // The library is about to be replaced: the open item won't exist.
             .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
                 selected = nil
@@ -558,6 +604,55 @@ struct LibraryView: View {
                 }
                 if env["CWG_MAP"] != nil { mode.showMap = true }
             }
+        }
+    }
+
+    /// Room for the list and the pane side by side: iPhone Duo open in
+    /// landscape. Open in portrait the pane would cover the list, so saves
+    /// open as the drawer there, as on any phone. Side bars keep it to the
+    /// Duo: a big iPhone held sideways is wide enough too, but keeps the
+    /// drawer. An empty tab has nothing to pick, so its first-run state
+    /// keeps the whole width.
+    private var sideBySide: Bool {
+        widthClass == .regular && screenWidth >= 760 && barsEdge != nil && !base.isEmpty
+    }
+
+    private func setPane(_ open: Bool) {
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { paneOpen = open }
+    }
+
+    /// The drawer's share of the selection. Handing over to the pane closes
+    /// the drawer, and that close reports "nothing open": ignored then, so
+    /// the save carries across.
+    private var drawerItem: Binding<Item?> {
+        Binding(
+            get: { sideBySide ? nil : selected },
+            set: { if $0 != nil || !paneTakesOver { selected = $0 } }
+        )
+    }
+
+    /// Empty while hidden: a closed inspector still hands its content's
+    /// toolbar to the bar.
+    @ViewBuilder
+    private var sidePane: some View {
+        if !sideBySide {
+            EmptyView()
+        } else if let selected {
+            ItemDetailView(item: selected) { self.selected = nil }
+                .id(selected.id)
+                // The pane's own bars stay horizontal, so it can't tell the
+                // app's run down the side: its buttons line up with Add here.
+                .environment(\.floatingRowMatch, barsEdge != nil ? PlusButtonFrame.shared.side : nil)
+        } else {
+            EmptyState(
+                title: kind == Item.Kind.place ? "Pick a place" : "Pick an event",
+                message: "It opens here, with its map, dates and plans, while the list stays put."
+            )
+            .padding(24)
+            .frame(maxHeight: .infinity)
+            .background { ThemeFill(color: AppBackground.sheet) }
         }
     }
 
@@ -1324,6 +1419,7 @@ private struct ChipRow: View {
     @Binding var nearMe: Bool
     @Binding var openNow: Bool
     var checkingHours = false
+    @State private var barsEdge: HorizontalEdge?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -1374,6 +1470,11 @@ private struct ChipRow: View {
         // and below and the list remeasures that on every drag.
         .scrollClipDisabled()
         .clipShape(.rect.inset(by: -64))
+        // With the bars down the side (iPhone Duo), the row stops short of
+        // the screen edge and would cut chips off mid-word: fade them out
+        // just past the cards' edge instead.
+        .modifier(TrailingFade(on: barsEdge != nil))
+        .onBarsEdgeChange { barsEdge = $0 }
     }
 
     private func chip(_ label: String, symbol: String? = nil, isOn: Bool, busy: Bool = false, cap: Int? = nil, toggle: @escaping () -> Void) -> some View {

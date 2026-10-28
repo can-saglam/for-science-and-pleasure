@@ -89,7 +89,6 @@ struct OnboardingView: View {
     @State private var index = 0
 
     // Sign in (the welcome page is the front door when there's no session)
-    @State private var nonce = AppleSignIn.makeNonce()
     @State private var signingIn = false
     /// The session landed but the library couldn't be reached, so we
     /// can't tell what the account already has. Retry rather than guess.
@@ -1042,9 +1041,7 @@ struct OnboardingView: View {
                 }
             } else {
                 SignInWithAppleButton(.continue) { request in
-                    nonce = AppleSignIn.makeNonce()
-                    request.requestedScopes = [.fullName, .email]
-                    request.nonce = AppleSignIn.sha256(nonce)
+                    AppleSignIn.prepare(request)
                 } onCompletion: { result in
                     Task { await finishApple(result) }
                 }
@@ -1083,7 +1080,7 @@ struct OnboardingView: View {
         do {
             // `complete` returns only after Apple's one-time name has
             // been written, so the page order below can trust `hasName`.
-            try await AppleSignIn.complete(result, nonce: nonce)
+            try await AppleSignIn.complete(result)
             Haptics.success()
             await signedInFromFrontDoor()
         } catch {
@@ -1276,7 +1273,7 @@ struct OnboardingView: View {
                        selected: together == .start) { chooseTogether(.start) }
                 .disabled(joined)
             choiceTile("envelope.open.fill", "I\u{2019}ve got an invite",
-                       "Pop in the code a friend sent you, like KV7-P2M, and you\u{2019}re in.",
+                       "Paste the link a friend sent you, or their code, like KV7-P2M, and you\u{2019}re in.",
                        selected: together == .code) { chooseTogether(.code) }
 
             if together == .code {
@@ -1360,14 +1357,15 @@ struct OnboardingView: View {
                 .disabled(joined)
 
             if clipboardHasText, codeDraft.isEmpty, !joined {
-                chip("Paste the code you were sent", icon: "doc.on.clipboard") {
+                chip("Paste your invite", icon: "doc.on.clipboard") {
                     // Read only now, on the tap: reading earlier would put
                     // up the system paste prompt the moment the page opened.
-                    if let s = UIPasteboard.general.string, let c = GroupStore.normaliseCode(s) {
+                    let board = UIPasteboard.general
+                    if let s = board.string ?? board.url?.absoluteString, let c = GroupStore.normaliseCode(s) {
                         codeDraft = JoinSheet.formatTyping(c)
                     } else {
                         clipboardHasText = false
-                        note = "Nothing that looks like a code on the clipboard."
+                        note = "Nothing that looks like an invite on the clipboard."
                     }
                 }
             }
@@ -2226,7 +2224,7 @@ struct OnboardingView: View {
             if let invite {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Their code")
+                        Text("Your invite code")
                             .font(.footnote)
                             .foregroundStyle(AppBackground.ink.opacity(0.72))
                         Text(invite.code)
@@ -2235,8 +2233,8 @@ struct OnboardingView: View {
                     }
                     .accessibilityElement(children: .combine)
                     Spacer(minLength: 0)
-                    chip(copiedCode ? "Copied" : "Copy", icon: copiedCode ? "checkmark" : "doc.on.doc") {
-                        UIPasteboard.general.string = invite.code
+                    chip(copiedCode ? "Copied" : "Copy link", icon: copiedCode ? "checkmark" : "link") {
+                        UIPasteboard.general.url = URL(string: GroupStore.inviteLink(invite.code))
                         copiedCode = true
                     }
                 }
@@ -2269,7 +2267,7 @@ struct OnboardingView: View {
     /// so it reads as a reason to come, not a sign-up.
     private var inviteMessage: String {
         guard let invite else { return "" }
-        let base = invite.message ?? "Join me on Can We Go? \u{2014} code \(invite.code)"
+        let base = invite.message ?? "Join me on Can We Go? \(GroupStore.inviteLink(invite.code))"
         guard let title = firstSave?.title, !title.isEmpty else { return base }
         return "First on my list: \(title).\n\n\(base)"
     }
@@ -2581,8 +2579,8 @@ struct OnboardingView: View {
     /// prompt. The contents are read only on the tap.
     private func refreshOffers() {
         let board = UIPasteboard.general
-        // A link is never a code; anything else that's text might be.
-        clipboardHasText = page == .together && together == .code && board.hasStrings && !board.hasURLs
+        // Text might be a code, and a link might be the invite link.
+        clipboardHasText = page == .together && together == .code && (board.hasStrings || board.hasURLs)
     }
 
     /// Removes a page without moving the reader: if it sat before the

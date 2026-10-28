@@ -7,6 +7,9 @@ import SwiftUI
 struct FloatingActions<Content: View>: View {
     private let content: Content
     @State private var keyboardUp = false
+    @Environment(\.floatingRowMatch) private var match
+    @Environment(\.floatingRowFloor) private var floor
+    @Environment(\.floatingRowTrailing) private var trailing
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -21,13 +24,16 @@ struct FloatingActions<Content: View>: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.leading, 20)
+        .padding(.trailing, trailing ?? 20)
         .padding(.top, 28)
         // Into the home-indicator margin, the way the system's own
         // floating controls sit, while keeping clear of the corner. Over
         // the keyboard there's no margin to borrow, so they stand off it.
-        .padding(.bottom, keyboardUp ? 12 : -8)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+        .padding(.bottom, bottomPadding)
+        // Turning iPhone Duo posts a show with no keyboard on screen.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+            guard Self.keyboardOnScreen(note) else { return }
             withAnimation(.snappy) { keyboardUp = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
@@ -50,8 +56,27 @@ struct FloatingActions<Content: View>: View {
     }
 }
 
+extension FloatingActions {
+    /// Level with the side bar's Add button when there's one to match,
+    /// bottom edges together.
+    private var bottomPadding: CGFloat {
+        if keyboardUp { return 12 }
+        if let match, let floor { return floor - match.maxY }
+        return -8
+    }
+
+    private static func keyboardOnScreen(_ note: Notification) -> Bool {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let screen = note.object as? UIScreen
+        else { return true }
+        return frame.height > 0 && frame.intersects(screen.bounds)
+    }
+}
+
 /// Solid white: the reason the drawer is open.
 struct FloatingMainButton: View {
+    @Environment(\.floatingRowMatch) private var match
+    private var side: CGFloat { match?.height ?? 54 }
     let symbol: String
     let label: String
     let action: () -> Void
@@ -73,7 +98,7 @@ struct FloatingMainButton: View {
             .font(.subheadline.weight(.semibold))
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .padding(.horizontal, 20)
-            .frame(minWidth: 54, minHeight: 54)
+            .frame(minWidth: side, minHeight: side)
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
@@ -85,6 +110,8 @@ struct FloatingMainButton: View {
 
 /// Plain glass, a symbol alone; the label is for VoiceOver.
 struct FloatingCircleButton: View {
+    @Environment(\.floatingRowMatch) private var match
+    private var side: CGFloat { match?.height ?? 54 }
     let symbol: String
     let label: String
     var tint: Color = AppBackground.ink
@@ -104,7 +131,7 @@ struct FloatingCircleButton: View {
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 19, weight: .semibold))
-                .frame(width: 54, height: 54)
+                .frame(width: side, height: side)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)

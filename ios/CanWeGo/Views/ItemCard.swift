@@ -123,6 +123,9 @@ struct ItemCard: View {
     }
 
     private var radius: CGFloat { compact ? 14 : 18 }
+    @Environment(\.openSaveID) private var openSaveID
+    /// Showing in the side pane beside the list.
+    private var isOpen: Bool { openSaveID == item.id }
 
     private var imageURL: URL? {
         guard !compact else { return nil }
@@ -231,7 +234,7 @@ struct ItemCard: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(cardBorder, lineWidth: 1)
+                .strokeBorder(isOpen ? AppBackground.ink.opacity(0.9) : cardBorder, lineWidth: isOpen ? 2 : 1)
         )
         // Flat before anything fades it: the press dim and the long-press
         // lift apply opacity, which per layer shows the melt as a box.
@@ -241,6 +244,7 @@ struct ItemCard: View {
         // three separate stops with the countdown detached from its title.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
+        .accessibilityAddTraits(isOpen ? .isSelected : [])
     }
 
     private var accessibilitySummary: String {
@@ -594,6 +598,8 @@ struct ItemCardRow: View {
             .tint(AppBackground.swipeDelete)
         }
         .contentShape(.contextMenuPreview, .rect(cornerRadius: compact ? 14 : 18, style: .continuous))
+        // Lifted to reorder, the card alone, not the clear row around it.
+        .contentShape(.dragPreview, .rect(cornerRadius: compact ? 14 : 18, style: .continuous))
         .contextMenu {
             if item.canPutBack {
                 Button {

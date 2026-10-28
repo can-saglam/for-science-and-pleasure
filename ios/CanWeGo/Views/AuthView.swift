@@ -8,8 +8,6 @@ struct AuthView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var errorMessage: String?
-    /// One nonce per Apple attempt; regenerated when the sheet is requested.
-    @State private var nonce = AppleSignIn.makeNonce()
     private var auth: SupabaseAuth { SupabaseAuth.shared }
 
     var body: some View {
@@ -28,9 +26,7 @@ struct AuthView: View {
                 .padding(.top, 72)
 
                 SignInWithAppleButton(.continue) { request in
-                    nonce = AppleSignIn.makeNonce()
-                    request.requestedScopes = [.fullName, .email]
-                    request.nonce = AppleSignIn.sha256(nonce)
+                    AppleSignIn.prepare(request)
                 } onCompletion: { result in
                     Task { await finishApple(result) }
                 }
@@ -83,7 +79,7 @@ struct AuthView: View {
         errorMessage = nil
         defer { busy = false }
         do {
-            try await AppleSignIn.complete(result, nonce: nonce)
+            try await AppleSignIn.complete(result)
             Haptics.success()
         } catch {
             errorMessage = AppleSignIn.message(for: error)

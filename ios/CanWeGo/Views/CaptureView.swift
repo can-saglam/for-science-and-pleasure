@@ -17,6 +17,7 @@ struct CaptureView: View {
     @State private var text = ""
     @State private var imageJPEG: Data?
     @State private var busy = false
+    @State private var sideInsets = EdgeInsets()
     @State private var errorMessage: String?
     /// A parse that came back as a nudge rather than a fault.
     @State private var nudge: CaptureNudge?
@@ -110,7 +111,8 @@ struct CaptureView: View {
                         editFirst: { withAnimation(.snappy) { editing = true } },
                         typed: reading == .text ? trimmedText : nil,
                         titleSpace: titleSpace,
-                        growsIn: true
+                        growsIn: true,
+                        sideInsets: sideInsets
                     ) {
                         if let draft {
                             VStack(alignment: .leading, spacing: 18) {
@@ -137,8 +139,9 @@ struct CaptureView: View {
                     ))
                 }
             }
-            // The drawer's photo runs edge to edge under the close button.
-            .ignoresSafeArea(edges: showsDrawer ? .top : [])
+            // The drawer's photo runs edge to edge under the close button,
+            // and under the camera when held sideways.
+            .ignoresSafeArea(edges: showsDrawer ? [.top, .horizontal] : [])
             .scrollDismissesKeyboard(.interactively)
             // The bar and the card's actions take the same strip, so the
             // thumb ends where it started.
@@ -173,7 +176,10 @@ struct CaptureView: View {
             // the sheet takes the save's colour a beat before the card.
             .background(alignment: .top) {
                 let tint = draft?.accentColor ?? AppBackground.ink
-                let strength: Double = draft != nil ? 0.25 : (busy ? 0.09 : 0)
+                // Under the drawer's photo it stays put while the photo
+                // scrolls away, and would show as a seam at the photo's foot.
+                let underPhoto = showsDrawer && (draft == nil || draft?.imageUrl.flatMap(URL.init(string:)) != nil)
+                let strength: Double = underPhoto ? 0 : draft != nil ? 0.25 : (busy ? 0.09 : 0)
                 LinearGradient(
                     colors: [tint.opacity(strength), tint.opacity(0)],
                     startPoint: .top,
@@ -185,6 +191,9 @@ struct CaptureView: View {
                 .animation(.easeInOut(duration: 0.4), value: busy)
             }
             .background { ThemeFill(color: AppBackground.sheet) }
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: {
+                sideInsets = EdgeInsets(top: 0, leading: $0.leading, bottom: 0, trailing: $0.trailing)
+            }
         }
         .foregroundStyle(AppBackground.ink)
         .appColorScheme()

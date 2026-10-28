@@ -13,33 +13,35 @@
 <link rel="stylesheet" href="/css/join.css">
 <script src="/js/join.js" defer></script>
 </head>
-<body class="join-page">
+<body class="join-page" data-api="{{shareApi}}">
 <main class="join">
   <a class="join-mark" href="/" aria-label="Can We Go? home"><!-- include img/wordmark.svg --></a>
 
   <div class="join-panel" data-join hidden>
-    <h1>You’re invited</h1>
-    <p class="join-lede">Someone wants to share their Can We Go? list with you: the exhibitions, gigs and restaurants you’ll go to together.</p>
+    <div class="join-faces" data-faces hidden></div>
+    <h1 data-title>You’re invited</h1>
+    <p class="join-lede" data-lede>Someone wants to share their Can We Go? list with you: the exhibitions, gigs and restaurants you’ll go to together.</p>
 
-    <div class="join-code">
-      <span class="join-code-label">Your code</span>
-      <span class="join-code-value" data-code></span>
-      <button class="join-copy" type="button" data-copy>Copy</button>
-    </div>
-
-    <ol class="join-steps">
+    <ol class="join-steps" data-steps>
       <li>
         <b>Get Can We Go? for iPhone.</b>
-        <a class="pill pill-cream" href="{{appStoreUrl}}">Download for iPhone</a>
+        Tapping download copies your invite, ready for the app.
+        <a class="pill pill-cream" href="{{appStoreUrl}}" data-download>Download for iPhone</a>
       </li>
       <li>
         <b>Open it and sign in with Apple.</b>
-        When it asks whether you’re joining someone, enter the code. If you copied it, the app offers it for you.
+        Choose “I’ve got an invite” and tap Paste your invite. Or come back to this page and tap Open the invite.
       </li>
     </ol>
 
     <a class="join-open" data-open href="#">Already have the app? Open the invite</a>
-    <p class="join-fine">Codes last seven days. If this one has expired, ask for a new one.</p>
+
+    <div class="join-code" data-code-box>
+      <span class="join-code-label">Or enter the code</span>
+      <span class="join-code-value" data-code></span>
+      <button class="join-copy" type="button" data-copy>Copy</button>
+    </div>
+    <p class="join-fine" data-fine>Invites last seven days. If this one has expired, ask for a new one.</p>
   </div>
 
   <div class="join-panel" data-join-missing hidden>

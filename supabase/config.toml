@@ -445,7 +445,7 @@ verify_jwt = true
 [functions.verify-entitlements]
 verify_jwt = false
 
-# Reading a shared save is public (the web page and the app both ask);
+# Reading a shared save or an invite's page is public (the web page and the app ask);
 # making one checks the caller itself.
 [functions.share]
 verify_jwt = false

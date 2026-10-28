@@ -137,16 +137,7 @@ Deno.serve(async (req) => {
         const { data, error } = await db.rpc("membership_invite", { p_user: userId });
         if (error) throw error;
         if (data?.code) {
-          const [{ data: profile }, { data: cfg }] = await Promise.all([
-            db.from("profiles").select("display_name").eq("user_id", userId).maybeSingle(),
-            db.from("app_config").select("store_url").eq("id", true).maybeSingle(),
-          ]);
-          const store = cfg?.store_url && !String(cfg.store_url).startsWith("itms") ? String(cfg.store_url) : null;
-          return json({
-            ...data,
-            code: formatCode(data.code),
-            message: inviteMessage(data.code, profile?.display_name ?? null, store),
-          });
+          return json({ ...data, code: formatCode(data.code), message: inviteMessage(data.code) });
         }
         return json(data);
       }

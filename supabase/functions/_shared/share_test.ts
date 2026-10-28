@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { firstName, sharedCard, shareToken } from "./share.ts";
+import { firstName, publicInvite, sharedCard, shareToken } from "./share.ts";
 
 Deno.test("a shared card keeps the public fields and drops the rest", () => {
   const card = sharedCard({
@@ -44,4 +44,25 @@ Deno.test("share tokens are ten unambiguous characters", () => {
   const tokens = new Set(Array.from({ length: 500 }, shareToken));
   assertEquals(tokens.size, 500);
   for (const t of tokens) assert(/^[A-HJ-NP-Za-km-z2-9]{10}$/.test(t), t);
+});
+
+Deno.test("an invite's page learns first names and whether it still works", () => {
+  const now = new Date("2026-10-27T12:00:00Z");
+  const live = { expires_at: "2026-11-01T00:00:00Z", revoked_at: null };
+  const members = [
+    { display_name: "Can Sağlam", avatar_colour: "coral" },
+    { display_name: "Joyce Lee", avatar_colour: null },
+    { display_name: null, avatar_colour: "mint" },
+  ];
+  assertEquals(publicInvite(live, "Can Sağlam", members, now), {
+    status: "ok",
+    from: "Can",
+    members: [{ name: "Can", colour: "coral" }, { name: "Joyce", colour: null }],
+  });
+  assertEquals(publicInvite(live, null, [...members, members[0]], now).status, "full");
+  assertEquals(
+    publicInvite({ ...live, expires_at: "2026-10-20T00:00:00Z" }, "Can", members, now),
+    { status: "expired", from: "Can", members: [] },
+  );
+  assertEquals(publicInvite({ ...live, revoked_at: "2026-10-26T00:00:00Z" }, "Can", members, now).status, "expired");
 });

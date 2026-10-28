@@ -98,7 +98,7 @@ struct JoinSheet: View {
 
     private var field: some View {
         VStack(spacing: 12) {
-            Text("Ask anyone who shares the library for their invite code. It\u{2019}s under Invite in their Settings.")
+            Text("Tap the invite link they sent you, or type their code here. Anyone in the library can send one from Invite in their Settings.")
                 .font(.subheadline)
                 .foregroundStyle(AppBackground.ink.opacity(0.72))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,7 +127,7 @@ struct JoinSheet: View {
             Haptics.tap()
             useClipboard()
         } label: {
-            Label("Use code from clipboard", systemImage: "clipboard")
+            Label("Use invite from clipboard", systemImage: "clipboard")
                 .font(.subheadline.weight(.semibold))
         }
         .buttonStyle(.glass)
@@ -291,17 +291,17 @@ struct JoinSheet: View {
     /// `hasStrings` does not trigger the paste banner. The contents are
     /// only read when they tap the offer.
     private func refreshClipboardOffer() async {
-        clipboardOffer = UIPasteboard.general.hasStrings
+        clipboardOffer = UIPasteboard.general.hasStrings || UIPasteboard.general.hasURLs
     }
 
     private func useClipboard() {
         clipboardOffer = false
-        guard let raw = UIPasteboard.general.string else {
+        guard let raw = UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString else {
             note = "Nothing on the clipboard."
             return
         }
         guard let found = GroupStore.normaliseCode(raw) else {
-            note = "That wasn\u{2019}t an invite code."
+            note = "That wasn\u{2019}t an invite link or code."
             return
         }
         draft = GroupStore.formatCode(found)

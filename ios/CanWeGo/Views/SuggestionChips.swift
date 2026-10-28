@@ -78,13 +78,16 @@ struct PickStrip<Content: View>: View {
 }
 
 /// A wide chip takes the strip's width less the gap between chips, so the
-/// next one starts where the cards above end and only peeks in.
+/// next one starts where the cards above end and only peeks in. A strip
+/// wider than any iPhone's (iPhone Duo open, either way up) shows two.
 private struct StripWidth: ViewModifier {
     let on: Bool
 
     func body(content: Content) -> some View {
         if on {
-            content.containerRelativeFrame(.horizontal) { width, _ in width - 8 }
+            content.containerRelativeFrame(.horizontal) { width, _ in
+                width > 560 ? (width - 8) / 2 : width - 8
+            }
         } else {
             content
         }

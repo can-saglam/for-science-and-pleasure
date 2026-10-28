@@ -21,6 +21,20 @@ enum AppleSignIn {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// The raw nonce of the attempt in flight. Kept here, not in the
+    /// sign-in screen's state: SwiftUI can rebuild that screen while Apple's
+    /// sheet is up (iPhone Duo moving between displays), and a rebuilt
+    /// screen would send Supabase a nonce Apple never saw.
+    private static var pending: String?
+
+    /// Fills Apple's request for one attempt: scopes and a fresh nonce.
+    static func prepare(_ request: ASAuthorizationAppleIDRequest) {
+        let nonce = makeNonce()
+        pending = nonce
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = sha256(nonce)
+    }
+
     static func sha256(_ s: String) -> String {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -33,7 +47,7 @@ enum AppleSignIn {
     /// Completes the sign-in from Apple's credential. Throws with a message
     /// fit for the sign-in screen. Cancelling the Apple sheet is not an
     /// error worth showing, so callers should check `isCancellation` first.
-    static func complete(_ result: Result<ASAuthorization, Error>, nonce: String) async throws {
+    static func complete(_ result: Result<ASAuthorization, Error>) async throws {
         let authorization: ASAuthorization
         switch result {
         case .success(let a): authorization = a
@@ -41,7 +55,8 @@ enum AppleSignIn {
         }
         guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
               let tokenData = credential.identityToken,
-              let identityToken = String(data: tokenData, encoding: .utf8)
+              let identityToken = String(data: tokenData, encoding: .utf8),
+              let nonce = pending
         else {
             throw Failure(message: "Apple didn't return a sign-in token. Please try again.")
         }

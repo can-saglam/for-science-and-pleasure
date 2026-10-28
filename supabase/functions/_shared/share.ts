@@ -100,3 +100,27 @@ export function sharedCard(raw: unknown): SharedCard | null {
     source: "shared",
   };
 }
+
+export interface PublicInvite {
+  status: "ok" | "full" | "expired";
+  from: string | null;
+  members: { name: string; colour: string | null }[];
+}
+
+/// What wegocan.com/join/<code> may say about an invite: who sent it and
+/// who's in, by first name, and whether it still works. A dead invite says
+/// only who to ask for a new one.
+export function publicInvite(
+  invite: { expires_at: string; revoked_at: string | null },
+  inviter: unknown,
+  members: { display_name: unknown; avatar_colour: unknown }[],
+  now = new Date(),
+): PublicInvite {
+  const from = firstName(inviter);
+  if (invite.revoked_at || new Date(invite.expires_at) <= now) return { status: "expired", from, members: [] };
+  const named = members.flatMap((m) => {
+    const name = firstName(m.display_name);
+    return name ? [{ name, colour: typeof m.avatar_colour === "string" ? m.avatar_colour : null }] : [];
+  });
+  return { status: members.length >= 4 ? "full" : "ok", from, members: named };
+}

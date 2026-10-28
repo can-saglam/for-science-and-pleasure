@@ -237,6 +237,12 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
             .set(true, forKey: declinedPrimeKey)
     }
 
+    /// Info.plist lists landscape for iPhone Duo; everywhere else the app
+    /// stays portrait, as it always has.
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        Foldable.rotates(window) ? .allButUpsideDown : .portrait
+    }
+
     static func register() {
         guard SupabaseAuth.shared.signedIn else { return }
         guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
