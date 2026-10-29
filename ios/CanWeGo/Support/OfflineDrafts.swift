@@ -70,6 +70,8 @@ enum OfflineDrafts {
     static func watch(context: ModelContext) {
         guard !watching else { return }
         watching = true
+        // Only ever used back on the main actor, where it lives.
+        nonisolated(unsafe) let context = context
         monitor.pathUpdateHandler = { path in
             let satisfied = path.status == .satisfied
             Task { @MainActor in
@@ -190,7 +192,7 @@ enum OfflineDrafts {
         put(\.showingsJSON, Showing.encode(card.showings))
         item.reconcileReminder()
         item.updatedAt = .now
-        try? context.save()
+        context.saveOrReport()
         SupabaseSync.schedule(context: context)
     }
 }

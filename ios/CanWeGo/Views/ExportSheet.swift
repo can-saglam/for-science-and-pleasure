@@ -11,7 +11,7 @@ struct ExportSheet: View {
     @State private var detent: PresentationDetent = .medium
 
     private var count: Int {
-        items.filter { !$0.isDeleted && $0.deletedAt == nil }.count
+        items.filter { !$0.isTrashed && $0.deletedAt == nil }.count
     }
 
     var body: some View {

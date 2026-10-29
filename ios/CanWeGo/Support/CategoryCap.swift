@@ -16,7 +16,7 @@ enum CategoryCap {
     }
 
     static func counts(_ item: Item) -> Bool {
-        !item.isDeleted && !item.isDone && !item.isMissed
+        !item.isTrashed && !item.isDone && !item.isMissed
     }
 
     /// Whether this phone should hold back: a known free group. With no
@@ -44,7 +44,7 @@ enum CategoryCap {
     static func overflow(_ item: Item, context: ModelContext) -> String? {
         guard applies, let category = item.category else { return nil }
         let k = key(category)
-        guard !k.isEmpty, !item.isDeleted, item.timeBucket != .past else { return nil }
+        guard !k.isEmpty, !item.isTrashed, item.timeBucket != .past else { return nil }
         let others = ((try? context.fetch(FetchDescriptor<Item>())) ?? [])
             .filter { $0.id != item.id && counts($0) && key($0.category) == k }
         return others.count >= limit ? category : nil

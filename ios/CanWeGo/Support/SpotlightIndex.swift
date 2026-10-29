@@ -12,7 +12,7 @@ enum SpotlightIndex {
     @MainActor
     static func sync(items: [Item]) {
         let entries = items
-            .filter { !$0.isDeleted }
+            .filter { !$0.isTrashed }
             .map { item -> CSSearchableItem in
                 let attributes = CSSearchableItemAttributeSet(contentType: .content)
                 attributes.title = item.title
@@ -37,8 +37,9 @@ enum SpotlightIndex {
                 )
             }
         let index = CSSearchableIndex.default()
-        index.deleteSearchableItems(withDomainIdentifiers: [domain]) { _ in
-            index.indexSearchableItems(entries, completionHandler: nil)
+        Task {
+            try? await index.deleteSearchableItems(withDomainIdentifiers: [domain])
+            try? await index.indexSearchableItems(entries)
         }
         #if !APP_EXTENSION
         // "Open <save> in Can We Go" matches against the current titles.

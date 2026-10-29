@@ -73,7 +73,7 @@ struct RemindRow: View {
         if item.remindAt != before {
             item.updatedAt = .now
             item.stampAuthor()
-            try? context.save()
+            context.saveOrReport()
         }
     }
 
@@ -171,7 +171,7 @@ struct RemindRow: View {
         guard persist else { return }
         item.updatedAt = .now
         item.stampAuthor()
-        try? context.save()
+        context.saveOrReport()
     }
 
     private func requestNotificationPermission() {

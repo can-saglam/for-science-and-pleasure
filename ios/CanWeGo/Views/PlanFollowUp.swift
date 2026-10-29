@@ -208,12 +208,12 @@ struct PlanFollowUpSheet: View {
             // Done first: the went day is read from the plan.
             item.markDone()
             item.clearPlan()
-            try? context.save()
+            context.saveOrReport()
             UndoBin.shared.stashDone(item)
         } else {
             item.clearPlan()
             item.updatedAt = .now
-            try? context.save()
+            context.saveOrReport()
         }
         next()
     }
@@ -233,7 +233,7 @@ struct PlanFollowUpSheet: View {
         guard item.modelContext != nil, item.planIsOver else { return }
         item.clearPlan()
         item.updatedAt = .now
-        try? context.save()
+        context.saveOrReport()
     }
 
     private func next() {

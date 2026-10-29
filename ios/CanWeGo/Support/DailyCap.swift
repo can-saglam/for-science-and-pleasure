@@ -26,7 +26,7 @@ enum DailyCap {
         guard let me else { return [] }
         let start = startOfToday
         return items
-            .filter { $0.createdBy == me && !$0.isDeleted && $0.createdAt >= start }
+            .filter { $0.createdBy == me && !$0.isTrashed && $0.createdAt >= start }
             .sorted { $0.createdAt > $1.createdAt }
     }
 

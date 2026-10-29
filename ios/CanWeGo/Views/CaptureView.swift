@@ -787,7 +787,7 @@ struct CaptureView: View {
         item.updatedAt = .now
         item.stampAuthor()
         context.insert(item)
-        try? context.save()
+        context.saveOrReport()
         Task { await SupabaseSync.announceSave(item) }
         Haptics.success()
         withAnimation(.easeInOut(duration: 0.25)) { saved = true }

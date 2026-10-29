@@ -34,20 +34,38 @@ enum LibraryStore {
         // reinstall or an account change (another person signing in on the
         // same phone saw the previous member's saves; deleted rows came
         // back as duplicates). Same store name, so existing data opens as-is.
+        let local = ModelConfiguration("CanWeGo", cloudKitDatabase: .none)
         do {
-            let local = ModelConfiguration("CanWeGo", cloudKitDatabase: .none)
             return try ModelContainer(for: Item.self, configurations: local)
         } catch {
-            // A store this build can't open (corrupt file, downgrade): keep
-            // the app usable on a fresh one; the next sync refills it.
+            // A store this build can't open (corrupt file, downgrade): its
+            // files go aside, unsynced edits and all, for recovery by hand,
+            // and a fresh store fills from a full pull. The sync cursor
+            // belongs to the old file, so it goes too.
+            print("[store] couldn't open the library, setting it aside: \(error)")
+            setAside(local.url)
+            SupabaseSync.resetCursor()
             do {
-                let fallback = ModelConfiguration("CanWeGo-local", cloudKitDatabase: .none)
-                return try ModelContainer(for: Item.self, configurations: fallback)
+                return try ModelContainer(for: Item.self, configurations: local)
             } catch {
                 fatalError("Could not create any model container: \(error)")
             }
         }
     }()
+
+    /// Moves a store's files (with its -wal and -shm) into
+    /// Application Support/Set aside.
+    private static func setAside(_ store: URL) {
+        let files = FileManager.default
+        let folder = URL.applicationSupportDirectory.appending(path: "Set aside", directoryHint: .isDirectory)
+        try? files.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stamp = Int(Date.now.timeIntervalSince1970)
+        for suffix in ["", "-wal", "-shm"] {
+            let file = URL(filePath: store.path() + suffix)
+            guard files.fileExists(atPath: file.path()) else { continue }
+            try? files.moveItem(at: file, to: folder.appending(path: "\(stamp)-\(file.lastPathComponent)"))
+        }
+    }
 }
 
 /// Sign-in gate: the shared library needs a member session before anything
@@ -345,7 +363,7 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
     /// records the build so `min_build` can be raised on evidence.
     private static func upload(token: String) async {
         guard let jwt = try? await SupabaseAuth.shared.validToken(),
-              let device = await UIDevice.current.identifierForVendor?.uuidString
+              let device = UIDevice.current.identifierForVendor?.uuidString
         else { return }
         #if targetEnvironment(simulator)
         let platform = "simulator"

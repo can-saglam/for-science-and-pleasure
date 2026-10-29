@@ -96,9 +96,10 @@ enum SupabaseSync {
 
     /// Before a library is wiped, whatever this person changed in it and
     /// hasn't synced yet gets one push. Rows that were theirs to edit land;
-    /// rows the server refuses (403: a group they've since left) are set
-    /// aside and go with the wipe. Only network trouble stops the swap —
-    /// the wipe waits for a moment when nothing can be lost.
+    /// rows for a group they've since left (403) go with the wipe; any other
+    /// refused row is written to a file first. Network trouble, or every
+    /// row refused, stops the swap: the wipe waits for a moment when
+    /// nothing can be lost.
     private static func salvage(context: ModelContext) async throws {
         let me = SupabaseAuth.shared.userId
         let email = SupabaseAuth.shared.email
@@ -117,14 +118,38 @@ enum SupabaseSync {
             return item.createdBy == nil && item.addedByEmail != nil && item.addedByEmail == email
         }
         guard !mine.isEmpty else { return }
+        var refused: [Row] = []
         do {
             try await upsert(rows: mine.map(row(from:)))
         } catch let error as SyncProblem where error.rowRejected {
             for item in mine {
                 do { try await upsert(rows: [row(from: item)]) } catch let e as SyncProblem where e.rowRejected {
-                    continue
+                    // 403 is a library they've left: not theirs to keep.
+                    if e.status != 403 { refused.append(row(from: item)) }
                 }
             }
+        }
+        guard !refused.isEmpty else { return }
+        // Refused as a whole is the server, not the rows: hold the swap.
+        if refused.count == mine.count {
+            throw SyncProblem(message: "Couldn\u{2019}t save your latest changes. Try again in a moment.")
+        }
+        keepAside(refused)
+    }
+
+    /// Edits the server wouldn't take, written out before a wipe so they
+    /// can still be recovered by hand (Application Support/Set aside).
+    private static func keepAside(_ rows: [Row]) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            let folder = URL.applicationSupportDirectory.appending(path: "Set aside", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let name = "\(Date.now.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false).timeSeparator(.omitted))).json"
+            try encoder.encode(rows).write(to: folder.appending(path: name), options: .atomic)
+        } catch {
+            print("[sync] couldn't set aside \(rows.count) refused edit(s): \(error)")
         }
     }
 
@@ -164,6 +189,21 @@ enum SupabaseSync {
     /// so an edit made mid-sync (or a membership change spotted mid-sync)
     /// is never dropped.
     private static var rerun = false
+
+    /// Saves the pull made whose notices haven't arrived yet. What a pull
+    /// writes is already the server's, so it needs no sync of its own.
+    private static var pullSaves = 0
+
+    /// For each `ModelContext.didSave`: schedules a sync unless the save
+    /// was the pull's own. Notices arrive in order, so the count holds
+    /// even when a person's edit lands while one is in flight.
+    static func saved(context: ModelContext) {
+        if pullSaves > 0 {
+            pullSaves -= 1
+            return
+        }
+        schedule(context: context)
+    }
 
     /// Debounced sync — safe to call on every local save. The debounce is
     /// only the wait; the sync itself runs in its own task, so a later
@@ -641,7 +681,7 @@ enum SupabaseSync {
     private static func announce(_ item: Item, topic: String) async {
         guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return }
         // Undone before the request left: don't put it back.
-        if item.isDeleted { return }
+        if item.isTrashed { return }
         let id = item.id
         let context = item.modelContext
         do {
@@ -650,7 +690,7 @@ enum SupabaseSync {
             guard let item = context?.item(id) else { return }
             // Undone while the upsert was in flight. That write can land
             // after the delete and resurrect the save, so put the delete back.
-            if item.isDeleted {
+            if item.isTrashed {
                 setDeleted(id, true)
                 return
             }
@@ -802,12 +842,19 @@ enum SupabaseSync {
 
         // After a complete snapshot, drop leftovers from another group.
         if let gid = GroupStore.shared.card?.groupId {
-            let leftover = (try? context.fetch(FetchDescriptor<Item>())) ?? []
-            for local in leftover where local.groupId != nil && local.groupId != gid {
-                context.delete(local)
+            let leftover = ((try? context.fetch(FetchDescriptor<Item>())) ?? [])
+                .filter { $0.groupId != nil && $0.groupId != gid }
+            if !leftover.isEmpty {
+                // One may be open: its sheet closes before the row goes.
+                NotificationCenter.default.post(name: .cwgLibraryWillSwap, object: nil)
+                try? await Task.sleep(for: .milliseconds(350))
+                for local in leftover { context.delete(local) }
             }
         }
-        if context.hasChanges { try context.save() }
+        if context.hasChanges {
+            pullSaves += 1
+            do { try context.save() } catch { pullSaves -= 1; throw error }
+        }
         return serverTimes
     }
 

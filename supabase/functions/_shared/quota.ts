@@ -23,34 +23,38 @@ async function coveredByPlus(db: SupabaseClient, userId: string): Promise<boolea
   return (count ?? 0) > 0;
 }
 
-/** Whether today's allowance has room for one more call. Counts nothing. */
-export async function hasQuota(db: SupabaseClient, userId: string): Promise<boolean> {
-  const day = new Date().toISOString().slice(0, 10);
-  const { data: existing } = await db
-    .from("usage_daily")
-    .select("parse, locate, suggest")
-    .eq("user_id", userId)
-    .eq("day", day)
-    .maybeSingle();
-  const used = (existing?.parse ?? 0) + (existing?.locate ?? 0) + (existing?.suggest ?? 0);
-  return used < DAILY.free || (used < DAILY.plus && await coveredByPlus(db, userId));
-}
-
-/** Count one call against today's allowance. */
-export async function chargeQuota(db: SupabaseClient, userId: string, kind: QuotaKind): Promise<boolean> {
-  const day = new Date().toISOString().slice(0, 10);
-  const { error } = await db.rpc("bump_usage", { p_user_id: userId, p_day: day, p_kind: kind });
-  return !error;
-}
-
-/** Increment today's counter. Returns false when the day's allowance is spent. */
-export async function consumeQuota(
+/** Takes one call from today's allowance before it's made, in a single
+ * statement, so requests sent together can't all pass a check that none
+ * of them has counted yet. False when the day is spent. `kindCap` limits
+ * this kind alone as well. */
+export async function reserveQuota(
   db: SupabaseClient,
   userId: string,
   kind: QuotaKind,
+  kindCap?: number,
 ): Promise<boolean> {
-  return await hasQuota(db, userId) && await chargeQuota(db, userId, kind);
+  const day = new Date().toISOString().slice(0, 10);
+  const reserve = async (cap: number) => {
+    const { data, error } = await db.rpc("reserve_usage", {
+      p_user_id: userId,
+      p_day: day,
+      p_kind: kind,
+      p_cap: cap,
+      p_kind_cap: kindCap ?? null,
+    });
+    return !error && data === true;
+  };
+  return await reserve(DAILY.free) || (await coveredByPlus(db, userId) && await reserve(DAILY.plus));
 }
+
+/** Gives back a reservation that wasn't charged after all. */
+export async function releaseQuota(db: SupabaseClient, userId: string, kind: QuotaKind): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { error } = await db.rpc("release_usage", { p_user_id: userId, p_day: day, p_kind: kind });
+  if (error) console.warn("release_usage failed", error.message);
+}
+
+export const consumeQuota = reserveQuota;
 
 /** Opening-hours lookups per person per day: each is a billed Google call,
  * counted apart from the AI allowance. Far more than opening every save. */

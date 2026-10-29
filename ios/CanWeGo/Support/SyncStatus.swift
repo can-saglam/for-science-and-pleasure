@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Observation
+import SwiftData
 
 /// Observable mirror of the sync engine's state, for the UI: the first-pull
 /// loading screen, pull-to-refresh, "Last synced" in Settings, and the
@@ -120,5 +121,21 @@ struct SyncProblem: Error, Equatable {
         self.message = message
         self.detail = detail
         self.status = status
+    }
+}
+
+extension ModelContext {
+    /// Saves, or says so on the sync banner: a change that didn't save is
+    /// on screen but not on disk, and won't sync.
+    func saveOrReport() {
+        do {
+            try save()
+        } catch {
+            print("[store] save failed: \(error)")
+            SyncStatus.shared.problem = SyncProblem(
+                message: "Couldn\u{2019}t save your last change. Try it again.",
+                detail: String(describing: error)
+            )
+        }
     }
 }

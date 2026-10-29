@@ -136,7 +136,7 @@ enum SaveLibrary {
     static func all() -> [Item] {
         guard SupabaseAuth.shared.signedIn, !GroupStore.shared.libraryIsForeign else { return [] }
         let items = (try? LibraryStore.container.mainContext.fetch(FetchDescriptor<Item>())) ?? []
-        return items.filter { !$0.isDeleted }
+        return items.filter { !$0.isTrashed }
     }
 
     /// Still to do: not been, not missed.

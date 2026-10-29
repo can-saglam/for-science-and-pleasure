@@ -424,12 +424,6 @@ verify_jwt = false
 [functions.place-photo]
 verify_jwt = false
 
-[functions.suggest]
-verify_jwt = true
-
-[functions.starters]
-verify_jwt = true
-
 [functions.send-reminders]
 verify_jwt = false
 

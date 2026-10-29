@@ -1,4 +1,5 @@
 import CoreLocation
+import SwiftData
 import SwiftUI
 
 /// The signature look carried over from the web app: every save wears a

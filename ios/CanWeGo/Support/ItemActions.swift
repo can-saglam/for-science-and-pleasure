@@ -4,7 +4,7 @@ import SwiftData
 
 // Actions shared by the detail sheet, swipe actions, and context menus.
 extension Item {
-    var isDeleted: Bool { deletedAt != nil }
+    var isTrashed: Bool { deletedAt != nil }
 
     /// Who saved or last edited this, for sync salvage and "Added by".
     func stampAuthor() {
@@ -18,7 +18,7 @@ extension Item {
         deletedAt = .now
         updatedAt = .now
         stampAuthor()
-        try? modelContext?.save()
+        modelContext?.saveOrReport()
         let id = self.id
         Task { @MainActor in SupabaseSync.setDeleted(id, true) }
     }
@@ -39,7 +39,7 @@ extension Item {
         clearReminder()
         updatedAt = .now
         stampAuthor()
-        try? modelContext?.save()
+        modelContext?.saveOrReport()
     }
 
     /// Back from We Did Go to the active library. A plan it went with is
@@ -50,7 +50,7 @@ extension Item {
         if let planOn, planOn < DayString.today() { clearPlan() }
         updatedAt = .now
         stampAuthor()
-        try? modelContext?.save()
+        modelContext?.saveOrReport()
     }
 
     var coordinate: CLLocationCoordinate2D? {

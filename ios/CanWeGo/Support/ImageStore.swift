@@ -425,8 +425,10 @@ struct CachedImage<Content: View>: View {
                 if let image {
                     phase = .success(Image(uiImage: image))
                     loaded = url
-                } else if loaded == nil {
+                } else {
+                    // Not the old picture: it belongs to the old address.
                     phase = .failure
+                    loaded = nil
                 }
             }
         }

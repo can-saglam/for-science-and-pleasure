@@ -10,7 +10,8 @@
 // counts against the caller's daily limit. Authenticated (member JWT).
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
-import { consumeQuota } from "../_shared/quota.ts";
+import { reserveQuota } from "../_shared/quota.ts";
+import { runCost } from "../_shared/warm_plan.ts";
 import { fallbackStarters, starterKey } from "../_shared/starters.ts";
 import { uncarded } from "../_shared/pick_cards.ts";
 import { cityJobs } from "../_shared/suggestion_jobs.ts";
@@ -35,6 +36,28 @@ interface Row {
   payload: unknown;
   fetched_at: string | null;
   refreshing_since: string | null;
+}
+
+/// Brand-new cities one person can start a search for in a day. Each sets
+/// off several paid searches; someone moving or looking ahead needs one or
+/// two.
+const NEW_CITIES_PER_DAY = 3;
+/// What searches people set off (not the warm-up) may spend in a UTC day.
+/// Past it, cities answer from what's stored, and new ones get starters.
+const ASKS_DAILY_BUDGET_USD = 10;
+
+async function underAskBudget(db: ReturnType<typeof admin>): Promise<boolean> {
+  const since = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+  const { data, error } = await db
+    .from("suggestion_runs")
+    .select("input_tokens, output_tokens, searches")
+    .eq("warm", false)
+    .gte("at", since);
+  if (error) {
+    console.error("suggestion_runs", error.message);
+    return false;
+  }
+  return (data ?? []).reduce((sum, r) => sum + runCost(r), 0) < ASKS_DAILY_BUDGET_USD;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -80,7 +103,8 @@ Deno.serve(async (req) => {
     const placeRow = row("place");
     let events = servePool(eventRow?.payload, "event", today);
     let places = servePool(placeRow?.payload, "place", today);
-    const allowed = eventRow || placeRow ? true : await consumeQuota(db, caller.userId, "suggest");
+    const allowed = await underAskBudget(db) &&
+      (eventRow || placeRow ? true : await reserveQuota(db, caller.userId, "suggest", NEW_CITIES_PER_DAY));
 
     const lastTry = async (kind: SuggestionKind) => {
       const { data } = await db

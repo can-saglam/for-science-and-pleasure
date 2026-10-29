@@ -47,7 +47,7 @@ enum Foldable {
         .zero
         #else
         UIApplication.shared.connectedScenes.lazy
-            .compactMap { $0 as? UIWindowScene }.first?.coordinateSpace.bounds.size ?? .zero
+            .compactMap { $0 as? UIWindowScene }.first?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
         #endif
     }
 }

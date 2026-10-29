@@ -107,7 +107,7 @@ struct LibraryView: View {
     }
 
     private var base: [Item] {
-        library.filter { $0.kind == kind && !$0.isDeleted && !$0.isDone && !$0.isMissed }
+        library.filter { $0.kind == kind && !$0.isTrashed && !$0.isDone && !$0.isMissed }
     }
 
     /// One chip/search filter shared by the active list and the journal.
@@ -211,11 +211,38 @@ struct LibraryView: View {
     /// the home city's picks carry on under it as one more section.
     private static let shortList = 2
 
+    /// Read many times per redraw, so it's worked out once per change.
     private var visible: [Item] {
-        let list = Self.ordered(base.filter(matches), kind: kind)
-        guard nearMe, kind == Item.Kind.place else { return list }
-        return Self.nearestFirst(list)
+        var key = Hasher()
+        for value in [kind, query, category ?? "", area ?? ""] { key.combine(value) }
+        key.combine(openNow)
+        key.combine(nearMe)
+        // Days left, "open now" and "missed" turn over with the clock.
+        key.combine(Int(Date.now.timeIntervalSince1970 / 60))
+        if nearMe, let here = LocationStore.shared.location {
+            key.combine(here.coordinate.latitude)
+            key.combine(here.coordinate.longitude)
+        }
+        // Every edit that syncs moves updatedAt; arranging moves sortOrder.
+        for item in library {
+            key.combine(item.id)
+            key.combine(item.updatedAt)
+            key.combine(item.sortOrder)
+        }
+        let fingerprint = key.finalize()
+        if visibleMemo.fingerprint == fingerprint { return visibleMemo.items }
+        var list = Self.ordered(base.filter(matches), kind: kind)
+        if nearMe, kind == Item.Kind.place { list = Self.nearestFirst(list) }
+        visibleMemo.fingerprint = fingerprint
+        visibleMemo.items = list
+        return list
     }
+
+    private final class VisibleMemo {
+        var fingerprint: Int?
+        var items: [Item] = []
+    }
+    @State private var visibleMemo = VisibleMemo()
 
     /// Closest to the phone first; anything without a pin (or no fix yet)
     /// keeps its place in the list's own order, after the rest.
@@ -360,13 +387,13 @@ struct LibraryView: View {
 
     private var been: [Item] {
         library
-            .filter { $0.kind == kind && !$0.isDeleted && $0.isDone && matches($0) }
+            .filter { $0.kind == kind && !$0.isTrashed && $0.isDone && matches($0) }
             .sorted { $0.wentDate != $1.wentDate ? $0.wentDate > $1.wentDate : newerFirst($0, $1) }
     }
 
     private var missed: [Item] {
         library
-            .filter { $0.kind == kind && !$0.isDeleted && $0.isMissed && $0.endsOn != nil && matches($0) }
+            .filter { $0.kind == kind && !$0.isTrashed && $0.isMissed && $0.endsOn != nil && matches($0) }
             .sorted {
                 ($0.endsOn ?? "") != ($1.endsOn ?? "")
                     ? ($0.endsOn ?? "") > ($1.endsOn ?? "")
@@ -640,7 +667,10 @@ struct LibraryView: View {
         if !sideBySide {
             EmptyView()
         } else if let selected {
-            ItemDetailView(item: selected) { self.selected = nil }
+            // Closing a second after We Did Go: only if it's still the open one.
+            ItemDetailView(item: selected) { [id = selected.id] in
+                if self.selected?.id == id { self.selected = nil }
+            }
                 .id(selected.id)
                 // The pane's own bars stay horizontal, so it can't tell the
                 // app's run down the side: its buttons line up with Add here.
@@ -880,7 +910,7 @@ struct LibraryView: View {
             #if !APP_EXTENSION
             if #available(iOS 27.0, *), let question = askQuestion {
                 AskLibraryRow(question: question, asked: $asked) { id in
-                    selected = items.first { $0.id == id && !$0.isDeleted }
+                    selected = items.first { $0.id == id && !$0.isTrashed }
                 }
                 .cardListRow()
             }
@@ -949,7 +979,7 @@ struct LibraryView: View {
                 if base.isEmpty && !filtered {
                     // Nothing in this tab: the first-time version when the
                     // whole library is new, with things to start from.
-                    let firstTime = !library.contains { !$0.isDeleted }
+                    let firstTime = !library.contains { !$0.isTrashed }
                     EmptyState(
                         title: firstTime ? firstTitle : emptyTitle,
                         message: firstTime ? firstPrompt : emptyPrompt

@@ -11,7 +11,7 @@ enum LibraryExport {
     /// Writes the files into a fresh folder and returns them for the share
     /// sheet. The calendar is left out when nothing has a date.
     static func write(_ items: [Item]) -> [URL] {
-        let live = items.filter { !$0.isDeleted && $0.deletedAt == nil }
+        let live = items.filter { !$0.isTrashed && $0.deletedAt == nil }
             .sorted { ($0.isEvent ? 0 : 1, $0.title.lowercased()) < ($1.isEvent ? 0 : 1, $1.title.lowercased()) }
         let folder = FileManager.default.temporaryDirectory.appending(path: "Can We Go export")
         try? FileManager.default.removeItem(at: folder)

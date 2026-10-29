@@ -352,12 +352,12 @@ final class GroupStore {
         return e
     }()
 
-    private static let fractional: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
-    private static let plain = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let plain = ISO8601DateFormatter()
 
     private func call<T: Decodable>(_ body: [String: Any], as: T.Type) async throws -> T {
         let data = try await raw(body)

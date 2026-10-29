@@ -311,6 +311,7 @@ struct ItemDetailView: View {
         copy.lat = item.lat
         copy.lng = item.lng
         copy.placeId = item.placeId
+        copy.source = item.source
         return copy
     }
 
@@ -348,11 +349,12 @@ struct ItemDetailView: View {
         item.colorHex = scratch.colorHex
         item.lat = scratch.lat
         item.lng = scratch.lng
+        item.source = scratch.source
         item.reconcileReminder()
         item.reconcilePlan()
         item.updatedAt = .now
         item.stampAuthor()
-        try? context.save()
+        context.saveOrReport()
         self.scratch = nil
     }
 

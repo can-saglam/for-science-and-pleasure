@@ -34,9 +34,9 @@ import { groupHome, homeToday } from "../_shared/home.ts";
 import { poolPick, storeCard } from "../_shared/pick_cards.ts";
 import {
   bumpVague,
-  chargeQuota,
-  hasQuota,
   quotaResponse,
+  releaseQuota,
+  reserveQuota,
   VAGUE_STRIKES,
   vagueStrikes,
 } from "../_shared/quota.ts";
@@ -132,6 +132,13 @@ Deno.serve(async (req) => {
   const run: ParseRun = { deadline: started + BUDGET_MS };
   let userId: string | null = null;
   let source = "text";
+  // Taken before the model is asked; given back unless it answered.
+  let reserved = false;
+  const unreserve = async () => {
+    if (!reserved || !userId) return;
+    reserved = false;
+    await releaseQuota(admin(), userId, "parse");
+  };
   try {
     if (!(req.headers.get("Authorization") ?? "").startsWith("Bearer ")) {
       return json({ error: "unauthorized" }, 401);
@@ -185,12 +192,15 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (!picked && !await hasQuota(admin(), caller.userId)) {
-      record(started, source, "over_quota", run);
-      return new Response(quotaResponse().body, {
-        status: 429,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!picked) {
+      reserved = await reserveQuota(admin(), caller.userId, "parse");
+      if (!reserved) {
+        record(started, source, "over_quota", run);
+        return new Response(quotaResponse().body, {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Typed words from someone who has already searched a few times today:
@@ -202,6 +212,7 @@ Deno.serve(async (req) => {
       await looksLikeSearch(text)
     ) {
       record(started, source, "gate", run);
+      await unreserve();
       return json(await vague(caller.userId, new VagueInputError().message), 422);
     }
 
@@ -214,11 +225,14 @@ Deno.serve(async (req) => {
       read = { page: pageFromHtml(body.page_html, link) };
     } else if (link && body.page_fallback === "true") {
       read = { page: await readPage(link) };
-      if (!read.page) return json({ error: "page blocked", code: "page_blocked", url: link }, 409);
+      if (!read.page) {
+        await unreserve();
+        return json({ error: "page blocked", code: "page_blocked", url: link }, 409);
+      }
     }
 
     const finish = async (outcome: Outcome, card?: Awaited<ReturnType<typeof extractCard>>) => {
-      if (answered(outcome) && !picked) await chargeQuota(admin(), caller.userId, "parse");
+      if (!answered(outcome)) await unreserve();
       record(started, source, outcome, run, card);
       if (picked && card) {
         const keep = storeCard(admin(), picked.key, picked.pick, card);
@@ -268,6 +282,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     const { status, body, outcome } = await failure(e, userId);
     record(started, source, outcome, run);
+    await unreserve();
     return json(body, status);
   }
 });

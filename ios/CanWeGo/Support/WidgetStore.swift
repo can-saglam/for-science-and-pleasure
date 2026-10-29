@@ -63,9 +63,11 @@ enum WidgetStore {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
+    nonisolated(unsafe) private static var writing: Task<Void, Never>?
+
     static func sync(items: [Item]) {
         // The widget shows things you could still go to, places included.
-        let active = items.filter { !$0.isDeleted && !$0.isDone && !$0.isMissed }
+        let active = items.filter { !$0.isTrashed && !$0.isDone && !$0.isMissed }
         let entries = active.map { item in
             (
                 entry: Entry(
@@ -89,7 +91,11 @@ enum WidgetStore {
         let lock = lockData(items)
 
         writeTheme(ThemeStore.shared.current)
-        Task.detached(priority: .utility) {
+        // One at a time: a run's sweep would take the photos another run
+        // has just written for items it didn't know about.
+        let previous = writing
+        writing = Task.detached(priority: .utility) {
+            await previous?.value
             guard let directory else { return }
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
@@ -160,7 +166,7 @@ enum WidgetStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let entries = items
-            .filter { !$0.isDeleted && ($0.upcomingPlan != nil || ($0.isEvent && !$0.isDone && !$0.isMissed)) }
+            .filter { !$0.isTrashed && ($0.upcomingPlan != nil || ($0.isEvent && !$0.isDone && !$0.isMissed)) }
             .map { item in
                 LockEntry(
                     id: item.id,

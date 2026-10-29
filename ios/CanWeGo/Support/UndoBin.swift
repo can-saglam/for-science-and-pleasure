@@ -33,6 +33,10 @@ struct ItemSnapshot {
     var placeId: String?
     var showingsJSON: String?
     var addedByEmail: String?
+    var source: String?
+    var groupId: UUID?
+    var createdBy: UUID?
+    var sortOrder: Double?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -48,7 +52,8 @@ extension Item {
             planOn: planOn, planTime: planTime, plannedBy: plannedBy, wentOn: wentOn, price: price,
             category: category, notes: notes, status: status,
             colorHex: colorHex, lat: lat, lng: lng, placeId: placeId, showingsJSON: showingsJSON,
-            addedByEmail: addedByEmail, createdAt: createdAt, updatedAt: updatedAt
+            addedByEmail: addedByEmail, source: source, groupId: groupId, createdBy: createdBy,
+            sortOrder: sortOrder, createdAt: createdAt, updatedAt: updatedAt
         )
     }
 
@@ -83,6 +88,10 @@ extension Item {
         placeId = s.placeId
         showingsJSON = s.showingsJSON
         addedByEmail = s.addedByEmail
+        source = s.source
+        groupId = s.groupId
+        createdBy = s.createdBy
+        sortOrder = s.sortOrder
         createdAt = s.createdAt
         updatedAt = s.updatedAt
     }
@@ -207,7 +216,7 @@ final class UndoBin {
             item.deletedAt = nil
             item.updatedAt = .now
             item.stampAuthor()
-            try? context.save()
+            context.saveOrReport()
             Task { @MainActor in SupabaseSync.setDeleted(item.id, false) }
             clear()
             land(item.id)
@@ -219,7 +228,7 @@ final class UndoBin {
         item.updatedAt = .now
         item.stampAuthor()
         context.insert(item)
-        try? context.save()
+        context.saveOrReport()
         Task { @MainActor in SupabaseSync.setDeleted(item.id, false) }
         clear()
         land(item.id)

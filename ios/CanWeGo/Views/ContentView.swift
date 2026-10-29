@@ -14,7 +14,11 @@ final class PlusButtonFrame {
     /// ever comes back empty.
     var fallback: CGRect = .zero
     var screen: CGRect = .zero
-    var best: CGRect { measured != .zero ? measured : fallback }
+    /// A reading from before a turn or a fold can sit off the new screen.
+    var best: CGRect {
+        let onScreen = measured != .zero && (screen == .zero || screen.contains(CGPoint(x: measured.midX, y: measured.midY)))
+        return onScreen ? measured : fallback
+    }
 
     /// The Add circle when the bars run down the side (iPhone Duo). A
     /// reading left over from the bottom bar, or from before a fold or a
@@ -84,9 +88,18 @@ private struct TabBarAddButtonReader: UIViewRepresentable {
             scheduleRead()
         }
 
+        private var readPending = false
+
         func scheduleRead() {
             // The bar lays out after us; read once this pass has settled.
-            DispatchQueue.main.async { [weak self] in self?.read() }
+            // One read per pass, however many updates asked: each walks
+            // the whole window.
+            guard !readPending else { return }
+            readPending = true
+            DispatchQueue.main.async { [weak self] in
+                self?.readPending = false
+                self?.read()
+            }
         }
 
         /// The bar animates to its new place; a read straight away can
@@ -403,12 +416,12 @@ struct ContentView: View {
         // then refresh the shared URL index.
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active { becameActive() }
-            if phase == .background { WidgetStore.syncLock(items: items.filter { !$0.isDeleted }) }
+            if phase == .background { WidgetStore.syncLock(items: items.filter { !$0.isTrashed }) }
         }
         // Any local save (add, edit, done, delete-undo…) syncs to the shared
         // table after a short debounce.
         .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
-            SupabaseSync.schedule(context: context)
+            SupabaseSync.saved(context: context)
         }
         .sheet(item: $followUp) { PlanFollowUpSheet(items: $0.items) }
     }
@@ -490,7 +503,7 @@ struct ContentView: View {
         let claimedURLs = drainInbox()
         OfflineDrafts.watch(context: context)
         Task { await OfflineDrafts.resume(context: context) }
-        let listed = items.filter { !$0.isDeleted }
+        let listed = items.filter { !$0.isTrashed }
         #if !APP_EXTENSION
         Task { await LiveDay.refresh(items: listed) }
         Task { await WidgetTip.refresh(items: listed) }
@@ -512,7 +525,7 @@ struct ContentView: View {
             await ThumbnailBackfill.run(context: context)
             // The widget's snapshot rebuilds after the pull, so it
             // rotates through the freshest library.
-            WidgetStore.sync(items: items.filter { !$0.isDeleted })
+            WidgetStore.sync(items: items.filter { !$0.isTrashed })
             offerFollowUp()
             await LocationBackfill.run(context: context)
         }
@@ -530,7 +543,7 @@ struct ContentView: View {
     private func drainInbox() -> [String] {
         // Same rule as the share sheet's "already saved": a deleted save
         // doesn't count, and one that just landed does.
-        var existing = Set(items.filter { !$0.isDeleted }.compactMap { $0.url.map(SavedURLIndex.normalize) })
+        var existing = Set(items.filter { !$0.isTrashed }.compactMap { $0.url.map(SavedURLIndex.normalize) })
         var claimed: [Item] = []
         var claimedURLs: [String] = []
         var parked: [(file: String, reason: PlusReason, item: Item)] = []
@@ -668,7 +681,7 @@ struct ContentView: View {
     private func openItem(_ id: UUID) {
         ItemGate.pending = nil
         if let match = items.first(where: { $0.id == id }) {
-            if match.isDeleted { goneItem = true } else { deepLinked = match }
+            if match.isTrashed { goneItem = true } else { deepLinked = match }
             return
         }
         Task {
@@ -677,7 +690,7 @@ struct ContentView: View {
             while SyncStatus.shared.syncing, Date.now < deadline {
                 try? await Task.sleep(for: .milliseconds(200))
             }
-            if let match = context.item(id), !match.isDeleted { deepLinked = match } else { goneItem = true }
+            if let match = context.item(id), !match.isTrashed { deepLinked = match } else { goneItem = true }
         }
     }
 
@@ -706,7 +719,7 @@ struct ContentView: View {
     private var prewarmURLs: [URL] { Self.prewarmURLs(items) }
 
     static func prewarmURLs(_ items: [Item]) -> [URL] {
-        let active = items.filter { !$0.isDeleted && !$0.isDone && !$0.isMissed }
+        let active = items.filter { !$0.isTrashed && !$0.isDone && !$0.isMissed }
         let events = LibraryView.eventSections(
             LibraryView.ordered(active.filter(\.isEvent), kind: Item.Kind.event)
         ).flatMap(\.1)

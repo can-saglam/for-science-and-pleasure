@@ -22,7 +22,10 @@ function words({ status, from, members }) {
 
 export async function onRequestGet({ request, params, env }) {
   const page = await env.ASSETS.fetch(new URL("/join/", request.url));
-  const found = await invite(params.code);
+  const found = await invite(params.code, {
+    visitor: request.headers.get("cf-connecting-ip"),
+    siteKey: env.SITE_LOOKUP_SECRET,
+  });
   if (!found) return page;
   const { title, description } = words(found);
 

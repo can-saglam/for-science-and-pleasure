@@ -12,20 +12,20 @@ extension Item {
 
     /// A plan still ahead, today included, on a save still on the list.
     var upcomingPlan: String? {
-        guard !isDone, !isDeleted, let planOn, planOn >= DayString.today() else { return nil }
+        guard !isDone, !isTrashed, let planOn, planOn >= DayString.today() else { return nil }
         return planOn
     }
 
     /// A plan whose day has gone by, waiting for the morning-after question.
     var planIsOver: Bool {
-        guard !isDone, !isDeleted, let planOn else { return false }
+        guard !isDone, !isTrashed, let planOn else { return false }
         return planOn < DayString.today()
     }
 
     /// The days that can be planned: from today (or the day it opens)
     /// through the day it closes, at most a year out. Nil when none are left.
     var plannableDays: ClosedRange<String>? {
-        guard !isDone, !isDeleted else { return nil }
+        guard !isDone, !isTrashed else { return nil }
         let today = DayString.today()
         var first = today
         var last = DayString.addingDays(Self.planHorizonDays, to: today) ?? today

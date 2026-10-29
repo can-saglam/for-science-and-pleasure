@@ -119,7 +119,7 @@ final class Suggestions {
         let today = DayString.today()
         var savedLinks = Set<String>()
         var savedTitles = Set<String>()
-        for item in saved where !item.isDeleted {
+        for item in saved where !item.isTrashed {
             if let link = item.url.flatMap(Self.linkKey) { savedLinks.insert(link) }
             savedTitles.insert(item.title.lowercased())
         }

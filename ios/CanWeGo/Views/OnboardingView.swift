@@ -1536,7 +1536,7 @@ struct OnboardingView: View {
                 note = "Couldn't sync your latest edits. Try again once you're back online."
                 return
             }
-            try await group.join(code: code, keepCopy: false)
+            _ = try await group.join(code: code, keepCopy: false)
             let landed = await SupabaseSync.replaceLibrary(context: context)
             guard landed else {
                 note = "You're in the group, but this phone couldn't refresh the library. Open the app again when you're online."
@@ -2193,7 +2193,7 @@ struct OnboardingView: View {
             Task { @MainActor in
                 defer { reading.remove(item.id) }
                 guard let card = try? await ParseClient.parse(text: url, imageJPEG: nil),
-                      !item.isDeleted
+                      !item.isTrashed
                 else { return }
                 item.take(card)
                 guard !preview, item.modelContext != nil else { return }

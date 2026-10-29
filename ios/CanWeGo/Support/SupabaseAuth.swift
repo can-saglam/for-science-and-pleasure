@@ -248,9 +248,15 @@ final class SupabaseAuth {
             return fresh.accessToken
         } catch {
             refreshTask = nil
-            // 4xx means the token family is dead — no retry can save it.
-            // Anything else (offline, 5xx) keeps the session for next time.
-            if let rejection = error as? AuthError, (400...499).contains(rejection.status) {
+            // A refused token means the family is dead, unless the share
+            // extension renewed with it first: then its session is the
+            // live one. Anything else (offline, rate limited, 5xx) keeps
+            // the session for next time.
+            if let rejection = error as? AuthError, [400, 401, 403].contains(rejection.status) {
+                if let stored = storedSession(), stored.refreshToken != current.refreshToken, !Self.signedOutFlag {
+                    session = stored
+                    return try await validToken()
+                }
                 signOut(expired: true)
                 sessionExpired = true
             }

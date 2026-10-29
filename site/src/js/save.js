@@ -72,7 +72,9 @@ function show({ card, from }) {
   fill("address", card.address);
 
   if (card.url) link("page", card.url);
-  $("page").textContent = card.kind === "place" ? "Website" : "Event page";
+  // Where it leads, so a card can't pass off a stranger's page as the event's.
+  const host = card.url ? new URL(card.url).hostname.replace(/^www\./, "") : "";
+  $("page").textContent = `${card.kind === "place" ? "Website" : "Event page"}${host ? ` · ${host}` : ""}`;
   const maps = directions(card);
   if (maps) link("directions", maps);
   if (on && !on.over && token.length === 10) link("calendar", `/s/${token}/calendar`);

@@ -9,12 +9,15 @@ export function cleanCode(raw) {
   return /^[A-HJ-NP-Z2-9]{6}$/.test(code) ? code : null;
 }
 
-/** { status, from, members } for a code, or null when it's unknown (or slow). */
-export async function invite(raw) {
+/** { status, from, members } for a code, or null when it's malformed (or
+ * slow). The visitor's address goes along, so the share function limits
+ * guessing per person rather than per Cloudflare server. */
+export async function invite(raw, { visitor, siteKey } = {}) {
   const code = cleanCode(raw);
   if (!code) return null;
+  const headers = visitor && siteKey ? { "x-visitor-ip": visitor, "x-site-key": siteKey } : {};
   try {
-    const res = await fetch(`${API}?i=${code}`, { signal: AbortSignal.timeout(4000), cf: { cacheTtl: 60 } });
+    const res = await fetch(`${API}?i=${code}`, { headers, signal: AbortSignal.timeout(4000) });
     if (!res.ok) return null;
     const body = await res.json();
     return body.status ? body : null;

@@ -967,7 +967,7 @@ struct PlanSheet: View {
             item.clearPlan()
         }
         item.updatedAt = .now
-        try? context.save()
+        context.saveOrReport()
         if moved { Task { [item] in await SupabaseSync.announcePlan(item) } }
         onFinish?()
         dismiss()

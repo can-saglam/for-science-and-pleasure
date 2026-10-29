@@ -108,10 +108,17 @@ enum SharedInbox {
         else { return [] }
 
         var claims: [Claim] = []
+        let monthAgo = Date.now.addingTimeInterval(-30 * 86_400)
         for file in files where file.pathExtension == "json" {
             guard let data = try? Data(contentsOf: file),
                   let save = try? JSONDecoder().decode(PendingSave.self, from: data)
-            else { continue }
+            else {
+                // Kept a while in case a newer build reads it; past a
+                // month it's never going to.
+                let made = (try? file.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+                if let made, made < monthAgo { try? FileManager.default.removeItem(at: file) }
+                continue
+            }
             if let owner = save.userId, let me = userId, owner.lowercased() != me.uuidString.lowercased() {
                 continue
             }
