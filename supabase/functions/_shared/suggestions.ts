@@ -10,8 +10,10 @@ import { colorFromImageUrl, heroImageFromUrl } from "./color.ts";
 import { cleanLink, type extractCard, linkKey, ownPage } from "./extract.ts";
 import type { Home } from "./home.ts";
 import { publicFetch } from "./netguard.ts";
-import { findPlace, isVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
+import { findPlace, isVenue, namedVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
 import { AGGREGATOR_RE } from "./starters.ts";
+
+export { namedVenue };
 
 export type SuggestionKind = "event" | "place";
 
@@ -234,14 +236,6 @@ export function undressed(items: Suggestion[]): boolean {
 /// being dressed join once they have one (`pictures_coming`).
 export function forPhone(items: Suggestion[]): Suggestion[] {
   return items.filter((s) => typeof s.image === "string" && s.image.length > 0);
-}
-
-/// A venue worth finding on a map: not "Various venues", "Online", "TBA".
-export function namedVenue(venue: string | null | undefined): string | null {
-  const v = venue?.trim();
-  if (!v || v.length < 3) return null;
-  if (/^(various|multiple|several|online|virtual|tba|tbc|secret|across|all over)\b/i.test(v)) return null;
-  return v;
 }
 
 /// A pool stored before the chip named what each pick is.

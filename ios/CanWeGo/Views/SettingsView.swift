@@ -92,8 +92,6 @@ struct SettingsView: View {
                     groupHeader
                     Section {
                         homeCityRow
-                    } header: {
-                        SettingsSectionHeader("Finding things")
                     }
                     .listRowBackground(Self.rowBackground)
                 } else {
@@ -112,8 +110,6 @@ struct SettingsView: View {
                         } label: { EmptyView() }
                     }
                     .sensoryFeedback(.selection, trigger: transportApp)
-                } header: {
-                    SettingsSectionHeader("Making plans")
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -128,8 +124,6 @@ struct SettingsView: View {
                         theme.wrappedValue = option
                     }
                     .padding(.vertical, 6)
-                } header: {
-                    SettingsSectionHeader("Look")
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -145,8 +139,6 @@ struct SettingsView: View {
                         ) {
                             path.append(.account)
                         }
-                    } header: {
-                        SettingsSectionHeader("You")
                     }
                     .listRowBackground(Self.rowBackground)
                 }
@@ -312,7 +304,7 @@ struct SettingsView: View {
             groupUI.editingHome = true
         } label: {
             HStack {
-                SettingsRow(title: "Home city", subtitle: "Where we look for picks, and where the map opens")
+                SettingsRow(title: "Home city")
                 Spacer(minLength: 8)
                 Text(home ?? "Not set")
                     .foregroundStyle(AppBackground.secondaryInk)
@@ -472,11 +464,9 @@ struct SettingsView: View {
                 get: { liveActivities && activitiesAllowed },
                 set: { liveActivities = $0 }
             )) {
-                SettingsRow(
-                    title: "Use Live Activities",
-                    subtitle: "Plans and reminders stay on your Lock Screen on the day, instead of a notification."
-                )
+                SettingsRow(title: "Use Live Activities")
             }
+            .accessibilityHint("Plans and reminders stay on your Lock Screen on the day, instead of a notification.")
             .disabled(!activitiesAllowed)
             .tint(AppBackground.toggleTint)
             .sensoryFeedback(.selection, trigger: liveActivities)
@@ -484,8 +474,6 @@ struct SettingsView: View {
                 Task { await LiveDay.set(on) }
             }
             notificationsRow
-        } header: {
-            SettingsSectionHeader("On the day")
         } footer: {
             // Footers here (and in GroupSection) spell out `.footnote`:
             // when a menu picker opens or closes, the List re-measures
@@ -549,7 +537,6 @@ struct SettingsView: View {
 
     private var notificationSummary: String? {
         switch notificationStatus {
-        case .authorized, .provisional, .ephemeral: "Reminders, plans and what your group adds"
         case .denied: "Turn them on in iPhone Settings"
         case .notDetermined: "Tap to turn them on"
         default: nil
@@ -627,12 +614,6 @@ struct SettingsView: View {
                                 .foregroundStyle(AppBackground.ink.opacity(0.45))
                         }
                     }
-                } header: {
-                    SettingsSectionHeader("Your saves")
-                } footer: {
-                    Text("A spreadsheet, a calendar file and a readable list, to keep or move elsewhere.")
-                        .font(.footnote)
-                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 .listRowBackground(Self.rowBackground)
 
@@ -730,7 +711,7 @@ struct SettingsView: View {
         // `listRowInsets` the outermost modifier on the row — anything
         // wrapped around it hides the insets from the List.
         .frame(minHeight: 34)
-        .listRowInsets(EdgeInsets(top: 9, leading: 20, bottom: 9, trailing: 20))
+        .listRowInsets(.vertical, 9)
     }
 
     #if !APP_EXTENSION
@@ -739,7 +720,7 @@ struct SettingsView: View {
     /// someone who taps here asking for them.
     @ViewBuilder private var calendarRow: some View {
         if calendarAccess == .fullAccess {
-            menuRow("Calendar", subtitle: Self.calendarNote) {
+            menuRow("Calendar") {
                 // Unset follows the iPhone's default, shown by its name;
                 // only a pick writes the setting.
                 Picker(selection: Binding(
@@ -773,17 +754,15 @@ struct SettingsView: View {
                     }
                     .foregroundStyle(AppBackground.secondaryInk)
                 } label: {
-                    SettingsRow(title: "Calendar", subtitle: Self.calendarNote)
+                    SettingsRow(title: "Calendar")
                 }
             }
             .buttonStyle(.plain)
             .accessibilityHint("Choose a calendar. iOS will ask to let Can We Go see your calendars.")
             .frame(minHeight: 34)
-            .listRowInsets(EdgeInsets(top: 9, leading: 20, bottom: 9, trailing: 20))
+            .listRowInsets(.vertical, 9)
         }
     }
-
-    private static let calendarNote = "Where plans go when you add them to your calendar"
 
     /// A calendar that's gone falls back to the default, so the picker
     /// never shows a blank value.

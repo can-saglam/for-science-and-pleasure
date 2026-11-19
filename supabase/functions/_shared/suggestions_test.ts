@@ -346,6 +346,9 @@ Deno.test("namedVenue: somewhere on a map, not a vague answer", () => {
   assertEquals(namedVenue("Pasir Panjang Power Station"), "Pasir Panjang Power Station");
   assertEquals(namedVenue("Various London venues"), null);
   assertEquals(namedVenue("Online"), null);
+  assertEquals(namedVenue("Online event"), null);
+  assertEquals(namedVenue("Livestream"), null);
+  assertEquals(namedVenue("Onlineshop Café"), "Onlineshop Café");
   assertEquals(namedVenue("  "), null);
   assertEquals(namedVenue(null), null);
 });

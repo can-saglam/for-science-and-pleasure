@@ -25,15 +25,15 @@ struct LibraryView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.horizontalSizeClass) private var widthClass
     // Seeded from the window, so a cold open on iPhone Duo held sideways
     // has both columns from the first frame; layout corrects them after.
     @State private var screenWidth: CGFloat = Foldable.launchSize.width
-    @State private var paneOpen = Foldable.opensWide(Foldable.launchSize)
     /// `sideBySide` as last laid out. The drawer's binding outlives the
-    /// view value it was made from, size class and all, so it reads this.
+    /// view value it was made from, widths and all, so it reads this.
     @State private var paneTakesOver = false
     @State private var contentWidth: CGFloat = 0
+    /// The side bars' column: the window's width less the content's.
+    @State private var barColumn: CGFloat = 0
     /// Where the bars run on iPhone Duo; nil when they're top and bottom.
     @State private var barsEdge: HorizontalEdge? = Foldable.opensWide(Foldable.launchSize) ? .trailing : nil
     /// The stale-sync pill's sideways drag, on its way to being dismissed.
@@ -515,7 +515,11 @@ struct LibraryView: View {
             // No navigation title: the wordmark owns the leading edge, and
             // the bottom bar already says which tab you're on.
             .navigationBarTitleDisplayMode(.inline)
-            .logoTitle(refreshing: refreshing, pull: pull, width: barsEdge == nil ? nil : max(contentWidth - 40, 0))
+            // Mid-fold the column still measures the open display's width;
+            // a wordmark that wide gets moved into the bar's overflow menu,
+            // and doesn't always come back.
+            .logoTitle(refreshing: refreshing, pull: pull, width: barsEdge == nil ? nil
+                : max(min(contentWidth, Foldable.sceneSize.width - barColumn) - 40, 0))
             .onBarsEdgeChange {
                 barsEdge = $0
                 SideBars.shared.edge = $0
@@ -594,25 +598,20 @@ struct LibraryView: View {
             // one display is still open on the other.
             .environment(\.openSaveID, sideBySide ? selected?.id : nil)
             .sheet(item: drawerItem) { ItemDetailView(item: $0) }
-            .inspector(isPresented: $paneOpen) {
-                sidePane
-                    .inspectorColumnWidth(min: 340, ideal: 400, max: 460)
-            }
+            // A column of our own rather than an inspector: folding narrows
+            // the window before an inspector can close, and the system
+            // shows it as a sheet on its way out.
+            .modifier(BesideList(shown: sideBySide) { sidePane })
             // Measured outside the pane, so opening it can't shrink the
             // width that decided to open it.
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { screenWidth = $0 }
-            // The system closes the pane itself while the phone turns; if
-            // there's still room once it settles, it comes straight back.
-            // The pane is part of the layout, not something that arrives:
-            // no slide in at launch, or after a turn.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                screenWidth = $0
+                // Mid-fold this is the old display's width: not a column.
+                let column = Foldable.sceneSize.width - $0
+                if column > 0 { barColumn = column }
+            }
             .onChange(of: sideBySide, initial: true) { _, wide in
                 paneTakesOver = wide
-                setPane(wide)
-            }
-            .onChange(of: paneOpen) { _, open in
-                if !open && sideBySide {
-                    Task { if sideBySide { setPane(true) } }
-                }
             }
             // The library is about to be replaced: the open item won't exist.
             .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
@@ -639,15 +638,11 @@ struct LibraryView: View {
     /// open as the drawer there, as on any phone. Side bars keep it to the
     /// Duo: a big iPhone held sideways is wide enough too, but keeps the
     /// drawer. An empty tab has nothing to pick, so its first-run state
-    /// keeps the whole width.
+    /// keeps the whole width. Not the size class: folding, it turns compact
+    /// a frame before the window narrows, and the list would spread across
+    /// the old display, pushing the wordmark into the bar's overflow menu.
     private var sideBySide: Bool {
-        widthClass == .regular && screenWidth >= 760 && barsEdge != nil && !base.isEmpty
-    }
-
-    private func setPane(_ open: Bool) {
-        var still = Transaction()
-        still.disablesAnimations = true
-        withTransaction(still) { paneOpen = open }
+        screenWidth >= 760 && barsEdge != nil && !base.isEmpty
     }
 
     /// The drawer's share of the selection. Handing over to the pane closes
@@ -660,20 +655,15 @@ struct LibraryView: View {
         )
     }
 
-    /// Empty while hidden: a closed inspector still hands its content's
-    /// toolbar to the bar.
     @ViewBuilder
     private var sidePane: some View {
-        if !sideBySide {
-            EmptyView()
-        } else if let selected {
+        if let selected {
             // Closing a second after We Did Go: only if it's still the open one.
             ItemDetailView(item: selected) { [id = selected.id] in
                 if self.selected?.id == id { self.selected = nil }
             }
                 .id(selected.id)
-                // The pane's own bars stay horizontal, so it can't tell the
-                // app's run down the side: its buttons line up with Add here.
+                // Its buttons line up with the side bar's Add.
                 .environment(\.floatingRowMatch, barsEdge != nil ? PlusButtonFrame.shared.side : nil)
         } else {
             EmptyState(
@@ -1438,6 +1428,23 @@ struct LibraryView: View {
 ///
 /// Deliberately its own view so a chip toggle re-renders only this row,
 /// not the whole page (sections, sorts and all) behind it.
+/// The side pane: a column after the list's, inside the same navigation,
+/// so a save's buttons join the app's side bar.
+private struct BesideList<Pane: View>: ViewModifier {
+    let shown: Bool
+    @ViewBuilder let pane: () -> Pane
+
+    func body(content: Content) -> some View {
+        HStack(spacing: 0) {
+            content
+            if shown {
+                pane()
+                    .frame(width: 400)
+            }
+        }
+    }
+}
+
 private struct ChipRow: View {
     let categories: [String]
     /// Free groups only: active saves per category key, for the "3/4"

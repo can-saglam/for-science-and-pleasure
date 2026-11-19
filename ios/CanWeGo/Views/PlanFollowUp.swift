@@ -55,7 +55,10 @@ struct PlanFollowUpSheet: View {
                 next()
             }
         }) { item in
-            PlanSheet(item: item) { replanned = true }
+            PlanSheet(item: item) {
+                answered.insert(item.id)
+                replanned = true
+            }
         }
         .onDisappear {
             // Closed because the library is being replaced: not an answer.
@@ -108,6 +111,8 @@ struct PlanFollowUpSheet: View {
 
                 Button {
                     Haptics.tap()
+                    answered.insert(item.id)
+                    clear(item)
                     next()
                 } label: {
                     Text("Keep it in the list")
@@ -117,6 +122,22 @@ struct PlanFollowUpSheet: View {
                 }
                 .buttonStyle(.glass)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            Button {
+                Haptics.tap()
+                withAnimation(.snappy) { askingAgain = false }
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppBackground.ink)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .accessibilityLabel("Back")
+            .padding(16)
         }
     }
 
@@ -218,13 +239,14 @@ struct PlanFollowUpSheet: View {
         next()
     }
 
+    /// The plan stays until "Another day?" is answered, so Back can undo it.
     private func notThisTime(_ item: Item) {
         Haptics.tap()
-        answered.insert(item.id)
-        clear(item)
         if item.canPlan {
             withAnimation(.snappy) { askingAgain = true }
         } else {
+            answered.insert(item.id)
+            clear(item)
             next()
         }
     }

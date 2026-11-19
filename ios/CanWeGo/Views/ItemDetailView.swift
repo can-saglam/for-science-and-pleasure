@@ -96,7 +96,7 @@ struct ItemDetailView: View {
     private var rowIntoBarColumn: Bool { onClose == nil && barsEdge == .trailing && sideInsets.trailing > 48 }
 
     var body: some View {
-        NavigationStack {
+        withOwnBars {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if let hero = heroURL, !editing {
@@ -122,6 +122,7 @@ struct ItemDetailView: View {
                     .task(id: item.showsHours ? item.placeId : nil) { await loadHours() }
                 }
             }
+            .keepsNavigationBar(onClose != nil)
             // With a hero, the photo runs edge-to-edge under the controls.
             .ignoresSafeArea(edges: photoUnderBar ? [.top, .horizontal] : showsHero ? .top : [])
             .scrollDismissesKeyboard(.interactively)
@@ -160,7 +161,7 @@ struct ItemDetailView: View {
             #if !APP_EXTENSION
             .appEntityIdentifier(EntityIdentifier(for: SaveEntity.self, identifier: item.id))
             #endif
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarBackground(onClose == nil ? .hidden : .automatic, for: .navigationBar)
             // In the side pane the buttons live in the app's side bar, so
             // nothing up top needs the photo frosted behind it.
             .scrollEdgeEffectHidden(onClose != nil, for: .top)
@@ -172,10 +173,17 @@ struct ItemDetailView: View {
                             applyEdits()
                             withAnimation(.snappy) { editing = false }
                         } label: {
-                            Text("Done").font(.subheadline.weight(.semibold))
+                            // The side bar takes icons; words would be moved
+                            // up over the list.
+                            if onClose != nil {
+                                Image(systemName: "checkmark").fontWeight(.semibold)
+                            } else {
+                                Text("Done").font(.subheadline.weight(.semibold))
+                            }
                         }
                         .accessibilityLabel("Finish editing")
                     }
+                    .keptVisible(.high)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     if editing {
@@ -186,7 +194,11 @@ struct ItemDetailView: View {
                             scratch = nil
                             withAnimation(.snappy) { editing = false }
                         } label: {
-                            Text("Cancel").font(.subheadline)
+                            if onClose != nil {
+                                Image(systemName: "xmark")
+                            } else {
+                                Text("Cancel").font(.subheadline)
+                            }
                         }
                         .accessibilityLabel("Cancel editing")
                     } else {
@@ -266,6 +278,17 @@ struct ItemDetailView: View {
 
     private func close() {
         if let onClose { onClose() } else { dismiss() }
+    }
+
+    /// The drawer has bars of its own. Beside the list, its buttons join
+    /// the library's, in the app's side bar.
+    @ViewBuilder
+    private func withOwnBars(@ViewBuilder _ page: () -> some View) -> some View {
+        if onClose == nil {
+            NavigationStack { page() }
+        } else {
+            page()
+        }
     }
 
     /// Same button, new label, then the drawer leaves. `markDone` waits

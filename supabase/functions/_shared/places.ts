@@ -19,6 +19,15 @@ function apiKey(): string | null {
   return Deno.env.get("GOOGLE_MAPS_API_KEY") || null;
 }
 
+/// A venue worth finding on a map: not "Various venues", "Online", "TBA".
+/// Searched for, those names find a business or a town called that.
+export function namedVenue(venue: string | null | undefined): string | null {
+  const v = venue?.trim();
+  if (!v || v.length < 3 || /^https?:\/\//.test(v)) return null;
+  if (/^(various|multiple|several|online|virtual|livestream|live stream|tba|tbc|secret|across|all over)\b/i.test(v)) return null;
+  return v;
+}
+
 export interface PlaceMatch {
   id: string;
   name: string;
@@ -270,8 +279,8 @@ export async function eventVenue(
   coords: { lat: number; lng: number } | null,
   known: PlaceMatch | null = null,
 ): Promise<PlaceMatch | null> {
-  const venue = card.venue?.trim();
-  if (!venue || /^https?:\/\//.test(venue)) return null;
+  const venue = namedVenue(card.venue);
+  if (!venue) return null;
   let match = known;
   if (!match && coords) match = await findPlace(venue, card, home, coords, { samePostcode: true });
   match ??= await findPlace(venue, card, home, null, { samePostcode: true });

@@ -10,7 +10,7 @@ import {
 } from "./color.ts";
 import { corsHeaders, geocode, resolveMapsLink } from "./geo.ts";
 import { hoursApply } from "./hours.ts";
-import { eventVenue, findPlace, isVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
+import { eventVenue, findPlace, isVenue, namedVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
 import {
   geocodeNearHome,
   type Home,
@@ -171,7 +171,7 @@ const cardSchema = (home: Home) => ({
       type: ["string", "null"],
       description: "One sentence on what it is and why it's interesting",
     },
-    venue: { type: ["string", "null"], description: "Venue or institution name" },
+    venue: { type: ["string", "null"], description: "Venue or institution name; 'Online' for an event held only online" },
     area: {
       type: ["string", "null"],
       description:
@@ -961,17 +961,21 @@ export async function extractCard(
   if (!coords && card.address) {
     coords = await inTime("geocode", () => geocodeNearHome(geocode, card.address!, home), null);
   }
-  if (!coords && (card.venue || card.area)) {
+  // "Online" or "TBA" is nowhere: searched for, it finds a town or a shop
+  // of that name, so such a card stays without a pin.
+  const venue = namedVenue(card.venue);
+  const nowhere = Boolean(card.venue?.trim()) && !venue;
+  if (!coords && !nowhere && (venue || card.area)) {
     coords = await inTime("geocode", () =>
       geocodeNearHome(
         geocode,
-        [card.venue ?? card.title, card.area].filter(Boolean).join(", "),
+        [venue ?? card.title, card.area].filter(Boolean).join(", "),
         home,
       ), null);
   }
   // An event at a venue nothing else could place: ask Google for the venue.
-  if (!coords && card.kind === "event" && card.venue) {
-    google = await inTime("venue", () => findPlace(card.venue!, card, home, null, { samePostcode: true }), null);
+  if (!coords && card.kind === "event" && venue) {
+    google = await inTime("venue", () => findPlace(venue, card, home, null, { samePostcode: true }), null);
     if (google?.lat != null && google.lng != null) {
       coords = { lat: google.lat, lng: google.lng };
       card.address ??= google.address;

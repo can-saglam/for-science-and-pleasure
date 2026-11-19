@@ -50,6 +50,10 @@ enum Foldable {
             .compactMap { $0 as? UIWindowScene }.first?.effectiveGeometry.coordinateSpace.bounds.size ?? .zero
         #endif
     }
+
+    /// The app's size now. Read while drawing, it's already the new
+    /// display's during a fold, when measured sizes still hold the old one.
+    @MainActor static var sceneSize: CGSize { launchSize }
 }
 
 /// Where the app's bars run, as the library last saw them, for views that
@@ -86,6 +90,19 @@ extension View {
     /// the top and bottom as usual. Read inside a navigation stack.
     func onBarsEdgeChange(_ action: @escaping (HorizontalEdge?) -> Void) -> some View {
         modifier(BarsEdgeReader(action: action))
+    }
+
+    /// A scroll view that leaves the navigation bar be. Beside the
+    /// library's list, a save's page shares the list's bar: scrolled, it
+    /// would tuck the wordmark away and the list would ride up into its
+    /// room.
+    @ViewBuilder
+    func keepsNavigationBar(_ on: Bool = true) -> some View {
+        if #available(iOS 27.0, *), on {
+            toolbarMinimizationBehavior(.never, for: .navigationBar)
+        } else {
+            self
+        }
     }
 }
 
@@ -129,7 +146,11 @@ private struct BarsEdgeReader: ViewModifier {
         let action: (HorizontalEdge?) -> Void
 
         func body(content: Content) -> some View {
-            content.onChange(of: edge, initial: true) { _, edge in action(edge) }
+            content
+                .onChange(of: edge, initial: true) { _, edge in action(edge) }
+                // Unfolding, the edge flips back and forth and the last
+                // change can go unreported; the size settles after it.
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in action(edge) }
         }
     }
 }

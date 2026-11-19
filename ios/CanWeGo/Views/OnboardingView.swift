@@ -168,6 +168,7 @@ struct OnboardingView: View {
 
     @State private var busy = false
     @State private var pageWidth: CGFloat = 402
+    @State private var pageHeight: CGFloat = 720
     /// Everything that should freeze the bottom bar, not just server writes.
     private var frozen: Bool { busy || signingIn }
     @State private var note: String?
@@ -192,15 +193,19 @@ struct OnboardingView: View {
                     // The front door is centred; every question starts at
                     // the same height, so headlines don't hop as pages turn —
                     // except home, which sits lower to leave the map in view.
+                    // Side by side the questions are a phone's width, centred.
                     pageBody
                         .id(page)
                         .transition(.opacity)
+                        .frame(maxWidth: sideBySide && page != .welcome ? 440 : .infinity)
                         .padding(.horizontal, 28)
                         .padding(.top, topInset(in: geo.size.height))
+                        .padding(.top, sideBySide ? 36 : 0)
+                        .padding(.bottom, sideBySide ? 12 : 0)
                         .frame(
                             maxWidth: .infinity,
                             minHeight: geo.size.height,
-                            alignment: [.welcome, .notify, .done].contains(page) ? .center : .top
+                            alignment: centred ? .center : .top
                         )
                 }
                 .scrollDismissesKeyboard(.interactively)
@@ -209,8 +214,11 @@ struct OnboardingView: View {
                 // scroll, so a keyboard can get out of the way.
                 .scrollDisabled(page == .welcome)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
             }
-            .safeAreaPadding(.bottom, page == .welcome ? 0 : 84)
+            // Open, iPhone Duo is short for its width: the tiles and a code
+            // only fit with less air over the bar.
+            .safeAreaPadding(.bottom, page == .welcome ? 0 : sideBySide ? 24 : 84)
             // The welcome cards live above the pages and follow a slot on
             // each, so signing in squares the same fan into the intro's stack.
             .overlayPreferenceValue(DeckSlotKey.self) { slots in
@@ -415,18 +423,25 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 28)
         .padding(.bottom, 10)
+        // iPhone Duo's status column only fills the top of its side;
+        // the bar runs under it, the full width of the display.
+        .ignoresSafeArea(.container, edges: .horizontal)
     }
 
     private static let control: CGFloat = 56
     /// Clears the preview's close button with room to spare.
     private static let headlineTop: CGFloat = 100
 
+    private var centred: Bool {
+        [.welcome, .notify, .done].contains(page) || sideBySide && page != .home
+    }
+
     private func topInset(in height: CGFloat) -> CGFloat {
-        switch page {
-        case .welcome, .notify, .done: 0
-        case .intro: 76
+        if centred { return 0 }
+        return switch page {
+        case .intro: tight ? 52 : 76
         case .home: max(Self.headlineTop, height * 0.34)
-        default: Self.headlineTop
+        default: tight ? Self.headlineTop - 28 : Self.headlineTop
         }
     }
 
@@ -574,8 +589,10 @@ struct OnboardingView: View {
         }
     }
 
+    /// The breaks are a phone's; the open Duo's column is wide enough
+    /// to run most on one line, and short enough that it needs to.
     private func headline(_ text: String) -> some View {
-        Text(text)
+        Text(sideBySide ? text.replacingOccurrences(of: "\n", with: " ") : text)
             .font(.displaySmallBold(38, relativeTo: .largeTitle))
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -648,7 +665,9 @@ struct OnboardingView: View {
             .font(.footnote)
             .foregroundStyle(note == nil ? Color.clear : AppBackground.warning)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .topLeading)
+            // Held open so a note doesn't push the page, except side by
+            // side, where the height is short and the page is centred anyway.
+            .frame(maxWidth: .infinity, minHeight: sideBySide && note == nil ? 0 : 36, alignment: .topLeading)
             .accessibilityHidden(note == nil)
     }
 
@@ -660,27 +679,29 @@ struct OnboardingView: View {
     /// lands. New accounts arrive with a name, so the name page is never
     /// asked of them; returning ones skip the whole run.
     private var welcomePage: some View {
-        VStack(spacing: 22) {
-            deckSlot(.welcome, height: 250)
-                .padding(.bottom, 18)
-            LogoTitle(height: 52, writes: .onboarding)
-            Text(auth.sessionExpired && !preview
-                 ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
-                 : "For all the places you\u{2019}ll go!")
-                .font(.displaySmallBold(23, relativeTo: .title3))
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if needsSignIn || unreachable || signingIn || preview || auth.signedIn {
-                signInBlock
-                    .padding(.top, 12)
+        Group {
+            if sideBySide {
+                // The fan on one side of the fold, the door on the other:
+                // the library's list and pane, before there's a library.
+                HStack(spacing: 0) {
+                    deckSlot(.welcome, height: 270)
+                    frontDoor
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                VStack(spacing: 22) {
+                    deckSlot(.welcome, height: 250)
+                        .padding(.bottom, 18)
+                    frontDoor
+                }
             }
-
-            legalLine
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 40)
+        // A tall phone wants it a little above centre. iPhone Duo's
+        // displays are near square: dead centre, the home indicator's
+        // inset evened out.
+        .padding(Foldable.rotates(Foldable.sceneSize) ? .top : .bottom,
+                 Foldable.rotates(Foldable.sceneSize) ? 20 : 40)
         .animation(ease, value: signingIn)
         .animation(ease, value: unreachable)
         .onAppear {
@@ -696,6 +717,35 @@ struct OnboardingView: View {
                 try? await Task.sleep(for: .seconds(1.3))
                 drift = true
             }
+        }
+    }
+
+    /// iPhone Duo open and held sideways: too wide for one column.
+    private var sideBySide: Bool { pageWidth >= 760 }
+
+    /// Short of a phone's height: iPhone Duo open or folded, iPhone SE.
+    /// The page's height, less the bar and the room over it: ~630 on a
+    /// Pro, ~580 on a mini, ~510 folded.
+    private var tight: Bool { sideBySide || pageHeight < 560 }
+
+    private var frontDoor: some View {
+        VStack(spacing: 22) {
+            LogoTitle(height: 52, writes: .onboarding)
+            Text(auth.sessionExpired && !preview
+                 ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
+                 : "For all the places you\u{2019}ll go!")
+                .font(.displaySmallBold(23, relativeTo: .title3))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if needsSignIn || unreachable || signingIn || preview || auth.signedIn {
+                signInBlock
+                    .frame(maxWidth: sideBySide ? 312 : nil)
+                    .padding(.top, 12)
+            }
+
+            legalLine
         }
     }
 
@@ -778,6 +828,9 @@ struct OnboardingView: View {
     /// How far a real card tucks under the one behind it: the place line
     /// goes under whole, so only the title shows.
     private static let fanOverlap: CGFloat = 36
+    /// A short display's fan is shrunk whole, so the titles keep their
+    /// phone lines.
+    private var fanScale: CGFloat { tight ? 0.84 : 1 }
 
     /// "+2" on the front card's corner: saves beyond the ones a fan shows.
     /// Lands after the last card does.
@@ -856,7 +909,12 @@ struct OnboardingView: View {
                     .animation(ease, value: reading.contains(item.id))
                     .frame(width: width,
                            height: loop > 0 && !typeSize.isAccessibilitySize ? Self.stripCardHeight : nil)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeights[i] = $0 }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        // A card's seat follows the heights, and moved a third
+                        // of a point its own height can snap the other way: a
+                        // loop that never draws a frame. Real changes are bigger.
+                        if abs((cardHeights[i] ?? 0) - height) >= 1 { cardHeights[i] = height }
+                    }
                     // A held card tilts with the pull, like a card on a
                     // table dragged from one edge.
                     .rotationEffect(.degrees((dealt ? seat.0 + (drift ? 1.2 : -1.2) * sway : 0) + pull.width / 16))
@@ -1208,6 +1266,7 @@ struct OnboardingView: View {
             themes.preview(option)
             themes.commit()
         }
+        .modifier(ColumnClip(on: sideBySide))
         .padding(.top, 4)
     }
 
@@ -1226,8 +1285,8 @@ struct OnboardingView: View {
         ]
         return VStack(alignment: .leading, spacing: 18) {
             deckSlot(.intro, height: 80)
-                .padding(.top, 24)
-                .padding(.bottom, 16)
+                .padding(.top, tight ? 8 : 24)
+                .padding(.bottom, tight ? 8 : 16)
             headline(firstName.map { "Hi \($0).\nHere\u{2019}s the idea." } ?? "Here\u{2019}s\nthe idea.")
             lede("One list for the exhibitions, gigs, restaurants and bars you mean to get to.")
 
@@ -1616,6 +1675,8 @@ struct OnboardingView: View {
                 let seats = Self.joinedSeats(shown.count)
                 // Newest in front: the fan runs back to front.
                 cardFan(shown.reversed(), seats: seats, dealt: joinedDealt, key: 100, width: 320, overlap: Self.fanOverlap)
+                    .scaleEffect(fanScale)
+                    .padding(.vertical, tight ? -22 : 0)
                     .frame(maxWidth: .infinity)
                     .overlay(alignment: .bottomTrailing) { moreBadge(groupCards.count - shown.count, dealt: joinedDealt) }
                     .padding(.vertical, 8)
@@ -1955,6 +2016,8 @@ struct OnboardingView: View {
                 // First pick in front: the fan runs back to front.
                 cardFan(shown.reversed(), seats: Self.joinedSeats(shown.count), dealt: savedDealt, key: 200, width: 320,
                         reading: reading, overlap: Self.fanOverlap)
+                    .scaleEffect(fanScale)
+                    .padding(.vertical, tight ? -22 : 0)
                     .frame(maxWidth: .infinity)
                     .overlay(alignment: .bottomTrailing) { moreBadge(savedPicks.count - shown.count, dealt: savedDealt) }
                     .padding(.vertical, 8)
@@ -2020,6 +2083,7 @@ struct OnboardingView: View {
                                 tickedPicks.append(pick)
                             }
                         }
+                        .modifier(ColumnClip(on: sideBySide))
                     }
 
                     // The share-sheet lesson isn't here: it arrives as a
@@ -2349,6 +2413,9 @@ struct OnboardingView: View {
                 PlanRemindStack(plan: planExample, remind: remindExample,
                                 icon: themes.current.iconPreviewName, isLight: themes.current.isLight,
                                still: reduceMotion)
+                   // At the column's full width it fills the open Duo's height.
+                   .frame(maxWidth: sideBySide ? 340 : nil)
+                   .frame(maxWidth: .infinity)
                    .padding(.top, 70)
                 VStack(alignment: .leading, spacing: 8) {
                     headline("Never miss it.")
@@ -3024,5 +3091,20 @@ private struct DeckSlotKey: PreferenceKey {
     static let defaultValue: [OnboardingView.Page: Anchor<CGRect>] = [:]
     static func reduce(value: inout [OnboardingView.Page: Anchor<CGRect>], nextValue: () -> [OnboardingView.Page: Anchor<CGRect>]) {
         value.merge(nextValue()) { $1 }
+    }
+}
+
+/// A sideways strip runs to the display's edges on a phone. In the open
+/// Duo's centred column it ends at the column's, top and bottom left
+/// loose for the chips' outlines and shadows.
+private struct ColumnClip: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on {
+            content.mask { Rectangle().padding(.vertical, -20) }
+        } else {
+            content
+        }
     }
 }

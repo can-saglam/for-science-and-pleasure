@@ -198,6 +198,7 @@ extension View {
                 .frame(width: width)
             }
             .sharedBackgroundVisibility(.hidden)
+            .keptVisible(.high)
         }
     }
 }
