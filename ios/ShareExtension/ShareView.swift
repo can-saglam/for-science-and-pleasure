@@ -452,7 +452,6 @@ struct ShareView: View {
         pending.url = extractedURL
         pending.notes = "Saved from the share sheet, needs a tidy-up."
         pending.userId = userId.uuidString
-        pending.groupId = GroupStore.shared.card?.groupId.uuidString
         finish(pending)
     }
 

@@ -846,6 +846,16 @@ struct SettingsView: View {
             SharedInbox.removeAll()
             #if !APP_EXTENSION
             OnboardingGate.clearSkip()
+            // Nothing of theirs is left behind: not in search, on the Home
+            // Screen, in the picture cache, or as a reminder still to come.
+            SavedURLIndex.rebuild(from: [])
+            SpotlightIndex.sync(items: [])
+            WidgetStore.sync(items: [])
+            ImageStore.clear()
+            OfflineDrafts.clear()
+            MembersStore.shared.clear()
+            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
             #endif
             HomeStore.shared.signedOut()
             GroupStore.shared.signedOut()

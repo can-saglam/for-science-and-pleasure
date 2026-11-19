@@ -37,14 +37,32 @@ enum ImageStore {
         return cache
     }()
 
+    /// Under Library/Caches, so iOS can reclaim it when the phone runs
+    /// short and it stays out of backups. It used to sit at the container's
+    /// top level, where neither applied; that copy goes on first use.
     private static let dir: URL = {
-        let base = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: SharedInbox.groupID)
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = base.appending(path: "ImageCache", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let dir: URL
+        if let group = fm.containerURL(forSecurityApplicationGroupIdentifier: SharedInbox.groupID) {
+            try? fm.removeItem(at: group.appending(path: "ImageCache", directoryHint: .isDirectory))
+            dir = group.appending(path: "Library/Caches/ImageCache", directoryHint: .isDirectory)
+        } else {
+            dir = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appending(path: "ImageCache", directoryHint: .isDirectory)
+        }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
+
+    /// Every picture, in memory and on disk: for a deleted account.
+    static func clear() {
+        memory.removeAllObjects()
+        failed.withLock { $0 = [:] }
+        let fm = FileManager.default
+        for file in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
+            try? fm.removeItem(at: file)
+        }
+    }
 
     /// Stable file name per URL — content-addressed by the URL string.
     /// Disk keeps one original per URL; the variants only differ in memory.
@@ -154,7 +172,11 @@ enum ImageStore {
     /// shows sharp-then-blurred.
     private static func loadUncached(_ url: URL, variant: Variant, network: Bool) async -> UIImage? {
         var image: UIImage?
-        if let data = try? Data(contentsOf: file(for: url)) {
+        let onDisk = file(for: url)
+        if let data = try? Data(contentsOf: onDisk) {
+            // Read counts as touched, so the prune drops what's gone unseen
+            // longest rather than what was downloaded first.
+            try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: onDisk.path())
             image = await decoded(data, maxSide: variant.maxSide)
         } else if network {
             guard mayFetch(url) else { return nil }

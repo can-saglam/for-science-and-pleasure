@@ -133,16 +133,17 @@ final class SupabaseAuth {
         Self.appleUserID = appleUserID
     }
 
-    /// `expired`: the server already refused the session. The share inbox
-    /// stays (its saves are tagged with this account and land after the
-    /// next sign-in), and there's no token left to unregister the phone with.
+    /// `expired`: the server already refused the session, and there's no
+    /// token left to unregister the phone with. The share inbox stays
+    /// either way: its saves are tagged with this account, no other account
+    /// claims them, and they land after its next sign-in. Only deleting the
+    /// account empties it.
     func signOut(expired: Bool = false) {
         let last = session
         Self.signedOutFlag = true
         session = nil
         Self.appleUserID = nil
         KeychainSession.delete()
-        if !expired { SharedInbox.removeAll() }
         if let last {
             Task { await Self.logoutRemote(last, forgetDevice: !expired) }
         }

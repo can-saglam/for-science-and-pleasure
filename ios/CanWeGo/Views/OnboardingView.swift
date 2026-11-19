@@ -2253,12 +2253,14 @@ struct OnboardingView: View {
         let preview = preview
         for item in items {
             guard let url = item.url else { continue }
-            reading.insert(item.id)
+            let id = item.id
+            reading.insert(id)
             Task { @MainActor in
-                defer { reading.remove(item.id) }
-                guard let card = try? await ParseClient.parse(text: url, imageJPEG: nil),
-                      !item.isTrashed
-                else { return }
+                defer { reading.remove(id) }
+                guard let card = try? await ParseClient.parse(text: url, imageJPEG: nil) else { return }
+                // Joining a library meanwhile swaps every row out; a saved
+                // one is looked up again, never touched across the wait.
+                guard let item = preview ? item : context.item(id), !item.isTrashed else { return }
                 item.take(card)
                 guard !preview, item.modelContext != nil else { return }
                 item.updatedAt = .now

@@ -28,6 +28,10 @@ enum ThumbnailBackfill {
     /// would fetch the same pages and overwrite each other's back-off.
     @MainActor private static var running = false
 
+    /// Page fetches per run. A big library imported at once fills in over
+    /// a few foregrounds instead of firing a request for every save.
+    private static let perRun = 8
+
     @MainActor
     static func run(context: ModelContext) async {
         guard !running else { return }
@@ -39,7 +43,7 @@ enum ThumbnailBackfill {
         // that isn't a web address (a lazy loader's `data:` placeholder)
         // is no picture at all.
         let missing = all.filter { item in
-            item.url != nil && (item.imageUrl.map {
+            !item.isTrashed && item.url != nil && (item.imageUrl.map {
                 !$0.lowercased().hasPrefix("http") || ImageStore.isDead($0) || isGooglePhoto($0)
             } ?? true)
         }
@@ -54,8 +58,9 @@ enum ThumbnailBackfill {
         counts = counts.filter { liveURLs.contains($0.key) }
 
         var found: [(id: UUID, image: String)] = []
+        var fetched = 0
         let queue = missing.map { (id: $0.id, url: $0.url, image: $0.imageUrl) }
-        for entry in queue {
+        for entry in queue where fetched < perRun {
             // Social posts' og:image is a signed CDN URL that expires within
             // days — never a thumbnail. Those saves get their picture from
             // the venue's own site at parse time, or stay on the colour block.
@@ -67,6 +72,7 @@ enum ThumbnailBackfill {
             if let tried = attempts[raw], Date.now.timeIntervalSince(tried) < retryAfter(misses: misses) {
                 continue
             }
+            fetched += 1
             // The page still pointing at the dead picture counts as nothing
             // found — back off, rather than try again next foreground.
             if let image = await pageImage(at: url), image != entry.image {

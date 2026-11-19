@@ -111,11 +111,22 @@ enum WidgetStore {
                 try? version.write(to: versionFile, atomically: true, encoding: .utf8)
             }
 
+            // Which picture each photo was made from, so a new cover
+            // replaces the old one instead of being skipped as done.
+            let sourcesFile = directory.appending(path: "sources.json")
+            let sources = (try? Data(contentsOf: sourcesFile))
+                .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+            var madeFrom: [String: String] = [:]
+
             var written: [Entry] = []
             for (entry, imageURL) in entries {
                 var entry = entry
                 if let imageURL {
-                    let file = directory.appending(path: "\(entry.id.uuidString).jpg")
+                    let id = entry.id.uuidString
+                    let file = directory.appending(path: "\(id).jpg")
+                    if sources[id] != imageURL.absoluteString {
+                        try? FileManager.default.removeItem(at: file)
+                    }
                     if !FileManager.default.fileExists(atPath: file.path()) {
                         // Big enough for a 3x medium widget; the widget still
                         // decodes these down to its own pixel size, so disk is
@@ -126,6 +137,7 @@ enum WidgetStore {
                         }
                     }
                     entry.hasImage = FileManager.default.fileExists(atPath: file.path())
+                    if entry.hasImage { madeFrom[id] = imageURL.absoluteString }
                 }
                 written.append(entry)
             }
@@ -134,9 +146,12 @@ enum WidgetStore {
                 try? data.write(to: directory.appending(path: "items.json"), options: .atomic)
             }
             try? lock?.write(to: directory.appending(path: "lock.json"), options: .atomic)
+            if let data = try? JSONEncoder().encode(madeFrom) {
+                try? data.write(to: sourcesFile, options: .atomic)
+            }
 
             // Sweep photos of items that left the rotation (done, deleted).
-            let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "lock.json", "version.txt", "theme.json"])
+            let keep = Set(written.map { "\($0.id.uuidString).jpg" } + ["items.json", "lock.json", "version.txt", "theme.json", "sources.json"])
             let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
             for file in files where !keep.contains(file) {
                 try? FileManager.default.removeItem(at: directory.appending(path: file))

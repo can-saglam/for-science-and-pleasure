@@ -37,9 +37,10 @@ enum SharedInbox {
         var allowDuplicate: Bool?
         var savedAt: Date = .now
         /// Who was signed in when the extension wrote this. A different
-        /// account on the same phone must not claim it.
+        /// account on the same phone must not claim it. No group: like a
+        /// save made in the app, it lands in whichever library is theirs
+        /// when it syncs, not one they may have left since.
         var userId: String?
-        var groupId: String?
         /// Set when whoever parked it already told someone the save's id
         /// (Siri answers with the save it added).
         var id: UUID?
@@ -143,7 +144,7 @@ enum SharedInbox {
 
 extension SharedInbox.PendingSave {
     /// A parsed card as Siri, Shortcuts or a finished offline draft hand it
-    /// to the inbox, tagged with who and which group it's for.
+    /// to the inbox, tagged with who it's for.
     @MainActor
     init(card: ParseClient.Card, url: String?, userId: UUID) {
         self.init(kind: card.kind, title: card.title)
@@ -164,7 +165,6 @@ extension SharedInbox.PendingSave {
         placeId = card.place_id
         showings = card.showings
         self.userId = userId.uuidString
-        groupId = GroupStore.shared.card?.groupId.uuidString
     }
 }
 
@@ -197,7 +197,6 @@ extension SharedInbox.PendingSave {
         showings = item.showingsJSON == nil ? nil : item.showings
         status = item.status
         self.userId = userId.uuidString
-        groupId = GroupStore.shared.card?.groupId.uuidString
     }
 }
 
@@ -232,7 +231,6 @@ extension Item {
         if let status = pending.status { self.status = status }
         createdAt = pending.savedAt
         updatedAt = pending.savedAt
-        if let gid = pending.groupId { groupId = UUID(uuidString: gid) }
         if let uid = pending.userId { createdBy = UUID(uuidString: uid); updatedBy = createdBy }
     }
 }

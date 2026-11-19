@@ -83,6 +83,10 @@ struct SyncProblem: Error, Equatable {
     /// behind by a membership change) must not block everything else.
     var rowRejected: Bool { [400, 403, 409, 422].contains(status) }
 
+    /// Refused for a free-plan limit (the daily adds, a full category):
+    /// the row's own fault, and fine again tomorrow or with Plus.
+    var isLimit: Bool { detail.map { $0.contains("daily_full") || $0.contains("category_full") } ?? false }
+
     /// Translates whatever the engine threw into something a person can act on.
     init(_ error: Error) {
         if let problem = error as? SyncProblem {

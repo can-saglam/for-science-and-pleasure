@@ -22,6 +22,12 @@ final class MembersStore {
         namesByUser = defaults.dictionary(forKey: Self.profilesCacheKey) as? [String: String] ?? [:]
     }
 
+    /// Forgets every name: for a deleted account.
+    func clear() {
+        namesByUser = [:]
+        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard).removeObject(forKey: Self.profilesCacheKey)
+    }
+
     /// Who saved an item: profile name when the row carries a user id,
     /// otherwise derived from the legacy email. Nil when there's neither.
     func saverName(for item: Item) -> String? {

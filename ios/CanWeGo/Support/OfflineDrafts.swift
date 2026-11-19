@@ -51,6 +51,11 @@ enum OfflineDrafts {
         try? FileManager.default.removeItem(at: pictureFile(id))
     }
 
+    /// Every queued draft and its picture: for a deleted account.
+    static func clear() {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     // MARK: - Connection
 
     private static let monitor = NWPathMonitor()
@@ -150,7 +155,6 @@ enum OfflineDrafts {
         save.url = link(in: text)
         save.imageUrl = cover
         save.userId = userId.uuidString
-        save.groupId = GroupStore.shared.card?.groupId.uuidString
         guard (try? SharedInbox.write(save)) != nil else { return false }
         NotificationCenter.default.post(name: .cwgInboxChanged, object: nil)
         return true

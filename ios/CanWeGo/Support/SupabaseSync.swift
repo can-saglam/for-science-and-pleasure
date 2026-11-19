@@ -598,6 +598,7 @@ enum SupabaseSync {
         context: ModelContext, since cursor: Date, serverTimes: [UUID: Date] = [:]
     ) async throws {
         releaseDailyRefusals()
+        releaseStaleRefusals()
         let locals = try context.fetch(FetchDescriptor<Item>())
         let dirty = locals.filter { item in
             guard !isQuarantined(item) else { return false }
@@ -621,6 +622,16 @@ enum SupabaseSync {
                 }
             }
             guard !refused.isEmpty else { return }
+            // Every row refused, and not for a limit: that's the server (a
+            // bad deploy), not the rows. Nothing is set aside, and the
+            // cursor stays put so they all go again next time.
+            if refused.count == dirty.count, !refused.contains(where: { $0.1.isLimit }) {
+                throw SyncProblem(
+                    message: "Couldn\u{2019}t save your latest changes. They\u{2019}re kept on this phone and will try again.",
+                    detail: refused.first?.1.detail,
+                    status: refused.first?.1.status ?? 0
+                )
+            }
             quarantine(refused)
         } catch let error as SyncProblem where error.rowRejected {
             quarantine(dirty.map { ($0, error) })
@@ -630,6 +641,10 @@ enum SupabaseSync {
     private static func quarantine(_ refused: [(Item, SyncProblem)]) {
         var record = rejected
         for (item, _) in refused { record[item.id.uuidString] = item.updatedAt }
+        if rejected.isEmpty {
+            defaults.set(Date.now, forKey: rejectedSinceKey)
+            defaults.set(buildNumber, forKey: rejectedBuildKey)
+        }
         rejected = record
         rejectedDetail = refused.first?.1.detail
         if refused.contains(where: { $0.1.detail?.contains("daily_full") == true }) {
@@ -645,6 +660,22 @@ enum SupabaseSync {
         guard let day = defaults.string(forKey: dailyRefusedKey), day != DayString.today() else { return }
         rejected = [:]
         defaults.removeObject(forKey: dailyRefusedKey)
+    }
+
+    /// When the set-aside rows were first refused, and by which build.
+    /// A day later, or once the app has been updated, they're tried again
+    /// without waiting for an edit: a fix on either side lets them through.
+    private static let rejectedSinceKey = "supabaseRejectedSince"
+    private static let rejectedBuildKey = "supabaseRejectedBuild"
+
+    private static func releaseStaleRefusals() {
+        guard !rejected.isEmpty else { return }
+        let since = defaults.object(forKey: rejectedSinceKey) as? Date ?? .distantPast
+        let build = defaults.integer(forKey: rejectedBuildKey)
+        guard Date.now.timeIntervalSince(since) > 86_400 || build != buildNumber else { return }
+        rejected = [:]
+        defaults.removeObject(forKey: rejectedSinceKey)
+        defaults.removeObject(forKey: rejectedBuildKey)
     }
 
     private static func upsert(rows: [Row]) async throws {
@@ -947,8 +978,21 @@ enum SupabaseSync {
     /// Mirrors the web's soft delete; `undelete` covers the 5-second Undo.
     static func setDeleted(_ id: UUID, _ deleted: Bool) {
         let stamp: Any = deleted ? isoFractional.string(from: .now) : NSNull()
-        Task { await patch(id, ["deleted_at": stamp]) }
+        // In order per save: an Undo's restore must never land before the
+        // delete it undoes and leave the save deleted for everyone else.
+        let previous = deletePatches[id]
+        let next = Task {
+            await previous?.value
+            _ = await patch(id, ["deleted_at": stamp])
+        }
+        deletePatches[id] = next
+        Task {
+            await next.value
+            if deletePatches[id] == next { deletePatches[id] = nil }
+        }
     }
+
+    private static var deletePatches: [UUID: Task<Void, Never>] = [:]
 }
 
 extension ModelContext {
