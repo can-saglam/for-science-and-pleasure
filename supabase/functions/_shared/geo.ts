@@ -1,5 +1,5 @@
 // Small, dependency-free helpers shared by functions. Kept separate from
-// extract.ts so that functions which only geocode (e.g. locate) don't pull in
+// extract.ts so that functions which only geocode don't pull in
 // the imagescript dependency, whose native codec loading crashes the worker.
 import { publicFetch } from "./netguard.ts";
 import { metresBetween } from "./places.ts";

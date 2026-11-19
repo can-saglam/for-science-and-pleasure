@@ -415,9 +415,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.parse]
 verify_jwt = true
 
-[functions.locate]
-verify_jwt = true
-
 [functions.calendar]
 verify_jwt = false
 

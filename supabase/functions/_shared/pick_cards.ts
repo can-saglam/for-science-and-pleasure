@@ -7,11 +7,11 @@
 // for everyone after. A new pool replaces the old one, cards and all.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isThumbnail } from "./color.ts";
-import { extractCard, linkKey } from "./extract.ts";
+import { extractCard, linkKey, type ParseRun } from "./extract.ts";
 import type { Home } from "./home.ts";
 import { findPlace } from "./places.ts";
 import { starterKey } from "./starters.ts";
-import { type PickCard, placeCard, servePool, type Suggestion, type SuggestionKind } from "./suggestions.ts";
+import { type PickCard, placeCard, servePool, type Suggestion, type SuggestionKind, type Usage } from "./suggestions.ts";
 
 /// Picks never looked up. A tried one keeps `card: null`.
 export function uncarded(items: Suggestion[]): boolean {
@@ -40,27 +40,41 @@ const READ_MS = 45_000;
 /// Look up every pick without a card: a place on Google (as dressing it
 /// does), an event by reading its page (as a tap would). A miss is null,
 /// left for a tap.
-export async function card(items: Suggestion[], home: Home): Promise<Suggestion[]> {
+export async function card(
+  items: Suggestion[],
+  home: Home,
+  spent: (u: Usage) => void = () => {},
+): Promise<Suggestion[]> {
   const out = [...items];
   const pending = out.flatMap((s, at) => s.card === undefined ? [{ s, at }] : []);
   for (let i = 0; i < pending.length; i += READS_AT_ONCE) {
     await Promise.all(pending.slice(i, i + READS_AT_ONCE).map(async ({ s, at }) => {
-      out[at] = { ...s, card: await cardFor(s, home) };
+      out[at] = { ...s, card: await cardFor(s, home, spent) };
     }));
   }
   return out;
 }
 
-async function cardFor(s: Suggestion, home: Home): Promise<PickCard | null> {
+async function cardFor(s: Suggestion, home: Home, spent: (u: Usage) => void): Promise<PickCard | null> {
+  const run: ParseRun = { deadline: Date.now() + READ_MS };
   try {
     if (s.kind === "place") {
       const match = await findPlace(s.title, { area: s.venue }, home);
       return match ? placeCard(s, match, s.image ?? null, s.color ?? null) : null;
     }
-    const found = await extractCard({ text: s.url }, home, undefined, undefined, { deadline: Date.now() + READ_MS });
+    const found = await extractCard({ text: s.url }, home, undefined, undefined, run);
     return keepable(found) ? withPickLook(found, s) : null;
   } catch {
     return null;
+  } finally {
+    if (run.input_tokens) {
+      spent({
+        model: run.model ?? "",
+        input_tokens: run.input_tokens,
+        output_tokens: run.output_tokens ?? 0,
+        searches: run.searches ?? 0,
+      });
+    }
   }
 }
 

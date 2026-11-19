@@ -14,7 +14,7 @@ import { reserveQuota } from "../_shared/quota.ts";
 import { runCost } from "../_shared/warm_plan.ts";
 import { fallbackStarters, starterKey } from "../_shared/starters.ts";
 import { uncarded } from "../_shared/pick_cards.ts";
-import { cityJobs } from "../_shared/suggestion_jobs.ts";
+import { cityJobs, EXTRAS } from "../_shared/suggestion_jobs.ts";
 import {
   BUSY_CITY_PEOPLE,
   type SuggestionKind,
@@ -112,6 +112,7 @@ Deno.serve(async (req) => {
         .select("outcome, at")
         .eq("key", key)
         .eq("kind", kind)
+        .neq("outcome", EXTRAS)
         .order("at", { ascending: false })
         .limit(1)
         .maybeSingle();

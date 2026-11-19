@@ -61,7 +61,12 @@ const TTL_DAYS: Record<SuggestionKind, number> = { event: 7, place: 30 };
 const BUSY_EVENT_TTL_DAYS = 3;
 export const BUSY_CITY_PEOPLE = 20;
 /// A refresh that never finished (the worker died) stops blocking the next.
-const REFRESH_LEASE_MS = 5 * 60_000;
+/// Longer than the worker's 400s wall clock, so a slow refresh that's still
+/// going is never joined by a second, paid the same again.
+export const REFRESH_LEASE_MS = 7 * 60_000;
+/// Where an event refresh stops starting model calls: its searches and
+/// checks end inside the wall clock, so its run is always written down.
+const EVENT_RUN_MS = 340_000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /// Stale by age, or thin: under three left (under MIN_EVENTS for events)
@@ -400,12 +405,12 @@ async function venuePhoto(s: Suggestion, home: Home): Promise<Suggestion> {
 
 /// Name the picks a pool stored before categories: one short call, no
 /// search. A miss leaves them unlabelled so the next ask tries again.
-export async function label(items: Suggestion[]): Promise<Suggestion[]> {
+export async function label(items: Suggestion[], spent: (u: Usage) => void = () => {}): Promise<Suggestion[]> {
   const pending = items.filter((s) => s.category === undefined);
   if (pending.length === 0) return items;
   const kind = pending[0].kind;
   const vocab = kind === "place" ? PLACE_CATEGORIES : EVENT_CATEGORIES;
-  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY"), ...SHORT_CALL });
   const response = await anthropic.messages.create({
     model: SUGGEST_MODEL,
     max_tokens: 1024,
@@ -419,6 +424,7 @@ export async function label(items: Suggestion[]): Promise<Suggestion[]> {
         pending.map((s) => [s.url, s.title, s.venue].filter(Boolean).join("\t")).join("\n"),
     }],
   });
+  spent(usageOf(response));
   const parsed = readItems(answerText(response.content));
   return parsed ? applyCategories(items, parsed) : items;
 }
@@ -426,11 +432,11 @@ export async function label(items: Suggestion[]): Promise<Suggestion[]> {
 /// A line for each pick in a pool stored before chips had one: one short
 /// call, no search. A miss leaves them as they were so the next ask tries
 /// again.
-export async function describe(items: Suggestion[]): Promise<Suggestion[]> {
+export async function describe(items: Suggestion[], spent: (u: Usage) => void = () => {}): Promise<Suggestion[]> {
   const pending = items.filter(needsAbout);
   if (pending.length === 0) return items;
   const kind = pending[0].kind;
-  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY"), ...SHORT_CALL });
   const response = await anthropic.messages.create({
     model: SUGGEST_MODEL,
     max_tokens: 2048,
@@ -446,6 +452,7 @@ export async function describe(items: Suggestion[]): Promise<Suggestion[]> {
         ).join("\n"),
     }],
   });
+  spent(usageOf(response));
   const parsed = readItems(answerText(response.content));
   return parsed ? applyAbouts(items, parsed) : items;
 }
@@ -606,6 +613,13 @@ export interface Refreshed {
 
 const SUGGEST_MODEL = "claude-sonnet-5";
 
+/// A call with no search. One retry: what's lost is a minute, not a
+/// search's worth of reading.
+const SHORT_CALL = { timeout: 60_000, maxRetries: 1 } as const;
+/// A searching call runs once: a retry would be a second spend, and the
+/// first may well have been billed.
+const SEARCH_CALL = { maxRetries: 0 } as const;
+
 function usageOf(response: { usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } | null } }): Usage {
   return {
     model: SUGGEST_MODEL,
@@ -647,6 +661,7 @@ async function searchEvents(
   locality: string,
   country: string,
   today: string,
+  timeout: number,
   avoid: string[] = [],
   count = 6,
 ): Promise<{ raw: unknown[]; seen: [string, string][]; note: string; usage: Usage }> {
@@ -671,7 +686,7 @@ async function searchEvents(
         `(dice.fm/event/…) or Resident Advisor (ra.co/events/…). Never a what's-on listing, a round-up, another ` +
         `ticketing, news or guide site, and only a url you saw in the search results, so search for the picks' own pages. Search at most four times, then answer straight away with the JSON: no commentary.`,
     }],
-  });
+  }, { ...SEARCH_CALL, timeout });
   const seen: [string, string][] = [];
   for (const block of response.content) {
     if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;
@@ -733,6 +748,8 @@ export async function refreshEvents(
   keep: Suggestion[] = [],
 ): Promise<Refreshed> {
   const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
+  const deadline = Date.now() + EVENT_RUN_MS;
+  const left = () => deadline - Date.now();
   // Every link the searches showed, with the title they showed it under.
   const seen = new Map<string, string>();
   const notes: string[] = [];
@@ -765,18 +782,20 @@ export async function refreshEvents(
     return checked.filter((s): s is Suggestion => s !== null).map((s) => keep.find((k) => samePick(k, s)) ?? s);
   };
 
+  // The first round leaves time to check its links and maybe top up.
+  const firstRound = Math.min(240_000, left() - 60_000);
   const shaped = gather(await Promise.allSettled(
-    EVENT_FOCUSES.map((focus) => searchEvents(anthropic, focus, locality, country, today)),
+    EVENT_FOCUSES.map((focus) => searchEvents(anthropic, focus, locality, country, today, firstRound)),
   ));
   await stage(`searches: ${notes.join(" / ")}; checking ${shaped.length} links`);
   const found = await check(shaped);
   const kept = mergePicks([found, keep], today);
   let proposed = shaped.length;
   let topped: Suggestion[] = [];
-  if (kept.length < MIN_EVENTS) {
+  if (kept.length < MIN_EVENTS && left() > 90_000) {
     await stage(`searches: ${notes.join(" / ")}; ${found.length} new and ${kept.length - found.length} kept, topping up`);
     const more = gather(await Promise.allSettled([
-      searchEvents(anthropic, TOP_UP_FOCUS, locality, country, today, kept.map((s) => s.title), 8),
+      searchEvents(anthropic, TOP_UP_FOCUS, locality, country, today, left() - 40_000, kept.map((s) => s.title), 8),
     ]));
     proposed += more.length;
     topped = await check(more);
@@ -836,7 +855,7 @@ async function searchPlaces(
         `never a guide, google, maps, tripadvisor, instagram, facebook, a booking site or a tourism portal; leave out a place ` +
         `without its own site. Search at most three times, then answer straight away with the JSON: no commentary.`,
     }],
-  });
+  }, { ...SEARCH_CALL, timeout: 150_000 });
   return { raw: readItems(answerText(response.content)) ?? [], usage: usageOf(response) };
 }
 
@@ -880,7 +899,7 @@ async function knownPlaces(anthropic: Anthropic, locality: string, country: stri
         `a domain you are sure exists — never google, maps, tripadvisor, timeout, wikipedia, instagram, facebook or a tourism portal. ` +
         `If you are unsure of a domain, pick a place whose official site you are sure of.`,
     }],
-  });
+  }, { timeout: 30_000, maxRetries: 0 });
   const shaped = shapeSuggestions({ items: readItems(answerText(response.content)) ?? [] }, "place", today);
   const alive = await Promise.all(shaped.map(async (s) => (await resolves(s.url)) ? s : null));
   return { items: alive.filter((s): s is Suggestion => s !== null), proposed: shaped.length, usage: usageOf(response) };

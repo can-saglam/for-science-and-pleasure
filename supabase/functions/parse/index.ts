@@ -10,8 +10,9 @@
 // A lookup counts against the day's allowance only once the model has
 // answered: a card, or its verdict that the input was a search. Errors,
 // timeouts and unreadable posts are free. So is a link that's one of the
-// home city's picks: answered from its stored card when it has one, and
-// otherwise looked up and kept for the next tap (pick_cards.ts).
+// home city's picks with a stored card. One without is looked up like any
+// link, and the card kept for the next tap (pick_cards.ts) when this
+// server read the page itself.
 import { internalErrorBody } from "../_shared/auth.ts";
 import {
   corsHeaders,
@@ -44,6 +45,10 @@ import {
 /// Everything from the request arriving to the card leaving. The phone
 /// waits 120s between bytes; the edge worker is cut off at 150s.
 const BUDGET_MS = 110_000;
+
+/// Typed or shared text past this goes to the model cut short: a pasted
+/// email's event is in its first pages, and a longer prompt only costs.
+const MAX_TEXT_CHARS = 12_000;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -153,6 +158,9 @@ Deno.serve(async (req) => {
     if (!body.text && !body.image_base64) {
       return json({ error: "text or image_base64 required" }, 400);
     }
+    if (typeof body.text === "string" && body.text.length > MAX_TEXT_CHARS) {
+      body.text = body.text.slice(0, MAX_TEXT_CHARS);
+    }
     const text = typeof body.text === "string" ? body.text.trim() : "";
     source = body.image_base64 ? "image" : firstUrl(text) ? "link" : "text";
 
@@ -192,15 +200,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (!picked) {
-      reserved = await reserveQuota(admin(), caller.userId, "parse");
-      if (!reserved) {
-        record(started, source, "over_quota", run);
-        return new Response(quotaResponse().body, {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+    reserved = await reserveQuota(admin(), caller.userId, "parse");
+    if (!reserved) {
+      record(started, source, "over_quota", run);
+      return new Response(quotaResponse().body, {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Typed words from someone who has already searched a few times today:
@@ -234,7 +240,9 @@ Deno.serve(async (req) => {
     const finish = async (outcome: Outcome, card?: Awaited<ReturnType<typeof extractCard>>) => {
       if (!answered(outcome)) await unreserve();
       record(started, source, outcome, run, card);
-      if (picked && card) {
+      // A page the phone sent is whatever the phone says it is: fine for
+      // this save, never for the card the whole city gets.
+      if (picked && card && typeof body.page_html !== "string") {
         const keep = storeCard(admin(), picked.key, picked.pick, card);
         // deno-lint-ignore no-explicit-any
         (globalThis as any).EdgeRuntime?.waitUntil?.(keep);

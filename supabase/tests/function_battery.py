@@ -33,8 +33,8 @@ s, b = call("/functions/v1/notify-save", "POST", {"item_id": item_id}, bearer(ca
 s, b = call("/functions/v1/notify-save", "POST", {"item_id": item_id}, bearer(stranger)); check("notify-save: stranger → 403", s == 403, f"{s} {b}")
 s, b = call("/functions/v1/notify-save", "POST", {"item_id": item_id});                   check("notify-save: no JWT → 403", s in (401, 403), f"{s} {b}")
 
-# gates on parse / locate / suggest (no model key on staging: anything but 403 means the gate let the member through)
-for fn, body in (("parse", {"text": "Tate Modern late, Friday"}), ("locate", {"items": [{"id": item_id, "title": "x"}]}), ("suggest", {"date": "2026-09-12"})):
+# gates on parse / suggest (no model key on staging: anything but 403 means the gate let the member through)
+for fn, body in (("parse", {"text": "Tate Modern late, Friday"}), ("suggest", {"date": "2026-09-12"})):
     s, b = call(f"/functions/v1/{fn}", "POST", body, bearer(stranger)); check(f"{fn}: stranger → 403", s == 403, f"{s} {b[:120]}")
     s, b = call(f"/functions/v1/{fn}", "POST", body, bearer(can));      check(f"{fn}: member passes the gate", s != 403 and s != 401, f"{s} {b[:120]}")
 s, b = call("/functions/v1/parse", "POST", {"text": "x"}, {"x-ingest-secret": "stg-ingest-secret"}); check("parse: a shared-secret header is not auth", s in (401, 403), f"{s} {b[:120]}")

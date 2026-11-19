@@ -38,9 +38,7 @@ writes are now also guarded server-side (`0013_stale_write_guard.sql`).
 - Supabase project `gvewzvcvmeztqyfwkgwa` (London) — Postgres + email OTP
   auth + edge functions. Membership is allow-listed in `public.members`;
   anyone else who signs in sees nothing (RLS).
-- Edge functions: `parse` and `locate` (used by the app; `locate` proposes
-  venue/area/coordinates for saves missing them, applied only after in-app
-  confirmation), `suggest`, `notify-save`, `group-membership`,
+- Edge functions: `parse` (used by the app), `suggest`, `notify-save`, `group-membership`,
   `delete-account`, `send-reminders` (shared Remind pushes: presets at 10:00
   home time, hand-picked times as they come round), and `calendar` (the ICS
   feed). Claude and push credentials are stored as Supabase secrets.
@@ -68,7 +66,7 @@ deploy`, `supabase config push`.
 
 - The `/calendar` feed opens only with a group's `feed_token` (rotated
   when a member leaves). The old shared `FEED_SECRET` is retired.
-  Parse, locate, suggest, notify-save, group-membership and delete-account
+  Parse, suggest, notify-save, group-membership and delete-account
   require a signed-in user JWT.
 
 ## Adding a member

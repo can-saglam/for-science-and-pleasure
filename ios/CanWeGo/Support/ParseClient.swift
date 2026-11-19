@@ -386,63 +386,6 @@ enum ParseClient {
         return transaction.environment == .production
         #endif
     }
-
-    // MARK: - Locate (find missing locations)
-
-    struct LocateItemPayload: Encodable {
-        let id: String
-        let kind: String
-        let title: String
-        let summary: String?
-        let venue: String?
-        let area: String?
-        let address: String?
-        let url: String?
-        let notes: String?
-
-        init(_ item: Item) {
-            id = item.id.uuidString.lowercased()
-            kind = item.kind
-            title = item.title
-            summary = item.summary
-            venue = item.venue
-            area = item.area
-            address = item.address
-            url = item.url
-            notes = item.notes
-        }
-    }
-
-    struct LocationProposal: Decodable, Identifiable {
-        let id: String
-        let venue: String?
-        let area: String?
-        let address: String?
-        let confidence: String
-        let lat: Double?
-        let lng: Double?
-    }
-
-    static func locate(items: [Item]) async throws -> [LocationProposal] {
-        guard let secrets = Secrets.shared else { throw ParseError.notConfigured }
-
-        var request = URLRequest(url: secrets.supabaseURL.appending(path: "functions/v1/locate"))
-        request.httpMethod = "POST"
-        request.timeoutInterval = 120 // model + geocoding take a while
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let jwt = try await SupabaseAuth.shared.validToken()
-        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(["items": items.map(LocateItemPayload.init)])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw ParseError.server(message ?? "Locate failed (\(status)).", status: status)
-        }
-        struct Envelope: Decodable { let proposals: [LocationProposal] }
-        return try JSONDecoder().decode(Envelope.self, from: data).proposals
-    }
 }
 
 extension ParseClient.Suggestion {

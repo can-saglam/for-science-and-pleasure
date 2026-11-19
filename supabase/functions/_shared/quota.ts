@@ -1,12 +1,12 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
-/** AI calls per person per day, parse + locate + suggest together. Plus
+/** AI calls per person per day, parse + suggest together. Plus
  * comes from the group: anyone covered by a member's subscription gets it.
  * Never mentioned in the app: the limit people see is ten (or fifty) new
  * saves a day (0043). This is the ceiling behind it, for lookups that are
  * never saved, and twice that so nobody adding normally meets it. */
 export const DAILY = { free: 20, plus: 100 } as const;
-export type QuotaKind = "parse" | "locate" | "suggest";
+export type QuotaKind = "parse" | "suggest";
 
 async function coveredByPlus(db: SupabaseClient, userId: string): Promise<boolean> {
   const { data: mine } = await db.from("group_members").select("group_id").eq("user_id", userId).maybeSingle();
@@ -53,8 +53,6 @@ export async function releaseQuota(db: SupabaseClient, userId: string, kind: Quo
   const { error } = await db.rpc("release_usage", { p_user_id: userId, p_day: day, p_kind: kind });
   if (error) console.warn("release_usage failed", error.message);
 }
-
-export const consumeQuota = reserveQuota;
 
 /** Opening-hours lookups per person per day: each is a billed Google call,
  * counted apart from the AI allowance. Far more than opening every save. */

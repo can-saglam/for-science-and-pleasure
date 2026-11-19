@@ -14,7 +14,7 @@
 // - Warm-up spend stops at MONTHLY_BUDGET_USD a month; asks never wait on it.
 import { sameSecret } from "../_shared/auth.ts";
 import { admin } from "../_shared/groups.ts";
-import { cityJobs } from "../_shared/suggestion_jobs.ts";
+import { cityJobs, EXTRAS } from "../_shared/suggestion_jobs.ts";
 import { starterKey } from "../_shared/starters.ts";
 import { BUSY_CITY_PEOPLE, type SuggestionKind, busyMatters } from "../_shared/suggestions.ts";
 import {
@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
 
   const [rowResult, runResult] = await Promise.all([
     db.from("city_suggestions").select("key, kind, payload, fetched_at, refreshing_since").in("key", keys),
-    db.from("suggestion_runs").select("key, kind, at").neq("outcome", "kept")
+    db.from("suggestion_runs").select("key, kind, at").not("outcome", "in", `(kept,${EXTRAS})`)
       .gte("at", new Date(now - RETRY_DAYS * DAY).toISOString()),
   ]);
   const late = failure(rowResult, runResult);
