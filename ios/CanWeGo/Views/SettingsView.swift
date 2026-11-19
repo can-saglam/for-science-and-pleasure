@@ -57,6 +57,9 @@ struct SettingsView: View {
     @State private var deletePhrase = ""
     @State private var deleteBusy = false
     @State private var deleteError: String?
+    /// Apple's re-sign-in failed (not cancelled): deleting anyway can't
+    /// unlink Sign in with Apple, so it's asked rather than assumed.
+    @State private var appleUnconfirmed = false
     @State private var showExport = false
     @State private var deleteAfterExport = false
     /// Which maps app gets the directions taps — same key `TransportApp` reads.
@@ -238,6 +241,14 @@ struct SettingsView: View {
                 Button("OK") {}
             } message: {
                 Text(deleteError ?? "")
+            }
+            .alert("Apple couldn\u{2019}t confirm it\u{2019}s you", isPresented: $appleUnconfirmed) {
+                Button("Delete anyway", role: .destructive) {
+                    Task { await deleteAccount(withoutApple: true) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Deleting anyway still removes everything. Can We Go? will stay in the Sign in with Apple list in your Apple Account settings until you remove it there.")
             }
             .fullScreenCover(isPresented: $showAuth) {
                 AuthView()
@@ -670,6 +681,9 @@ struct SettingsView: View {
                         isPresented: $confirmDelete,
                         titleVisibility: .visible
                     ) {
+                        if billsAfterDeletion {
+                            Button("Manage subscription") { manageSubscription = true }
+                        }
                         Button("Export my library first") {
                             deleteAfterExport = true
                             showExport = true
@@ -802,10 +816,17 @@ struct SettingsView: View {
 
     private var deleteAccountCopy: String {
         let shared = (GroupStore.shared.card?.members.count ?? 0) > 1
-        if shared {
-            return "Your group keeps the library. Export first if you want your own copy."
-        }
-        return "This deletes your library too. Export first if you want a copy."
+        let library = shared
+            ? "Your group keeps the library. Export first if you want your own copy."
+            : "This deletes your library too. Export first if you want a copy."
+        guard billsAfterDeletion else { return library }
+        return library + "\n\nPlus is billed by Apple and keeps renewing after your account is gone. Cancel it first under Manage subscription."
+    }
+
+    /// This Apple ID pays for Plus and it still renews: deleting the
+    /// account doesn't stop Apple charging for it.
+    private var billsAfterDeletion: Bool {
+        PlusStore.shared.subscribed && PlusStore.shared.renewal?.renews != false
     }
 
     /// RootGate resets the cursor and group card on any sign-out, this one
@@ -816,15 +837,19 @@ struct SettingsView: View {
         dismiss()
     }
 
-    private func deleteAccount() async {
+    private func deleteAccount(withoutApple: Bool = false) async {
         guard deletePhrase.trimmingCharacters(in: .whitespaces) == "DELETE" else { return }
         deleteBusy = true
         defer { deleteBusy = false }
         do {
             var payload: [String: String] = [:]
-            if SupabaseAuth.appleUserID != nil {
+            if SupabaseAuth.appleUserID != nil, !withoutApple {
                 do {
-                    payload["apple_code"] = try await AppleSignIn.codeForDeletion(using: authorizationController)
+                    guard let code = try await AppleSignIn.codeForDeletion(using: authorizationController) else {
+                        appleUnconfirmed = true
+                        return
+                    }
+                    payload["apple_code"] = code
                 } catch {
                     return // cancelled the Apple sheet: nothing deleted
                 }

@@ -80,7 +80,7 @@ enum AppleSignIn {
 
     /// A fresh one-time code from Apple, for account deletion to revoke the
     /// app's Sign in with Apple access. Nil when Apple can't give one (the
-    /// deletion goes ahead without it); throws only when the person cancels.
+    /// person is asked whether to delete anyway); throws only when they cancel.
     static func codeForDeletion(using controller: AuthorizationController) async throws -> String? {
         do {
             let result = try await controller.performRequest(ASAuthorizationAppleIDProvider().createRequest())
