@@ -149,6 +149,15 @@ img, video, svg { display: block; max-width: 100%; }
   .device.far { display: none; }
 }
 
+/* The fan's seven phones, left to right; kept here, not in the markup, for the CSP. */
+.device:nth-of-type(1) { --i: -3; }
+.device:nth-of-type(2) { --i: -2; }
+.device:nth-of-type(3) { --i: -1; }
+.device:nth-of-type(4) { --i: 0; }
+.device:nth-of-type(5) { --i: 1; }
+.device:nth-of-type(6) { --i: 2; }
+.device:nth-of-type(7) { --i: 3; }
+
 .device {
   --a: max(var(--i), calc(var(--i) * -1));
   position: absolute; left: 50%; top: 50%;

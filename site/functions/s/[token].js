@@ -29,7 +29,7 @@ export async function onRequestGet({ request, params, env }) {
 
   const description = [from ? `From ${from}` : "", where(card), dates(card)].filter(Boolean).join(" · ") ||
     card.summary || "";
-  const image = photo(card) ?? new URL("/img/share-icon.png", request.url).href;
+  const image = new URL(photo(card) ? `/s/${save.token}/image` : "/img/share-icon.png", request.url).href;
 
   const res = new HTMLRewriter()
     .on("title", { element: (el) => el.setInnerContent(`${card.title} · Can We Go?`) })

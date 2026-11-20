@@ -5,6 +5,8 @@
         "appIDs": ["D3GR6PRXK7.com.cansaglam.CanWeGo"],
         "components": [
           { "/": "/join/*", "comment": "Group invites" },
+          { "/": "/s/*/calendar", "exclude": true, "comment": "A shared save's calendar file opens in Calendar, not the app" },
+          { "/": "/s/*/image", "exclude": true, "comment": "A shared save's photo" },
           { "/": "/s/*", "comment": "A shared save" }
         ]
       }

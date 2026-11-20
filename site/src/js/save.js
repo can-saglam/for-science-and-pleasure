@@ -50,10 +50,11 @@ function show({ card, from }) {
   fill("from", from ? `${from} sent you this` : "Someone sent you this from Can We Go?");
   if (card.color) page.style.setProperty("--save-accent", card.color.startsWith("#") ? card.color : `#${card.color}`);
 
-  if (card.image_url && !card.image_url.includes("/functions/v1/place-photo")) {
+  if (card.image_url && !card.image_url.includes("/functions/v1/place-photo") && token.length === 10) {
     const photo = $("photo");
     const frame = $("photo-link");
-    photo.src = card.image_url;
+    // Through wegocan.com, so the photo's own site never sees the visitor.
+    photo.src = `/s/${token}/image`;
     photo.onerror = () => (frame.hidden = true);
     if (card.url) frame.href = card.url;
     frame.hidden = false;

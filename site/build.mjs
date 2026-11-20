@@ -18,12 +18,31 @@ const dist = join(here, "dist");
 const config = JSON.parse(readFileSync(join(here, "site.config.json"), "utf8"));
 
 const storeUrl = config.appStoreId ? `https://apps.apple.com/app/id${config.appStoreId}` : "";
+// Until there's an App Store listing, Download goes to the public beta.
+const getUrl = storeUrl || config.betaUrl || "";
+// What search engines read about the app; the listing joins it at launch.
+const appJsonLd = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Can We Go?",
+  description: config.description,
+  url: `${config.domain}/`,
+  operatingSystem: "iOS",
+  applicationCategory: "LifestyleApplication",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "GBP" },
+  ...(storeUrl ? { downloadUrl: storeUrl, installUrl: storeUrl } : {}),
+}).replace(/</g, "\\u003c");
 const vars = {
   ...config,
-  appStoreUrl: storeUrl || "#download",
+  appStoreUrl: getUrl || "#download",
   // For pages other than home, where there's no #download to land on.
-  getAppUrl: storeUrl || "/#download",
+  getAppUrl: getUrl || "/#download",
   smartBanner: config.appStoreId ? `<meta name="apple-itunes-app" content="app-id=${config.appStoreId}">` : "",
+  appJsonLd: `<script type="application/ld+json">${appJsonLd}</script>`,
+  // Apple's badge may only lead to the App Store; the beta gets a plain button.
+  getAppButton: storeUrl
+    ? `<a class="app-store" href="${storeUrl}"><img src="/img/app-store-badge.svg" alt="Download on the App Store" width="180" height="60"></a>`
+    : `<a class="pill pill-cream" href="${getUrl || "/#download"}">Download for iPhone</a>`,
   year: String(new Date().getFullYear()),
 };
 
@@ -139,5 +158,6 @@ for (const page of markdownPages) {
   writeFileSync(join(dist, page.slug, "index.html"), html);
 }
 
-if (!storeUrl) console.warn("site: appStoreId is empty, so download buttons point at #download");
+if (!getUrl) console.warn("site: appStoreId and betaUrl are empty, so download buttons point at #download");
+else if (!storeUrl) console.warn("site: no appStoreId yet, so download buttons go to the TestFlight beta");
 console.log(`site: built ${walk(dist).length} files into ${relative(root, dist)}`);

@@ -6,7 +6,7 @@
 import { shared } from "../../../lib/share.js";
 
 const compact = (iso) => iso.replaceAll("-", "");
-const escape = (s) => s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/[,;]/g, (c) => `\\${c}`);
+const escape = (s) => s.replace(/\\/g, "\\\\").replace(/\r\n|\r|\n/g, "\\n").replace(/[,;]/g, (c) => `\\${c}`);
 
 function nextDay(iso) {
   const d = new Date(`${iso}T12:00:00Z`);

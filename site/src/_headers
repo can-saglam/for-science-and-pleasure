@@ -1,9 +1,14 @@
 # Cloudflare Pages response headers.
+# Nothing inline and nothing from elsewhere: scripts, styles, photos (shared
+# saves' come through /s/<token>/image) and fonts are all this site's. The
+# pages call the share function directly when a preload is missing.
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self' https://gvewzvcvmeztqyfwkgwa.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
 
 # iOS reads this to open /join/ and /s/ links in the app; it must be JSON.
 /.well-known/apple-app-site-association

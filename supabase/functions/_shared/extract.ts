@@ -1070,6 +1070,9 @@ export async function extractCard(
 
   return {
     ...card,
+    // The model writes these, so a page's injected text could ask for any scheme.
+    booking_url: card.booking_url ? cleanLink(card.booking_url) : null,
+    website: card.website ? cleanLink(card.website) : null,
     url: savedUrl,
     source: input.image_base64 ? "image" : url ? "link" : "text",
     lat: coords?.lat ?? null,

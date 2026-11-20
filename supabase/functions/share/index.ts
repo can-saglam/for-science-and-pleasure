@@ -1,14 +1,17 @@
 // share: a save sent to someone outside the library.
-//   POST { item_id, card } (member JWT) → { token, url }. The card is what
-//     the phone has, so a save made offline or just edited goes as it is.
-//     Sharing the same save again keeps its link and refreshes the copy.
+//   POST { item_id } (member JWT) → { token, url }. The card is built from
+//     the saved row, so only a save in the sender's library that has
+//     reached the server can be shared (409 until it has; the app then
+//     sends the page's own link). Sharing the same save again keeps its
+//     link and refreshes the copy.
 //   GET ?t=<token> (public) → { card, from }, for wegocan.com/s/<token> and
 //     for the app, which opens it ready to save. `from` is the sender's
 //     first name as the app shows it, or null.
 //   GET ?i=<invite code> (public) → { status, from, members }, for
 //     wegocan.com/join/<code>: who's asking, by first name (publicInvite).
-//     An unknown code answers as an expired one, and an address that keeps
-//     guessing gets that answer for every code for an hour.
+//     An unknown code answers as an expired one. An address that keeps
+//     guessing gets that answer for every code for an hour, and so does
+//     everyone once wrong guesses pile up site-wide.
 import { corsHeaders } from "../_shared/extract.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { normaliseCode } from "../_shared/membership.ts";
@@ -24,6 +27,13 @@ function json(body: unknown, status = 200, extra: Record<string, string> = {}): 
 /// Wrong codes one address may try in an hour before every code reads as
 /// dead to it. Someone typing a code from a message needs a few.
 const LOOKUP_FAILS_PER_HOUR = 20;
+/// Wrong codes from everyone together in an hour before every code reads
+/// as dead to all: a guesser spread over many addresses still stops here.
+/// Joining in the app is unaffected; only the web page's preview waits.
+const LOOKUP_FAILS_SITEWIDE = 300;
+/// The columns a shared card is made of (sharedCard keeps them to size).
+const CARD_COLUMNS =
+  "kind, title, summary, venue, area, address, category, price, starts_on, ends_on, url, image_url, color, lat, lng, place_id, showings";
 /// New share links one person can make in a day.
 const SHARES_PER_DAY = 50;
 
@@ -31,11 +41,12 @@ const SHARES_PER_DAY = 50;
 const noInvite = () => json({ status: "expired", from: null, members: [] }, 200, { "Cache-Control": "no-store" });
 
 /// Who's asking, hashed: wegocan.com's own server passes on its visitor's
-/// address with the shared key; anyone else is their own address.
+/// address with the shared key. Anyone else could name any address in
+/// x-forwarded-for, so they all count as one caller.
 async function lookupKey(req: Request): Promise<string> {
   const siteKey = Deno.env.get("SITE_LOOKUP_SECRET");
   const fromSite = siteKey && req.headers.get("x-site-key") === siteKey ? req.headers.get("x-visitor-ip") : null;
-  const address = fromSite ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const address = fromSite ? `site:${fromSite}` : "direct";
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -49,6 +60,11 @@ async function invite(db: ReturnType<typeof admin>, req: Request, raw: string | 
     .eq("who", who)
     .gte("at", hourAgo);
   if ((fails ?? 0) >= LOOKUP_FAILS_PER_HOUR) return noInvite();
+  const { count: everyone } = await db
+    .from("public_lookups")
+    .select("id", { count: "exact", head: true })
+    .gte("at", hourAgo);
+  if ((everyone ?? 0) >= LOOKUP_FAILS_SITEWIDE) return noInvite();
 
   const code = normaliseCode(raw);
   const { data: inv } = code
@@ -112,13 +128,17 @@ Deno.serve(async (req) => {
     if (!caller) return json({ error: "not signed in" }, 401);
     const body = await req.json().catch(() => ({}));
     const itemId = typeof body.item_id === "string" ? body.item_id : "";
-    const card = sharedCard(body.card);
-    if (!/^[0-9a-f-]{36}$/i.test(itemId) || !card) return json({ error: "a save's card is required" }, 400);
+    if (!/^[0-9a-f-]{36}$/i.test(itemId)) return json({ error: "a save is required" }, 400);
 
-    // A save that has reached the server must be in the sender's library.
-    // One that hasn't (made offline a moment ago) goes on the card alone.
-    const { data: item } = await db.from("items").select("group_id, deleted_at").eq("id", itemId).maybeSingle();
-    if (item && (item.group_id !== caller.groupId || item.deleted_at)) return json({ error: "not your save" }, 403);
+    const { data: item } = await db
+      .from("items")
+      .select(`${CARD_COLUMNS}, group_id, deleted_at`)
+      .eq("id", itemId)
+      .maybeSingle();
+    if (!item) return json({ error: "not synced yet" }, 409);
+    if (item.group_id !== caller.groupId || item.deleted_at) return json({ error: "not your save" }, 403);
+    const card = sharedCard(item);
+    if (!card) return json({ error: "nothing to share" }, 400);
 
     const { data: existing } = await db
       .from("shared_saves")

@@ -10,19 +10,20 @@
 <meta property="og:title" content="Can We Go?">
 <meta property="og:description" content="{{tagline}}">
 <meta property="og:image" content="{{domain}}/img/og.png">
+{{appJsonLd}}
 <meta name="twitter:card" content="summary_large_image">
 </head>
 <body class="home" data-bg="midnight">
 
 <main>
   <section class="fan" aria-label="Screens from Can We Go?">
-    <figure class="device far" style="--i: -3"><img src="/img/shots/map.jpg" alt="Saved places on a map of London"></figure>
-    <figure class="device" style="--i: -2"><img src="/img/shots/sensual-mutual.jpg" alt="Sensual / Mutual at Auto Italia, 12 days left"></figure>
-    <figure class="device" style="--i: -1"><img src="/img/shots/salman-toor.jpg" alt="Salman Toor: Someone Like You at the Courtauld Gallery, 3 months left"></figure>
-    <figure class="device" style="--i: 0"><video src="/media/reel.mp4" poster="/img/shots/library.jpg" autoplay muted loop playsinline aria-label="Scrolling the library, adding Robert Ryman at the Barbican from a suggestion, saving it, then opening Anish Kapoor"></video></figure>
-    <figure class="device" style="--i: 1"><img src="/img/shots/anish-kapoor.jpg" alt="Anish Kapoor at the Hayward Gallery, 5 days left"></figure>
-    <figure class="device" style="--i: 2"><img src="/img/shots/places.jpg" alt="Places: restaurants, cafés and galleries to try, each with a photo"></figure>
-    <figure class="device far" style="--i: 3"><img src="/img/shots/composer.jpg" alt="Adding something new: “Where are we going?”"></figure>
+    <figure class="device far"><img src="/img/shots/map.jpg" alt="Saved places on a map of London"></figure>
+    <figure class="device"><img src="/img/shots/sensual-mutual.jpg" alt="Sensual / Mutual at Auto Italia, 12 days left"></figure>
+    <figure class="device"><img src="/img/shots/salman-toor.jpg" alt="Salman Toor: Someone Like You at the Courtauld Gallery, 3 months left"></figure>
+    <figure class="device"><video src="/media/reel.mp4" poster="/img/shots/library.jpg" autoplay muted loop playsinline aria-label="Scrolling the library, adding Robert Ryman at the Barbican from a suggestion, saving it, then opening Anish Kapoor"></video></figure>
+    <figure class="device"><img src="/img/shots/anish-kapoor.jpg" alt="Anish Kapoor at the Hayward Gallery, 5 days left"></figure>
+    <figure class="device"><img src="/img/shots/places.jpg" alt="Places: restaurants, cafés and galleries to try, each with a photo"></figure>
+    <figure class="device far"><img src="/img/shots/composer.jpg" alt="Adding something new: “Where are we going?”"></figure>
   </section>
 
   <section class="lede">
@@ -37,8 +38,6 @@
 </main>
 
 <!-- include partials/footer.html -->
-<script>
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) document.querySelector(".fan video").pause();
-</script>
+<script src="/js/home.js"></script>
 </body>
 </html>

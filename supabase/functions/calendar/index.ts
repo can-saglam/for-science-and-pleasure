@@ -4,29 +4,26 @@
 // feed_token.
 import { admin, groupForFeedKey } from "../_shared/groups.ts";
 import { groupHome } from "../_shared/home.ts";
+import { icsFold, icsLink, icsStamp, icsText } from "../_shared/ics.ts";
 
-function icsEscape(s: string): string {
-  return s.replace(/([,;\\])/g, "\\$1");
-}
-
-function allDay(uid: string, date: string, summary: string, url?: string | null): string {
+function allDay(uid: string, date: string, summary: string, stamp: string, url?: string | null): string[] {
   const dt = date.replace(/-/g, "");
   const next = new Date(new Date(date + "T00:00:00Z").getTime() + 86400000)
     .toISOString()
     .slice(0, 10)
     .replace(/-/g, "");
+  const link = icsLink(url);
   return [
     "BEGIN:VEVENT",
     `UID:${uid}@fsap`,
+    `DTSTAMP:${stamp}`,
     `DTSTART;VALUE=DATE:${dt}`,
     `DTEND;VALUE=DATE:${next}`,
-    `SUMMARY:${icsEscape(summary)}`,
-    url ? `URL:${url}` : "",
+    `SUMMARY:${icsText(summary)}`,
+    ...(link ? [`URL:${link}`] : []),
     "TRANSP:TRANSPARENT",
     "END:VEVENT",
-  ]
-    .filter(Boolean)
-    .join("\r\n");
+  ];
 }
 
 Deno.serve(async (req) => {
@@ -50,13 +47,14 @@ Deno.serve(async (req) => {
     return new Response("internal error", { status: 500 });
   }
 
+  const stamp = icsStamp(new Date());
   const events: string[] = [];
   for (const i of items ?? []) {
     if (i.kind === "event" && i.ends_on) {
-      events.push(allDay(`close-${i.id}`, i.ends_on, `Last day: ${i.title}`, i.url));
+      events.push(...allDay(`close-${i.id}`, i.ends_on, `Last day: ${i.title}`, stamp, i.url));
     }
     if (i.kind === "event" && i.starts_on && i.starts_on !== i.ends_on) {
-      events.push(allDay(`open-${i.id}`, i.starts_on, `Opens: ${i.title}`, i.url));
+      events.push(...allDay(`open-${i.id}`, i.starts_on, `Opens: ${i.title}`, stamp, i.url));
     }
   }
 
@@ -68,7 +66,7 @@ Deno.serve(async (req) => {
     `X-WR-TIMEZONE:${home.timezone}`,
     ...events,
     "END:VCALENDAR",
-  ].join("\r\n");
+  ].map(icsFold).join("\r\n") + "\r\n";
 
   return new Response(body, {
     headers: {

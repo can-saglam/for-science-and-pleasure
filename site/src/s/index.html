@@ -39,7 +39,7 @@
   </article>
 
   <div class="save-actions" data-actions hidden>
-    <a class="app-store" href="{{getAppUrl}}"><img src="/img/app-store-badge.svg" alt="Download on the App Store" width="180" height="60"></a>
+    {{getAppButton}}
     <a class="save-open" data-iphone href="#" hidden>Already have it? Open in the app</a>
     <p class="save-elsewhere" data-elsewhere hidden>Can We Go? is an iPhone app for the places and events you mean to go to. Open this link on an iPhone to save it to your own list. <a href="/">What’s Can We Go?</a></p>
   </div>
@@ -47,7 +47,7 @@
   <div data-missing hidden>
     <h1>This save isn’t here</h1>
     <p class="join-lede">The link may be incomplete. Ask whoever sent it to share it again.</p>
-    <a class="app-store" href="{{getAppUrl}}"><img src="/img/app-store-badge.svg" alt="Download on the App Store" width="180" height="60"></a>
+    {{getAppButton}}
   </div>
 
   <noscript><p class="join-lede">Open this link on your iPhone with Can We Go? installed to see the save.</p></noscript>
