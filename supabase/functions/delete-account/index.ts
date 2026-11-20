@@ -1,8 +1,8 @@
 // delete-account: the caller removes their login. A shared library is left
 // for whoever remains (they leave; feed_token rotates; their invite codes
-// go). A solo library is torn down with them, photos included. Their email
-// comes off every save they made, and their usage and invite-attempt rows
-// go. An Apple sign-in sends a fresh authorization code, and the app's
+// go). A solo library is torn down with them, photos included. Their rows
+// go in one transaction (delete_account_data, 0053) before the login does,
+// so a failure leaves the account whole and the person can try again. An Apple sign-in sends a fresh authorization code, and the app's
 // Sign in with Apple access is revoked once the account is gone. JWT
 // required; work runs as the service role.
 import { corsHeaders } from "../_shared/extract.ts";
@@ -54,46 +54,22 @@ Deno.serve(async (req) => {
       .select("group_id")
       .eq("user_id", uid)
       .maybeSingle();
+    // Read before the profile goes, so the ping still has their name.
+    const name = mem?.group_id ? await displayName(db, uid, email) : "";
 
-    if (mem?.group_id) {
-      const { count } = await db
-        .from("group_members")
-        .select("user_id", { count: "exact", head: true })
-        .eq("group_id", mem.group_id);
-      const others = (count ?? 1) - 1;
+    // Every row of theirs, in one transaction: all of it or none of it.
+    const { data: gone, error: dataErr } = await db.rpc("delete_account_data", { p_user: uid });
+    if (dataErr) throw dataErr;
+    const { group_id: groupId, others } = gone as { group_id: string | null; others: number };
 
-      if (others > 0) {
-        // Read before the profile goes, so the ping still has their name.
-        const name = await displayName(db, uid, email);
-        await db.from("group_members").delete().eq("user_id", uid);
-        // Codes they handed out stop letting people into a library they've left.
-        await db.from("group_invites").delete().eq("group_id", mem.group_id).eq("created_by", uid);
-        await db
-          .from("groups")
-          .update({ feed_token: crypto.randomUUID().replaceAll("-", "") })
-          .eq("id", mem.group_id);
-        await notifyGroupOfMember(db, { groupId: mem.group_id, userId: uid, name, change: "left" });
-      } else {
-        await removeGroupPhotos(db, mem.group_id);
-        await db.from("live_activity_runs").delete().eq("group_id", mem.group_id);
-        await db.from("notify_recent").delete().eq("group_id", mem.group_id);
-        await db.from("items").delete().eq("group_id", mem.group_id);
-        await db.from("group_invites").delete().eq("group_id", mem.group_id);
-        await db.from("group_members").delete().eq("group_id", mem.group_id);
-        await db.from("groups").delete().eq("id", mem.group_id);
-      }
+    if (groupId && others > 0) {
+      await notifyGroupOfMember(db, { groupId, userId: uid, name, change: "left" })
+        .catch((e) => console.error("left ping", e));
+    } else if (groupId) {
+      // Photos aren't rows: a failure leaves files nobody can reach, not data.
+      await removeGroupPhotos(db, groupId).catch((e) => console.error("photos", e));
     }
 
-    // Saves they made in any library keep the save, not their address.
-    if (email) {
-      const { error: forgetError } = await db.rpc("forget_saver", { p_email: email });
-      if (forgetError) throw forgetError;
-    }
-    await db.from("usage_daily").delete().eq("user_id", uid);
-    await db.from("invite_attempts").delete().eq("user_id", uid);
-    await db.from("notify_recent").delete().eq("actor", uid);
-    await db.from("apns_tokens").delete().eq("user_id", uid);
-    await db.from("profiles").delete().eq("user_id", uid);
     const { error: delErr } = await db.auth.admin.deleteUser(uid);
     if (delErr) throw delErr;
 

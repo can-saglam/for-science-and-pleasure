@@ -1,4 +1,4 @@
-"""RLS/behaviour battery. Run as: python3 rls_battery.py 1a|1b   (see README.md)
+"""RLS/behaviour battery. Run as: python3 rls_battery.py 1a|1b|0053   (see README.md)
 
 Signs in as Can, Joyce and a stranger with real password-grant JWTs and
 drives PostgREST the way the iOS app does. Every check prints PASS/FAIL;
@@ -53,9 +53,11 @@ def login(email):
     assert s == 200, (email, s, b)
     return b["access_token"], b["user"]["id"]
 
-s, rows = svc("/rest/v1/items?select=id")
-TOTAL = len(rows)  # includes soft-deleted rows: RLS is about rows, not status
 can_jwt, can_id = login(CAN)
+s, m = svc(f"/rest/v1/group_members?user_id=eq.{can_id}&select=group_id")
+s, rows = svc(f"/rest/v1/items?group_id=eq.{m[0]['group_id']}&select=id")
+TOTAL = len(rows)  # their group's, soft-deleted included: RLS is about rows, not status
+OURS = {r["id"] for r in rows}
 joyce_jwt, joyce_id = login(JOYCE)
 str_jwt, str_id = login(STRANGER)
 print(f"phase={PHASE}  can={can_id[:8]} joyce={joyce_id[:8]} stranger={str_id[:8]}")
@@ -63,7 +65,7 @@ print(f"phase={PHASE}  can={can_id[:8]} joyce={joyce_id[:8]} stranger={str_id[:8
 # ---------------------------------------------------------------- reads
 s, rows = http("/rest/v1/items?select=id", jwt=can_jwt);  check(f"can reads all {TOTAL} items", s == 200 and len(rows) == TOTAL, f"{s} {len(rows) if isinstance(rows, list) else rows}")
 s, rows = http("/rest/v1/items?select=id", jwt=joyce_jwt); check(f"joyce reads all {TOTAL} items", s == 200 and len(rows) == TOTAL, f"{s}")
-s, rows = http("/rest/v1/items?select=id", jwt=str_jwt); check("stranger reads 0 items", s == 200 and rows == [], f"{s} {rows}")
+s, rows = http("/rest/v1/items?select=id", jwt=str_jwt); check("stranger reads none of our items", s == 200 and not any(r["id"] in OURS for r in rows), f"{s} {rows}")
 s, rows = http("/rest/v1/items?select=id", jwt=None); check("anon reads 0 items", s in (200, 401) and (rows == [] or s == 401), f"{s} {rows}")
 
 # ---------------------------------------------------------------- insert as the app does (build 40 shape: group_id null in payload)
@@ -72,14 +74,14 @@ now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 row = {"id": new_id, "kind": "event", "status": "saved", "title": "RLS test item", "summary": None, "venue": None,
        "area": None, "address": None, "category": None, "price": None, "url": None, "booking_url": None,
        "starts_on": None, "ends_on": None, "lat": None, "lng": None, "image_url": None, "color": None,
-       "source": "app", "raw_input": None, "added_by_email": CAN, "created_at": now, "updated_at": now,
+       "source": "app", "added_by_email": CAN, "created_at": now, "updated_at": now,
        "deleted_at": None, "group_id": None, "updated_by": None}
 s, b = http("/rest/v1/items", "POST", [row], jwt=can_jwt, prefer="resolution=merge-duplicates,return=minimal")
 check("can inserts a row with group_id=null (build 40 payload)", s == 201, f"{s} {b}")
 s, b = svc(f"/rest/v1/items?id=eq.{new_id}&select=group_id,updated_by")
 check("trigger filled group_id + updated_by", s == 200 and b and b[0]["group_id"] and b[0]["updated_by"] == can_id, f"{s} {b}")
 gid = b[0]["group_id"] if b else None
-if PHASE == "1b":
+if PHASE in ("1b", "0053"):
     s, b = svc(f"/rest/v1/items?id=eq.{new_id}&select=created_by")
     check("1b: created_by stamped from JWT", s == 200 and b[0]["created_by"] == can_id, f"{b}")
 
@@ -111,8 +113,12 @@ s, after = svc(f"/rest/v1/items?id=eq.{new_id}&select=updated_at,updated_by")
 check("machine edit leaves updated_at/updated_by alone", before == after, f"{before} -> {after}")
 
 # ---------------------------------------------------------------- stranger
-s, b = http("/rest/v1/items", "POST", [dict(row, id=str(uuid.uuid4()), added_by_email=STRANGER)], jwt=str_jwt, prefer="return=minimal")
-check("stranger cannot insert", s in (400, 401, 403), f"{s} {b}")
+# Since 0021 the stranger has a personal group: their save lands there, never in ours.
+stray_id = str(uuid.uuid4())
+s, b = http("/rest/v1/items", "POST", [dict(row, id=stray_id, group_id=gid)], jwt=str_jwt, prefer="return=minimal")
+s2, b2 = svc(f"/rest/v1/items?id=eq.{stray_id}&select=group_id")
+check("stranger can't insert into our group", s in (400, 401, 403) or (b2 and b2[0]["group_id"] != gid), f"{s} {b} / {b2}")
+svc(f"/rest/v1/items?id=eq.{stray_id}", "DELETE")
 s, b = http(f"/rest/v1/items?id=eq.{new_id}", "PATCH", {"title": "HACKED", "updated_at": later}, jwt=str_jwt, prefer="return=representation")
 s2, b2 = svc(f"/rest/v1/items?id=eq.{new_id}&select=title")
 check("stranger update touches 0 rows", (b == [] or s in (401, 403, 404)) and b2[0]["title"] != "HACKED", f"{s} {b} / {b2}")
@@ -132,7 +138,7 @@ tok = "rlstest" + uuid.uuid4().hex
 s, b = http("/rest/v1/apns_tokens", "POST", {"token": tok, "email": CAN}, jwt=can_jwt, prefer="resolution=merge-duplicates,return=minimal")
 check("can registers an APNs token (email payload, as the app sends)", s == 201, f"{s} {b}")
 s, b = svc(f"/rest/v1/apns_tokens?token=eq.{tok}&select=user_id,email")
-if PHASE == "1b": check("1b: token linked to can's user_id by trigger", s == 200 and b and b[0]["user_id"] == can_id, f"{b}")
+if PHASE in ("1b", "0053"): check("1b: token linked to can's user_id by trigger", s == 200 and b and b[0]["user_id"] == can_id, f"{b}")
 else: print("INFO 1a: new token user_id =", b[0]["user_id"], "(no trigger yet; 0017 backfills)")
 s, b = http(f"/rest/v1/apns_tokens?token=eq.{tok}&select=token", jwt=str_jwt)
 check("stranger can't read can's token", s == 200 and b == [], f"{s} {b}")
@@ -161,24 +167,24 @@ else:
     check("0024: digest_runs is gone", s == 404, f"{s}")
 
 # ---------------------------------------------------------------- groups / profiles / entitlements (1a tables)
-s, b = http("/rest/v1/groups?select=id,name" + (",feed_token" if PHASE == "1b" else ""), jwt=can_jwt)
+s, b = http("/rest/v1/groups?select=id,name" + (",feed_token" if PHASE in ("1b", "0053") else ""), jwt=can_jwt)
 check("can reads own group", s == 200 and len(b) == 1 and b[0]["id"] == gid, f"{s} {b}")
-if PHASE == "1b":
+if PHASE in ("1b", "0053"):
     check("1b: group has a feed_token", bool(b) and len(b[0].get("feed_token") or "") == 32, f"{b}")
-s, b = http("/rest/v1/groups?select=id", jwt=str_jwt); check("stranger reads 0 groups", s == 200 and b == [], f"{s} {b}")
+s, b = http("/rest/v1/groups?select=id", jwt=str_jwt); check("stranger reads only their own group", s == 200 and len(b) <= 1 and all(x["id"] != gid for x in b), f"{s} {b}")
 s, b = http("/rest/v1/profiles?select=user_id,display_name", jwt=joyce_jwt); check("joyce reads both profiles", s == 200 and len(b) == 2, f"{s} {b}")
-s, b = http("/rest/v1/profiles?select=user_id", jwt=str_jwt); check("stranger reads 0 profiles", s == 200 and b == [], f"{s} {b}")
+s, b = http("/rest/v1/profiles?select=user_id", jwt=str_jwt); check("stranger reads only their own profile", s == 200 and all(x["user_id"] == str_id for x in b), f"{s} {b}")
 s, b = http("/rest/v1/entitlements?select=*", jwt=can_jwt); check("can reads group entitlements", s == 200 and len(b) >= 1, f"{s} {b}")
 s, b = http("/rest/v1/group_members?select=user_id", jwt=can_jwt); check("can sees 2 group members", s == 200 and len(b) == 2, f"{s} {b}")
 
 # ---------------------------------------------------------------- helpers
 s, b = http("/rest/v1/rpc/current_group_id", "POST", {}, jwt=can_jwt); check("current_group_id() for can", s == 200 and b == gid, f"{s} {b}")
-s, b = http("/rest/v1/rpc/current_group_id", "POST", {}, jwt=str_jwt); check("current_group_id() null for stranger", s == 200 and b is None, f"{s} {b}")
+s, b = http("/rest/v1/rpc/current_group_id", "POST", {}, jwt=str_jwt); check("current_group_id() for stranger isn't ours", s == 200 and b != gid, f"{s} {b}")
 s, b = http("/rest/v1/rpc/is_member", "POST", {}, jwt=can_jwt)
 check(("1a: is_member() still exists" if PHASE == "1a" else "1b: is_member() is gone"), (s == 200 and b is True) if PHASE == "1a" else s == 404, f"{s} {b}")
 
 # ---------------------------------------------------------------- 1b-only: member cap, dispatcher
-if PHASE == "1b":
+if PHASE in ("1b", "0053"):
     rows = sql(f"""
       do $$
       declare i int; uid uuid; g uuid := '{gid}';
@@ -217,6 +223,69 @@ if PHASE == "1b":
     check("1b: items.group_id NOT NULL", rows and rows[0]["n"] == 0, f"{rows}")
     rows = sql("select to_regclass('public.members') as m, to_regclass('public.digests') as d, to_regclass('public.push_subscriptions') as p")
     check("1b: members/digests/push_subscriptions dropped", rows and all(v is None for v in rows[0].values()), f"{rows}")
+
+# ---------------------------------------------------------------- 0053/0054: stamps, privacy, groups, deletion, housekeeping
+if PHASE == "0053":
+    fresh_id = str(uuid.uuid4())
+    http("/rest/v1/items", "POST", [dict(row, id=fresh_id, title="RLS stamp")], jwt=can_jwt, prefer="return=minimal")
+    s, b = svc(f"/rest/v1/items?id=eq.{fresh_id}&select=added_by_email,inserted_at")
+    svc(f"/rest/v1/items?id=eq.{fresh_id}", "DELETE")
+    check("0053: no email kept on a new save", s == 200 and b and b[0]["added_by_email"] is None, f"{b}")
+    check("0053: inserted_at stamped by the server", bool(b) and b[0]["inserted_at"] is not None, f"{b}")
+    rows = sql("select count(*) as n from public.items where added_by_email is not null")
+    check("0053: stored emails cleared", rows and rows[0]["n"] == 0, f"{rows}")
+    future_id = str(uuid.uuid4())
+    ahead = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)).isoformat()
+    s, b = http("/rest/v1/items", "POST", [dict(row, id=future_id, title="RLS future", created_at=ahead, updated_at=ahead)], jwt=can_jwt, prefer="return=minimal")
+    s2, b2 = svc(f"/rest/v1/items?id=eq.{future_id}&select=created_at,updated_at")
+    soon = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).isoformat()
+    check("0053: a future created_at/updated_at is pulled back to now", s == 201 and b2 and b2[0]["created_at"] < soon and b2[0]["updated_at"] < soon, f"{s} {b} / {b2}")
+    svc(f"/rest/v1/items?id=eq.{future_id}", "DELETE")
+
+    s, g = http("/rest/v1/groups?select=id,home_locality,home_timezone,feed_token", jwt=can_jwt)
+    home = g[0]["home_locality"] if g else None
+    s, b = http(f"/rest/v1/groups?id=eq.{gid}", "PATCH", {"home_locality": "Battery Town"}, jwt=can_jwt, prefer="return=minimal")
+    s2, b2 = svc(f"/rest/v1/groups?id=eq.{gid}&select=home_locality")
+    check("0053: a member can change the group's home", s == 204 and b2 and b2[0]["home_locality"] == "Battery Town", f"{s} {b} / {b2}")
+    svc(f"/rest/v1/groups?id=eq.{gid}", "PATCH", {"home_locality": home}, prefer="return=minimal")
+    s, b = http(f"/rest/v1/groups?id=eq.{gid}", "PATCH", {"feed_token": "0" * 32}, jwt=can_jwt, prefer="return=minimal")
+    s2, b2 = svc(f"/rest/v1/groups?id=eq.{gid}&select=feed_token")
+    check("0053: a member can't rewrite feed_token", s in (401, 403) and b2 and b2[0]["feed_token"] == g[0]["feed_token"], f"{s} {b}")
+    s, b = http(f"/rest/v1/groups?id=eq.{gid}", "PATCH", {"name": "Hijacked"}, jwt=can_jwt, prefer="return=minimal")
+    check("0053: a member can't rename the group directly", s in (401, 403), f"{s} {b}")
+    s, b = http(f"/rest/v1/groups?id=eq.{gid}", "PATCH", {"home_timezone": "Mars/Olympus"}, jwt=can_jwt, prefer="return=minimal")
+    s2, b2 = svc(f"/rest/v1/groups?id=eq.{gid}&select=home_timezone")
+    check("0053: an unknown timezone keeps the previous one, the save still lands", s == 204 and b2 and b2[0]["home_timezone"] == g[0]["home_timezone"], f"{s} {b} / {b2}")
+
+    s, b = http("/rest/v1/rpc/delete_account_data", "POST", {"p_user": str_id}, jwt=str_jwt)
+    check("0053: delete_account_data isn't callable by users", s in (401, 403, 404), f"{s} {b}")
+    s, b = http("/rest/v1/rpc/purge_old_rows", "POST", {}, jwt=can_jwt)
+    check("0054: purge_old_rows isn't callable by users", s in (401, 403, 404), f"{s} {b}")
+
+    rows = sql("""
+      do $$
+      declare uid uuid := gen_random_uuid(); g uuid;
+      begin
+        insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
+        values (uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'gone@example.com', '', now(), now(), now(), '{}', '{}');
+        select group_id into g from public.group_members where user_id = uid;
+        insert into public.items (kind, status, title, group_id, created_by) values ('event', 'saved', 'Solo save', g, uid);
+        perform public.delete_account_data(uid);
+        delete from auth.users where id = uid;
+      end $$;
+      select (select count(*) from public.items where title = 'Solo save') as items,
+             (select count(*) from public.groups g where not exists (select 1 from public.group_members m where m.group_id = g.id)) as empty_groups,
+             (select count(*) from public.profiles p where not exists (select 1 from auth.users u where u.id = p.user_id)) as orphan_profiles""")
+    check("0053: delete_account_data takes a solo library with it", isinstance(rows, list) and rows and rows[0]["items"] == 0 and rows[0]["orphan_profiles"] == 0, f"{rows}")
+
+    rows = sql("select column_name from information_schema.columns where table_name='items' and column_name='raw_input'")
+    check("0054: items.raw_input dropped", rows == [], f"{rows}")
+    rows = sql("select count(*) as n from cron.job where jobname = 'purge-nightly'")
+    check("0054: purge-nightly scheduled", rows and rows[0]["n"] == 1, f"{rows}")
+    rows = sql("select public.purge_old_rows() as r")
+    check("0054: purge runs", isinstance(rows, list) and rows and "saves" in (rows[0]["r"] if isinstance(rows[0]["r"], dict) else json.loads(rows[0]["r"])), f"{rows}")
+    rows = sql("select count(*) as n from public.suggestion_runs_weekly")
+    check("0054: weekly view reads", isinstance(rows, list) and rows and rows[0]["n"] >= 0, f"{rows}")
 
 print()
 print(f"{len(failures)} failure(s)" if failures else "ALL PASS", f"— phase {PHASE}")

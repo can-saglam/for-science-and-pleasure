@@ -10,7 +10,7 @@ Three scripts, no dependencies beyond Python 3 and the Supabase CLI:
 
 | script | target | what it proves |
 |---|---|---|
-| `rls_battery.py 1a\|1b` | staging | Real users see/write exactly their group; strangers see nothing; triggers stamp `group_id`/`created_by`/`updated_by`; stale-write guard; member cap; dispatcher runs |
+| `rls_battery.py 1a\|1b\|0053` | staging | Real users see/write exactly their group; strangers see nothing; triggers stamp `group_id`/`created_by`/`updated_by`; stale-write guard; member cap; dispatcher runs |
 | `function_battery.py` | staging | Every edge function's auth gate and group scoping (calendar feed, notify, reminders, parse/suggest gates; retired `ingest`/`digest` stay 404) |
 | `stranger_probe.py` | **production-safe** | A fresh account is provisioned into its own personal group and sees *only* that: no items, no other groups/profiles/schedules; blanket UPDATE/DELETE touch only its own row; it can't join, move its membership, mint invites or grant itself Plus; anon gets nothing; `membership_*` RPCs aren't callable by users. Creates and deletes its own user and group |
 | `membership_battery.py [--function]` | staging | 0021 + `group-membership`: provisioning (group, schedule, name, colour), invite lifecycle (ok/expired/revoked/unknown/own, multi-use), 2-free/4-Plus cap incl. the joiner's own Plus, join moving saves with URL dedupe and notes merge, leave with/without copy, feed-token rotation, auto-names and pinning, last-seat race (two threads), client lock-out, "Former member" tombstone; `--function` repeats the flows over HTTP with real JWTs. Creates six throwaway accounts and cleans up |
@@ -23,9 +23,21 @@ wording), 2 "hard" that were the *stored* card being wrong (Tate page says
 advertises 2027). With home = Lisbon, Lisbon museums geocoded in Lisbon with
 € prices, and a London URL stayed in London with the city in its address.
 
-`stranger_probe.py` can be run against production any time (it did run after
-1b and after 0018). The other two need a staging copy with the two member
-accounts, which the steps below create.
+`stranger_probe.py` signs in with a password, and production now has the
+email provider off (Sign in with Apple only), so it runs against staging; it
+exits cleanly, removing its account and group, when sign-in is refused. The
+batteries need a staging copy with two members of one group (the battery's
+"Can" and "Joyce"), which the steps below create.
+
+0053/0054 (20 Nov) were rehearsed on a copy of production: baseline green,
+up green (`rls_battery.py 0053`, `membership_battery.py`), down green, up
+green, and `delete-account` end to end for a solo and a shared account. It
+caught `transfer_items` failing on every URL twin since 0026 (an enum
+compared with ''). Two tips from it: load data with SQL under
+`session_replication_role = replica` (users first, via the admin API with
+their production `id`s), and run `membership_battery.py` with
+`SUPABASE_DB_PASSWORD` set, or its two-thread race trips over the CLI's
+temporary login role.
 
 ## Rehearsal
 

@@ -46,7 +46,8 @@ final class Item {
     /// a backfill or thumbnail write never changes it.
     var updatedBy: UUID?
     /// Who saved it — stamped server-side from the JWT (Phase 1b). Replaces
-    /// addedByEmail as the source for "Added by"; the email stays for old rows.
+    /// addedByEmail as the source for "Added by"; the server no longer keeps
+    /// the email (0053), so it survives only on saves never synced.
     var createdBy: UUID?
     /// Days before the anchor to fire a shared reminder: 7, 3, 1, or 0
     /// (morning of). Nil means no reminder. Always travels with

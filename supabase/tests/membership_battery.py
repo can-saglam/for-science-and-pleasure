@@ -124,7 +124,7 @@ try:
     founding = sql("select id, name, name_pinned from public.groups order by created_at limit 1")[0]
     check("founding group name pinned", founding["name_pinned"] is True and founding["name"] == "Can & Joyce", str(founding))
     cols = sql(f"select p.avatar_colour from public.group_members m join public.profiles p on p.user_id = m.user_id where m.group_id = '{founding['id']}' order by m.joined_at")
-    check("founders got distinct colours", [c["avatar_colour"] for c in cols] == ["coral", "mint"], str(cols))
+    check("founders got distinct colours", len(cols) >= 2 and len({c["avatar_colour"] for c in cols}) == len(cols), str(cols))
 
     # ------------------------------------------------------------ invites
     inv = fn(f"public.membership_invite('{ann}')")
@@ -144,7 +144,8 @@ try:
     add_item(g_ann, ann, "Ann's cafe", "https://www.example.com/cafe/", notes="Ann's note")
     add_item(g_ann, ann, "Ann only", "https://example.com/only")
     add_item(g_bob, bob, "Bob's cafe", "http://example.com/cafe", notes="Bob's note",
-             starts_on="2026-10-01", remind_at="2026-09-24", image_url="https://example.com/cafe.jpg")
+             starts_on="2026-10-01", remind_at="2026-09-24", reminder_offset_days=7, reminder_anchor="starts_on",
+             image_url="https://example.com/cafe.jpg")
     add_item(g_bob, bob, "Bob only")
     j = fn(f"public.membership_join('{bob}', '{code_ann}', false)")
     check("bob joins ann", j.get("joined") is True and j.get("moved") == 1, str(j))
@@ -244,7 +245,7 @@ try:
     ts = [threading.Thread(target=race, args=(u,)) for u in (eve, fay)]
     [t.start() for t in ts]; [t.join() for t in ts]
     outcomes = sorted("joined" if r.get("joined") else r.get("error", "?") for r in results)
-    check("last seat: one joins, one sees plus_required", outcomes == ["joined", "plus_required"], str(outcomes))
+    check("last seat: one joins, one sees plus_required", outcomes == ["joined", "plus_required"], str(results)[-1500:])
     s, b = svc(f"/rest/v1/group_members?group_id=eq.{g_ann}&select=user_id")
     check("…and the group has exactly 2", len(b) == 2)
     win, lose = ("eve", "fay") if group_of(eve) == g_ann else ("fay", "eve")

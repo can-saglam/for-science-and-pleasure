@@ -1,12 +1,12 @@
--- Undoes 0045: back to 0042's items_default_group and 0043's daily count.
+-- Undoes 0053_stamps_and_privacy. The emails it cleared stay cleared.
 
 drop trigger if exists items_pin_inserted_at on public.items;
 drop function if exists public.items_pin_inserted_at();
 
-create or replace function public.items_default_group()
-returns trigger
-language plpgsql
-as $$
+CREATE OR REPLACE FUNCTION public.items_default_group()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
 begin
   if new.group_id is null then
     new.group_id = public.current_group_id();
@@ -19,14 +19,14 @@ begin
   end if;
   return new;
 end;
-$$;
+$function$;
 
-create or replace function public.enforce_daily_adds()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
+CREATE OR REPLACE FUNCTION public.enforce_daily_adds()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
 declare
   me uuid := auth.uid();
   tz text;
@@ -77,6 +77,14 @@ begin
   end if;
   return new;
 end;
-$$;
+$function$;
 
 alter table public.items drop column if exists inserted_at;
+
+drop trigger if exists groups_check_timezone on public.groups;
+drop function if exists public.groups_check_timezone();
+grant all on table public.groups to authenticated;
+
+drop function if exists public.delete_account_data(uuid);
+
+delete from supabase_migrations.schema_migrations where version = '0053';

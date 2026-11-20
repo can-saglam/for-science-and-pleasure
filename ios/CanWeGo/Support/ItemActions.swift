@@ -11,7 +11,6 @@ extension Item {
         let me = SupabaseAuth.shared.userId
         if createdBy == nil { createdBy = me }
         updatedBy = me
-        if addedByEmail == nil { addedByEmail = SupabaseAuth.shared.email }
     }
 
     func softDelete() {

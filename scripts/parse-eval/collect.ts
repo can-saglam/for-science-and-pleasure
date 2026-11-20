@@ -8,7 +8,7 @@
 // Writes scripts/parse-eval/data/cases.json, which holds library content
 // and stays out of git. Handwritten cases live in typed.json beside this.
 
-import { firstUrl, type Page, pageFromHtml } from "../../supabase/functions/_shared/extract.ts";
+import { type Page, pageFromHtml } from "../../supabase/functions/_shared/extract.ts";
 import type { Case } from "./score.ts";
 
 const env = new TextDecoder().decode(await Deno.readFile(".supabase.env"));
@@ -31,12 +31,11 @@ interface Save {
   url: string | null;
   image_url: string | null;
   source: string;
-  raw_input: string | null;
 }
 
 const res = await fetch(
   `${url}/rest/v1/items?deleted_at=is.null&order=created_at.desc&limit=1000` +
-    "&select=id,kind,title,venue,category,starts_on,ends_on,url,image_url,source,raw_input",
+    "&select=id,kind,title,venue,category,starts_on,ends_on,url,image_url,source",
   { headers: { apikey: key, Authorization: `Bearer ${key}` } },
 );
 if (!res.ok) {
@@ -86,12 +85,6 @@ for (const save of saves) {
     ends_on: save.kind === "event" ? save.ends_on : null,
     photo: Boolean(save.image_url),
   };
-  const typed = save.source === "text" && save.raw_input && !firstUrl(save.raw_input);
-  if (typed) {
-    const host = save.url ? new URL(save.url).hostname.replace(/^www\./, "") : null;
-    cases.push({ id: save.id, group: "typed", input: save.raw_input!.trim(), expect: { ...expect, host } });
-    continue;
-  }
   if (!save.url) continue;
   const host = new URL(save.url).hostname.replace(/^www\./, "");
   if (MAPS.test(host)) {

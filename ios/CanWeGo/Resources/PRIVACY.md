@@ -6,7 +6,7 @@ Can We Go? is a shared list of places and events you mean to go to.
 
 - Your Apple sign-in, so we know which library is yours. Apple may give us your email address, or a private relay address if you chose to hide it.
 - The name you give yourself in the app, so people in your group know who saved what.
-- The cards you save: titles, dates, notes, links, photos you attach, and who in the group added them. Each save records the account that added it and, for now, the email address Apple gave that account.
+- The cards you save: titles, dates, notes, links, photos you attach, and who in the group added them. Each save records the account that added it, not its email address.
 - A home city, if you set one, so dates and distances read in that city.
 - Which city you asked for suggestions in, once a day, and whether your copy came from the App Store, so we keep suggestions ready in the cities people use. These are deleted after 120 days.
 - Whether you subscribe to Can We Go? Plus, and until when, so your group gets its benefits.
@@ -20,7 +20,7 @@ We do not sell this. We do not run ads. We do not track you across other apps.
 
 ## Who can see a save
 
-People in your group see every save in it, the name you go by, and which saves you added. Saves you added also carry your email address, which is copied to their phones with the save but never shown in the app; we are removing it. If you leave a shared group, their copies stay; yours come with you only when the leave flow says so. If you are the last member and you delete the account, that group’s library is removed.
+People in your group see every save in it, the name you go by, and which saves you added. They never see your email address. If you leave a shared group, their copies stay; yours come with you only when the leave flow says so. If you are the last member and you delete the account, that group’s library is removed.
 
 Share with a friend makes a link to a copy of one card: its title, place, dates, photo and link, never your notes, plans or reminders. Anyone with the link can see that copy, on the web or in the app, along with the first word of the name you go by in the app, so they know who sent it. Sending the same save again updates the copy. Deleting your account removes the copies you sent.
 

@@ -26,9 +26,14 @@ def http(path, method="GET", body=None, jwt=None, key=None, prefer=None):
 email = f"rls-probe-{secrets.token_hex(4)}@example.com"; pw = secrets.token_urlsafe(20)
 s, u = http("/auth/v1/admin/users", "POST", {"email": email, "password": pw, "email_confirm": True}, key=SVC)
 assert s == 200, (s, u); uid = u["id"]; print("probe user", uid[:8])
-own_gid = None
+# Looked up with the service key so cleanup finds it even if sign-in fails.
+s, m = http(f"/rest/v1/group_members?user_id=eq.{uid}&select=group_id", key=SVC)
+own_gid = m[0]["group_id"] if s == 200 and m else None
 try:
-    s, tok = http("/auth/v1/token?grant_type=password", "POST", {"email": email, "password": pw}); jwt = tok["access_token"]
+    s, tok = http("/auth/v1/token?grant_type=password", "POST", {"email": email, "password": pw})
+    if "access_token" not in (tok or {}):
+        sys.exit(f"Password sign-in refused ({s} {tok}). Production has the email provider off; run this against staging.")
+    jwt = tok["access_token"]
 
     # Since 0021 every new account is provisioned into a personal group, so a
     # stranger sees exactly their own rows and nothing of anyone else's.
@@ -81,7 +86,8 @@ finally:
         http(f"/rest/v1/groups?id=eq.{own_gid}", "DELETE", key=SVC)
     s, b = http(f"/rest/v1/profiles?user_id=eq.{uid}", "DELETE", key=SVC)
     s, b = http(f"/rest/v1/items?title=in.(probe,pwned)&select=id", key=SVC); check("no probe rows left behind", b == [], f"{b}")
-    s, b = http(f"/rest/v1/groups?id=eq.{own_gid}&select=id", key=SVC); check("probe group removed", b == [], f"{b}")
+    if own_gid:
+        s, b = http(f"/rest/v1/groups?id=eq.{own_gid}&select=id", key=SVC); check("probe group removed", b == [], f"{b}")
 
 print(); print(f"{len(fails)} failure(s)" if fails else "ALL PASS — production stranger probe")
 sys.exit(1 if fails else 0)

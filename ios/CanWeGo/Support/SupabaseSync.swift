@@ -495,7 +495,7 @@ enum SupabaseSync {
             try c.encode(place_id, forKey: .place_id)
             // Nor does it clear showings (0044).
             try c.encode(showings, forKey: .showings)
-            try c.encode(added_by_email, forKey: .added_by_email)
+            // added_by_email is read, never written: the server keeps no email (0053).
             try c.encode(group_id, forKey: .group_id)
             try c.encode(updated_by, forKey: .updated_by)
             try c.encode(created_by, forKey: .created_by)
@@ -768,7 +768,7 @@ enum SupabaseSync {
             lng: item.lng,
             place_id: item.placeId,
             showings: item.showingsJSON == nil ? nil : ShowingsColumn(item.showings),
-            added_by_email: item.addedByEmail ?? SupabaseAuth.shared.email,
+            added_by_email: nil,
             group_id: item.groupId,
             updated_by: item.updatedBy,
             created_by: item.createdBy,
@@ -862,6 +862,8 @@ enum SupabaseSync {
                     if local.imageUrl != row.image_url { local.imageUrl = row.image_url }
                     if local.colorHex != row.color { local.colorHex = row.color }
                     if local.placeId != row.place_id { local.placeId = row.place_id }
+                    // Emails cleared on the server (0053) without a bump.
+                    if row.added_by_email == nil, local.addedByEmail != nil { local.addedByEmail = nil }
                 }
             } else {
                 let item = Item()

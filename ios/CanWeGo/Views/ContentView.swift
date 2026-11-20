@@ -568,7 +568,6 @@ struct ContentView: View {
                 }
                 // Shared on an earlier day, landing now: one of today's adds.
                 if item.createdAt < DailyCap.startOfToday { item.createdAt = .now }
-                item.addedByEmail = SupabaseAuth.shared.email
                 if item.createdBy == nil { item.createdBy = SupabaseAuth.shared.userId }
                 item.updatedBy = SupabaseAuth.shared.userId
                 // Ahead of the sync cursor, so the regular push carries it
