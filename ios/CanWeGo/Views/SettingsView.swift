@@ -222,34 +222,6 @@ struct SettingsView: View {
             }) {
                 ExportSheet()
             }
-            .alert("Type DELETE to confirm", isPresented: $showDeleteConfirm) {
-                TextField("", text: $deletePhrase, prompt: AppBackground.fieldPrompt("DELETE"))
-                    .foregroundStyle(AppBackground.ink)
-                    .textInputAutocapitalization(.characters)
-                Button("Delete account", role: .destructive) {
-                    Task { await deleteAccount() }
-                }
-                .disabled(deletePhrase.trimmingCharacters(in: .whitespaces) != "DELETE")
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(deleteAccountCopy)
-            }
-            .alert("Couldn't delete the account", isPresented: Binding(
-                get: { deleteError != nil },
-                set: { if !$0 { deleteError = nil } }
-            )) {
-                Button("OK") {}
-            } message: {
-                Text(deleteError ?? "")
-            }
-            .alert("Apple couldn\u{2019}t confirm it\u{2019}s you", isPresented: $appleUnconfirmed) {
-                Button("Delete anyway", role: .destructive) {
-                    Task { await deleteAccount(withoutApple: true) }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Deleting anyway still removes everything. Can We Go? will stay in the Sign in with Apple list in your Apple Account settings until you remove it there.")
-            }
             .fullScreenCover(isPresented: $showAuth) {
                 AuthView()
             }
@@ -699,6 +671,36 @@ struct SettingsView: View {
                 }
                 .listRowBackground(Self.rowBackground)
             }
+        }
+        // On the Account page, not the root: an alert attached to a view
+        // under a pushed page never presents.
+        .alert("Type DELETE to confirm", isPresented: $showDeleteConfirm) {
+            TextField("", text: $deletePhrase, prompt: AppBackground.fieldPrompt("DELETE"))
+                .foregroundStyle(AppBackground.ink)
+                .textInputAutocapitalization(.characters)
+            Button("Delete account", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+            .disabled(deletePhrase.trimmingCharacters(in: .whitespaces) != "DELETE")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(deleteAccountCopy)
+        }
+        .alert("Couldn't delete the account", isPresented: Binding(
+            get: { deleteError != nil },
+            set: { if !$0 { deleteError = nil } }
+        )) {
+            Button("OK") {}
+        } message: {
+            Text(deleteError ?? "")
+        }
+        .alert("Apple couldn\u{2019}t confirm it\u{2019}s you", isPresented: $appleUnconfirmed) {
+            Button("Delete anyway", role: .destructive) {
+                Task { await deleteAccount(withoutApple: true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deleting anyway still removes everything. Can We Go? will stay in the Sign in with Apple list in your Apple Account settings until you remove it there.")
         }
         .settingsPage("Account")
     }
