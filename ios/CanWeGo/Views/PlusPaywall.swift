@@ -330,7 +330,7 @@ struct PlusPaywall: View {
                         .background(AvatarColour.color(waiting[i % waiting.count]).opacity(0.32), in: .circle)
                     Text(i == 0 ? "A friend" : "And another")
                         .font((size > 68 ? Font.footnote : Font.caption).weight(.semibold))
-                        .foregroundStyle(AppBackground.ink.opacity(0.62))
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .lineLimit(1)
                         .fixedSize()
                 }
@@ -432,7 +432,7 @@ struct PlusPaywall: View {
                     .font(.caption.weight(.bold))
                     .tracking(1.4)
                     .textCase(.uppercase)
-                    .foregroundStyle(AppBackground.ink.opacity(0.6))
+                    .foregroundStyle(AppBackground.secondaryInk)
             }
             Text(title)
                 .font(.displaySmallBold(42, relativeTo: .largeTitle))
@@ -440,7 +440,7 @@ struct PlusPaywall: View {
                 .accessibilityAddTraits(.isHeader)
             Text(lede)
                 .font(.subheadline)
-                .foregroundStyle(AppBackground.ink.opacity(0.72))
+                .foregroundStyle(AppBackground.secondaryInk)
                 .lineSpacing(2)
         }
         .multilineTextAlignment(.center)
@@ -482,7 +482,7 @@ struct PlusPaywall: View {
                 Text(title).font(.subheadline.weight(.semibold))
                 Text(detail)
                     .font(.footnote)
-                    .foregroundStyle(AppBackground.ink.opacity(0.62))
+                    .foregroundStyle(AppBackground.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
@@ -512,7 +512,7 @@ struct PlusPaywall: View {
             }
             Text("One subscription covers your whole group.")
                 .font(.footnote)
-                .foregroundStyle(AppBackground.ink.opacity(0.62))
+                .foregroundStyle(AppBackground.secondaryInk)
                 .padding(.top, 4)
         }
         .padding(.top, 24)
@@ -554,7 +554,7 @@ struct PlusPaywall: View {
                     }
                     Text(plan.perMonth ?? "Billed every month")
                         .font(.footnote)
-                        .foregroundStyle(AppBackground.ink.opacity(0.62))
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 1) {
@@ -563,7 +563,7 @@ struct PlusPaywall: View {
                         .monospacedDigit()
                     Text("a \(plan.unit)")
                         .font(.caption)
-                        .foregroundStyle(AppBackground.ink.opacity(0.62))
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .padding(.horizontal, 16)
@@ -590,7 +590,7 @@ struct PlusPaywall: View {
             VStack(spacing: 12) {
                 Label("Couldn\u{2019}t reach the App Store just now.", systemImage: "wifi.exclamationmark")
                     .font(.footnote)
-                    .foregroundStyle(AppBackground.ink.opacity(0.62))
+                    .foregroundStyle(AppBackground.secondaryInk)
                 Button {
                     Haptics.tap()
                     Task {
@@ -636,7 +636,7 @@ struct PlusPaywall: View {
 
                     Text(Self.appleNote(plus.renewal ?? (Self.screenshot == "covered" ? .sample : nil)))
                         .font(.footnote)
-                        .foregroundStyle(AppBackground.ink.opacity(0.72))
+                        .foregroundStyle(AppBackground.secondaryInk)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.bottom, 8)
@@ -674,7 +674,7 @@ struct PlusPaywall: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 18) {
+                HStack(spacing: 4) {
                     Button(restoring ? "Restoring\u{2026}" : "Restore") {
                         Haptics.tap()
                         Task {
@@ -688,8 +688,8 @@ struct PlusPaywall: View {
                     Button("Privacy") { legal = .privacy }
                 }
                 .font(.caption.weight(.semibold))
-                .buttonStyle(.plain)
-                .foregroundStyle(AppBackground.ink.opacity(0.75))
+                .buttonStyle(FooterLinkStyle())
+                .foregroundStyle(AppBackground.secondaryInk)
             }
         }
     }
@@ -799,7 +799,7 @@ struct BusyDaySheet: View {
                 .padding(.top, 18)
             Text("That\u{2019}s \(PlusPaywall.spelled(DailyCap.plus)) new things today, the most anyone can add in a day. We\u{2019}ll keep this one and add it first thing tomorrow.")
                 .font(.subheadline)
-                .foregroundStyle(AppBackground.ink.opacity(0.72))
+                .foregroundStyle(AppBackground.secondaryInk)
                 .lineSpacing(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1098,7 +1098,7 @@ struct PlusPage: View {
                 if let problem = message ?? plus.problem {
                     warning(problem)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     Button("Terms") {
                         Haptics.tap()
                         legal = .terms
@@ -1109,7 +1109,8 @@ struct PlusPage: View {
                         legal = .privacy
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(FooterLinkStyle())
+                .padding(.leading, -FooterLinkStyle.inset)
                 .font(.footnote)
                 .foregroundStyle(AppBackground.secondaryInk)
             }
@@ -1221,5 +1222,18 @@ struct PlusPage: View {
         defer { buying = false }
         message = nil
         message = await Checkout.buy(product, with: purchase)
+    }
+}
+
+/// Restore, Terms and Privacy: small type, a full 44pt to hit.
+struct FooterLinkStyle: ButtonStyle {
+    static let inset: CGFloat = 7
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, Self.inset)
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+            .opacity(configuration.isPressed ? 0.5 : 1)
     }
 }

@@ -177,7 +177,7 @@ struct RemindRow: View {
     private func requestNotificationPermission() {
         Task {
             #if !APP_EXTENSION
-            PushRegistrar.register()
+            await PushRegistrar.requestNow()
             #else
             let center = UNUserNotificationCenter.current()
             if (await center.notificationSettings()).authorizationStatus == .notDetermined {

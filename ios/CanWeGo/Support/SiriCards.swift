@@ -177,12 +177,9 @@ private struct SiriRow: View {
     private var radius: CGFloat { large ? 18 : 14 }
     private var background: Color { ItemCard.background(row.tint) }
 
-    /// The list card's grey, fixed: the system one turns vibrant on Siri's
-    /// glass and comes out the card's colour, brightened.
-    private var label: Color {
-        let traits = UITraitCollection(userInterfaceStyle: AppBackground.theme.isLight ? .light : .dark)
-        return Color(uiColor: .secondaryLabel.resolvedColor(with: traits))
-    }
+    /// The list card's quiet ink, a plain colour: the system grey turns
+    /// vibrant on Siri's glass and comes out the card's colour, brightened.
+    private var label: Color { AppBackground.secondaryInk }
 
     /// The library's card, in the app's theme whatever the system's
     /// appearance: the panel is the theme's, so its ink must be too.
@@ -194,7 +191,7 @@ private struct SiriRow: View {
             if let place = row.place {
                 Text(place)
                     .font(large ? .subheadline : .caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(label)
                     .lineLimit(1)
             }
             if row.when != nil || row.plan != nil {

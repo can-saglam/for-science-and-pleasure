@@ -345,9 +345,11 @@ struct ItemCard: View {
     private var cardBorder: Color { Self.border(item.accentColor) }
 
     static func background(_ accent: Color) -> Color {
-        AppBackground.base
-            .mix(with: accent, by: AppBackground.theme.cardAccentMix)
-            .mix(with: AppBackground.theme.cardLiftColor, by: AppBackground.theme.cardLiftAmount)
+        AppBackground.readable(
+            AppBackground.base
+                .mix(with: accent, by: AppBackground.theme.cardAccentMix)
+                .mix(with: AppBackground.theme.cardLiftColor, by: AppBackground.theme.cardLiftAmount)
+        )
     }
 
     static func border(_ accent: Color) -> Color {

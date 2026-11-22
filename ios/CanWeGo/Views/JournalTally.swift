@@ -94,7 +94,7 @@ struct JournalMonthLabel: View {
         Text(name.uppercased())
             .font(.caption.weight(.semibold))
             .tracking(0.6)
-            .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
+            .foregroundStyle(AppBackground.secondaryInk)
             .padding(.leading, 4)
             .padding(.top, 6)
     }

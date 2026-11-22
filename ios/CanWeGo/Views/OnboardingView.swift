@@ -454,7 +454,6 @@ struct OnboardingView: View {
     private var notNowButton: some View {
         Button {
             Haptics.tap()
-            if !preview { PushRegistrar.declinePrime() }
             advance()
         } label: {
             Text("Not now")

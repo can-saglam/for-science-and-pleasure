@@ -246,44 +246,29 @@ private struct DelayedSpinner: View {
 /// other member's saves can ping it. Lives here (not in Support/) because
 /// UIApplication is off-limits inside the share extension.
 final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    /// Onboarding's "Not now" — don't pop the system prompt the moment
-    /// they land in the library. Settings (or a reinstall) can still ask.
-    private static let declinedPrimeKey = "declinedNotificationPrime"
-
-    static func declinePrime() {
-        (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard)
-            .set(true, forKey: declinedPrimeKey)
-    }
-
     /// Info.plist lists landscape for iPhone Duo; everywhere else the app
     /// stays portrait, as it always has.
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         Foldable.rotates(window) ? .allButUpsideDown : .portrait
     }
 
+    /// Signs this phone up for pushes. Never raises the system prompt: a
+    /// returning account would meet it cold, over the library. That comes
+    /// only from a moment that says what it's for (`requestNow`).
     static func register() {
         guard SupabaseAuth.shared.signedIn else { return }
-        guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }
         Task {
             await clearRetiredLocalNotifications()
-            let center = UNUserNotificationCenter.current()
-            let settings = await center.notificationSettings()
-            if settings.authorizationStatus == .notDetermined {
-                let declined = (UserDefaults(suiteName: SharedInbox.groupID) ?? .standard)
-                    .bool(forKey: declinedPrimeKey)
-                if declined { return }
-                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
-            }
             await MainActor.run {
                 UIApplication.shared.registerForRemoteNotifications()
             }
         }
     }
 
-    /// The first run's "Notify me": raise the system prompt now, over the
-    /// page that explained it, and return once it's answered so the flow
-    /// can finish *after* rather than under it. Ignores a past decline —
-    /// this tap is the person asking.
+    /// Raise the system prompt now, over whatever explained it: the first
+    /// run's "Notify me", the Notifications row in Settings, or choosing a
+    /// reminder. Returns once it's answered so the flow can finish *after*
+    /// rather than under it.
     static func requestNow() async {
         guard SupabaseAuth.shared.signedIn else { return }
         guard ProcessInfo.processInfo.environment["CWG_NO_PROMPTS"] == nil else { return }

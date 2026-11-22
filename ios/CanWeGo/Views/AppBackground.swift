@@ -184,6 +184,21 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
+    /// How much of the ink quiet type keeps: dates, venues, counts. Each
+    /// is the least that holds 4.5:1 on every page shade of its theme; a
+    /// card whose save colour would fall short darkens instead
+    /// (`AppBackground.readable`).
+    var secondaryStrength: Double {
+        switch self {
+        case .cobalt: 0.90
+        case .moss: 0.85
+        case .petrol: 0.80
+        case .oat, .stone, .blush: 0.78
+        case .terracotta: 0.75
+        default: 0.70
+        }
+    }
+
     /// The lift that separates a card from the page behind it. Dark
     /// themes mix in their ink (white, or forest's cream); the papers mix
     /// in black so cards sit *on* the page instead of bleaching out.
@@ -215,6 +230,9 @@ final class ThemeStore {
     /// choice is committed, so scrubbing the onboarding carousel can
     /// repaint SwiftUI colours without a UIKit trait rebuild mid-gesture.
     private(set) var scheme: AppTheme
+
+    /// Increase Contrast: quiet type goes to full ink and cards aim higher.
+    private(set) var highContrast = UIAccessibility.isDarkerSystemColorsEnabled
 
     /// When false, `current` is a live preview only — no disk, widgets,
     /// or window-style flip. The onboarding slider uses this so a swipe
@@ -272,6 +290,13 @@ final class ThemeStore {
             WidgetStore.writeTheme(theme)
         }
         #endif
+        NotificationCenter.default.addObserver(
+            forName: UIAccessibility.darkerSystemColorsStatusDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.highContrast = UIAccessibility.isDarkerSystemColorsEnabled
+        }
     }
 
     /// A user-chosen switch. Every window cross-dissolves as one picture:
@@ -420,10 +445,49 @@ enum AppBackground {
     /// Logo and primary marks — cream on midnight and forest, dark on the papers, white elsewhere.
     static var ink: Color { theme.ink }
 
-    /// Quiet type: dates, notes, legends. The system grey sits under 3:1 on
-    /// the papers, so they fade their own ink only as far as small type
-    /// still reads (4.5:1, washed rows included). Dark themes keep the grey.
-    static var secondaryInk: Color { theme.isLight ? ink.opacity(0.78) : .secondary }
+    /// Quiet type: dates, notes, legends. The theme's own ink, faded only
+    /// as far as small type still reads (4.5:1); the system grey was a cool
+    /// blue-grey on warm pages and fell under 3:1 on the mid-tones. Full
+    /// ink with Increase Contrast.
+    static var secondaryInk: Color {
+        ink.opacity(ThemeStore.shared.highContrast ? 1 : theme.secondaryStrength)
+    }
+
+    /// A card fill quiet type still reads on. A save colour light enough to
+    /// drop `secondaryInk` under 4.5:1 (7:1 with Increase Contrast) moves
+    /// toward black, or toward white on the papers, only as far as it takes,
+    /// so it keeps its hue.
+    static func readable(_ fill: Color) -> Color {
+        let high = ThemeStore.shared.highContrast
+        let key = ReadableKey(fill: fill, theme: theme, high: high)
+        readableLock.lock()
+        defer { readableLock.unlock() }
+        if let hit = readableCache[key] { return hit }
+
+        let target = high ? 7.1 : 4.6
+        let strength = high ? 1 : theme.secondaryStrength
+        let toward: Color = theme.isLight ? .white : .black
+        let reads = { (card: Color) in Contrast.ratio(ink, opacity: strength, over: card) >= target }
+        var result = fill
+        if !reads(fill) {
+            var short = 0.0, enough = 1.0
+            for _ in 0..<10 {
+                let mid = (short + enough) / 2
+                if reads(fill.mix(with: toward, by: mid)) { enough = mid } else { short = mid }
+            }
+            result = fill.mix(with: toward, by: enough)
+        }
+        readableCache[key] = result
+        return result
+    }
+
+    private struct ReadableKey: Hashable {
+        let fill: Color
+        let theme: AppTheme
+        let high: Bool
+    }
+    private static var readableCache: [ReadableKey: Color] = [:]
+    private static let readableLock = NSLock()
 
     /// Placeholder ink. The system grey disappears into the paper themes.
     static func fieldPrompt(_ title: String) -> Text {
@@ -472,9 +536,11 @@ enum AppBackground {
 
     /// A touch toward teal, and brighter: out on the town. The papers keep
     /// their pages on the one shade the drawers use — the tab tints read
-    /// as dirt on a light page.
+    /// as dirt on a light page. The mid-tones skip the brightening: their
+    /// ink only just holds 4.5:1 on the base as it is.
     static var places: Color {
-        theme.isLight ? sheet : base.shifted(hue: -0.020, brightness: 0.045)
+        if theme.isLight { return sheet }
+        return base.shifted(hue: -0.020, brightness: theme.isMidTone ? 0 : 0.045)
     }
     /// A touch toward violet.
     static var library: Color {
@@ -511,6 +577,28 @@ enum AppBackground {
     static var swipePutBack: Color {
         if theme.isLight { return Color(white: 0.45) }
         return base.shifted(brightness: theme.isMidTone ? 0.10 : 0.18)
+    }
+}
+
+/// WCAG 2 contrast, for colours the palette mixes at run time.
+enum Contrast {
+    /// `ink` at `opacity` laid over an opaque `background`.
+    static func ratio(_ ink: Color, opacity: Double, over background: Color) -> Double {
+        let env = EnvironmentValues()
+        let fg = ink.resolve(in: env), bg = background.resolve(in: env)
+        let a = Float(opacity) * fg.opacity
+        func blend(_ f: Float, _ b: Float) -> Float { f * a + b * (1 - a) }
+        let top = luminance(blend(fg.red, bg.red), blend(fg.green, bg.green), blend(fg.blue, bg.blue))
+        let bottom = luminance(bg.red, bg.green, bg.blue)
+        return (max(top, bottom) + 0.05) / (min(top, bottom) + 0.05)
+    }
+
+    private static func luminance(_ r: Float, _ g: Float, _ b: Float) -> Double {
+        func linear(_ c: Float) -> Double {
+            let c = Double(min(max(c, 0), 1))
+            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 }
 

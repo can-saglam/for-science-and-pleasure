@@ -79,7 +79,7 @@ struct HoursRow: View {
                     Text(OpeningHours.dayName(day, index: index))
                         .fontWeight(index == 0 ? .semibold : .regular)
                     Text(OpeningHours.rangesText(day.ranges))
-                        .foregroundStyle(AppBackground.secondaryInk.opacity(day.ranges.isEmpty ? 0.6 : 1))
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
             }
         }

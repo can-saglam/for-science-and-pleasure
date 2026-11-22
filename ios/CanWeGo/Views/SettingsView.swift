@@ -389,11 +389,11 @@ struct SettingsView: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
+                .foregroundStyle(AppBackground.secondaryInk)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 8)
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     Button("Privacy") {
                         Haptics.tap()
                         legal = .privacy
@@ -404,12 +404,12 @@ struct SettingsView: View {
                         legal = .terms
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(FooterLinkStyle())
                 .font(.footnote)
                 .foregroundStyle(AppBackground.secondaryInk)
                 Text("for science and pleasure · v\(version)")
                     .font(.caption)
-                    .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
+                    .foregroundStyle(AppBackground.secondaryInk)
                     #if !APP_EXTENSION
                     // The first-run preview, for whoever made it.
                     .onLongPressGesture {
@@ -575,7 +575,7 @@ struct SettingsView: View {
                             if let detail = problem.detail {
                                 Text(detail)
                                     .font(.caption2.monospaced())
-                                    .foregroundStyle(AppBackground.secondaryInk.opacity(0.75))
+                                    .foregroundStyle(AppBackground.secondaryInk)
                                     .textSelection(.enabled)
                                     .lineLimit(4)
                             }

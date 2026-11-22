@@ -38,7 +38,7 @@ struct Recommendations: View {
                         .font(.caption.weight(.semibold))
                         .textCase(.uppercase)
                         .tracking(0.6)
-                        .foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
+                        .foregroundStyle(AppBackground.secondaryInk)
                 }
                 PickStrip {
                     if finding { FindingChip(city: city) }

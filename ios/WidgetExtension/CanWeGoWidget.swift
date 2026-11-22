@@ -24,6 +24,7 @@ struct RandomSaveWidget: Widget {
         .configurationDisplayName("Can We Go?")
         .description("What's up next, or a save from your list, rotating through the day.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .contentMarginsDisabled()
     }
 }
 
@@ -231,33 +232,58 @@ struct Provider: TimelineProvider {
 struct RandomSaveView: View {
     let entry: SaveEntry
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.widgetContentMargins) private var margins
 
     private var accent: Color {
         entry.item?.colorHex.flatMap(Color.fromHex) ?? Color(red: 0.35, green: 0.42, blue: 0.62)
     }
 
+    /// Tinted and clear Home Screens drop the container background, photo
+    /// and all, so there the photo moves into the content instead. Margins
+    /// are applied here so that photo can still run edge to edge.
+    private var accented: Bool { renderingMode == .accented }
+
     var body: some View {
-        Group {
-            if let item = entry.item {
-                content(item)
-                    .overlay(alignment: .topTrailing) {
-                        if family != .systemSmall, entry.canSkip { nextButton }
-                    }
-                    .widgetURL(URL(string: "canwego://item/\(item.id.uuidString)"))
-            } else {
-                empty
+        let image = entry.photo.flatMap(UIImage.init(data:))
+        ZStack {
+            if accented, let image { accentedPhoto(image) }
+            Group {
+                if let item = entry.item {
+                    content(item)
+                        .overlay(alignment: .topTrailing) {
+                            if family != .systemSmall, entry.canSkip { nextButton }
+                        }
+                        .widgetURL(URL(string: "canwego://item/\(item.id.uuidString)"))
+                } else {
+                    empty
+                }
             }
+            .padding(margins)
         }
         .containerBackground(for: .widget) {
-            background
+            background(accented ? nil : image)
         }
+    }
+
+    /// Desaturated into the Home Screen's tint and dimmed so the title still
+    /// reads: the scrim would render as a white wash in these modes.
+    private func accentedPhoto(_ image: UIImage) -> some View {
+        Color.clear.overlay(
+            Image(uiImage: image)
+                .resizable()
+                .widgetAccentedRenderingMode(.accentedDesaturated)
+                .scaledToFill()
+                .opacity(0.45)
+        )
+        .clipped()
     }
 
     /// The photo runs edge to edge; without one, a deep wash of the item's
     /// color stands in, so the widget always looks dressed.
     @ViewBuilder
-    private var background: some View {
-        if let image = entry.photo.flatMap(UIImage.init(data:)) {
+    private func background(_ image: UIImage?) -> some View {
+        if let image {
             Color.clear.overlay(
                 Image(uiImage: image)
                     .resizable()
