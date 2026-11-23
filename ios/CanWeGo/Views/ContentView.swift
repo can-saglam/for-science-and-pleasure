@@ -173,6 +173,7 @@ struct ContentView: View {
     @State private var joinCode: String?
     /// Plans whose day has gone by: "Did you make it?"
     @State private var followUp: PlanFollowUp?
+    @State private var finishedPass: FinishedPass?
     /// The Events tab wears today's date; refreshed when the app comes
     /// forward so an overnight leave doesn't leave yesterday on the bar.
     @State private var dayOfMonth = Calendar.current.component(.day, from: Date())
@@ -288,6 +289,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cwgLibraryWillSwap)) { _ in
             deepLinked = nil
             followUp = nil
+            finishedPass = nil
         }
         // A last-chance notification tapped while the app is alive.
         .onReceive(NotificationCenter.default.publisher(for: .cwgOpenItem)) { note in
@@ -422,16 +424,21 @@ struct ContentView: View {
         // table after a short debounce.
         .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
             SupabaseSync.saved(context: context)
+            #if !APP_EXTENSION
+            Task { await SecondSaveNudge.refresh(items: items) }
+            #endif
         }
         .sheet(item: $followUp) { PlanFollowUpSheet(items: $0.items) }
+        .sheet(item: $finishedPass) { FinishedPassSheet(items: $0.items) }
     }
 
     /// The morning after a plan, once the pull has brought everyone's
     /// answers in: only onto the plain list, never over another sheet or a
-    /// save that was opened from outside.
+    /// save that was opened from outside. With no plan to ask about, the
+    /// week's pass over finished events gets the same chance.
     private func offerFollowUp() {
         #if !APP_EXTENSION
-        guard followUp == nil, deepLinked == nil, !captureOpen, joinCode == nil, inboxAsk == nil,
+        guard followUp == nil, finishedPass == nil, deepLinked == nil, !captureOpen, joinCode == nil, inboxAsk == nil,
               syncStatus.hasSyncedOnce, !syncStatus.updateRequired, !group.libraryIsForeign,
               scenePhase == .active
         else { return }
@@ -440,8 +447,15 @@ struct ContentView: View {
             .first
         guard presenting == nil else { return }
         let over = items.filter(\.planIsOver).sorted { ($0.planOn ?? "") < ($1.planOn ?? "") }
-        guard !over.isEmpty else { return }
-        followUp = PlanFollowUp(items: over)
+        if !over.isEmpty {
+            followUp = PlanFollowUp(items: over)
+            return
+        }
+        guard FinishedPass.due else { return }
+        let finished = FinishedPass.candidates(items)
+        guard !finished.isEmpty else { return }
+        FinishedPass.offered()
+        finishedPass = FinishedPass(items: finished)
         #endif
     }
 
@@ -527,6 +541,9 @@ struct ContentView: View {
             // rotates through the freshest library.
             WidgetStore.sync(items: items.filter { !$0.isTrashed })
             offerFollowUp()
+            #if !APP_EXTENSION
+            await SecondSaveNudge.refresh(items: items)
+            #endif
             await LocationBackfill.run(context: context)
         }
         Task { await MembersStore.shared.refresh() }

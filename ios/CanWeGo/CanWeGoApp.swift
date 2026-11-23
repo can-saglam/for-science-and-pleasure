@@ -311,6 +311,11 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
         didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
+        if let data = userInfo["pick"] as? Data,
+           let pick = try? JSONDecoder().decode(ParseClient.Suggestion.self, from: data) {
+            // The second-save nudge: open Add on its pick.
+            await MainActor.run { SuggestionChips.open(pick) }
+        }
         if let id = (userInfo["itemID"] as? String).flatMap(UUID.init) {
             // A reminder (or Spotlight) tap: open the save it's about.
             await MainActor.run {
