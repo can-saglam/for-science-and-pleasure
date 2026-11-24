@@ -12,6 +12,11 @@ membership, invite codes first, on-device-verified Plus. Everything cut is
 parked in the post-launch backlog at the end. Phase 0 starts now; group work
 starts after it.*
 
+*Status, 24 Nov 2026: Phases 0–3 are done and most of 4–5. The phases below
+are kept as written; what shipped from build 84 to build 149 is in
+[Since build 83](#since-build-83), and what's left is under
+[Still before launch](#still-before-launch).*
+
 ## Where we are (verified against the code)
 
 The backend is a single shared pool: an email allow-list (`public.members`)
@@ -293,9 +298,9 @@ than a hope.
   screen. Anyone in the group can invite.
 - The invite sheet shows the code big and copyable, plus a share-sheet
   message: "Join me on Can We Go? — code KV7-P2M" with the App Store link.
-  **Codes are the mechanism at launch; universal links come later.** Reserve
-  `canwego.app` now and fix the link format (`/join/KV7P2M`) so links slot
-  in post-launch without changing codes.
+  **Codes are the mechanism at launch; universal links come later.** Fix the
+  link format (`/join/KV7P2M`) now so links slot in without changing codes.
+  (The domain became `wegocan.com`; universal links shipped in build 129.)
 - **Clipboard detection.** The join screen (and onboarding's "join with a
   code") uses `UIPasteboard.detectPatterns` to notice a code on the
   clipboard and offer "Join KV7-P2M?" — without triggering iOS's paste
@@ -658,7 +663,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [x] Apple ID revocation check on launch (`AppleSignIn.checkCredentialState`: revoked/notFound → sign out, local store untouched; offline leaves it alone). Re-auth on refresh failure: a 4xx on renewal already signed out; the sign-in screen now explains it ("Your session expired — sign in again to keep syncing. Everything you saved is still here.") — `SupabaseAuth.sessionExpired`, cleared by the next sign-in. The SwiftData store is never touched by sign-out
 - [x] "Former member" tombstone on account deletion — 0021: `profiles` no longer cascades from `auth.users` and item attribution stops being a FK, so the row (id kept) outlives the account; the profiles read policy also covers anyone who saved/edited one of the group's items. Clearing name/colour + `former_at` is the delete-account function's job (Phase 4)
 - [x] Guided first save with own link; share-sheet teaching (onboarding step + library card, gone once a share-sheet save lands)
-- [x] Invite codes + share-sheet message; `/join/CODE` format fixed (`JoinGate` reads `canwego://join/…` and `https://canwego.app/join/…`). Reserving the `canwego.app` domain itself is still yours to do
+- [x] Invite codes + share-sheet message; `/join/CODE` format fixed (`JoinGate` reads `canwego://join/…` and, since build 129, `https://wegocan.com/join/…` as a universal link)
 - [x] Join screen, clipboard code detection (`hasStrings`, no paste banner until confirmed), dead-end screens (expired/revoked/full/unknown/own)
 - [x] Two-rule membership (server): `membership_join` moves saves in with URL dedupe (twin keeps its row, gains the notes) and dissolves the emptied personal group; `membership_leave` provisions a fresh personal group (home + digest time inherited), copies the library on request, rotates the feed token; leaving a shared group *for* another is one call (`join` with `keep_copy`). iOS flows still to build
 - [x] Sync handles membership change as a state (9 Sep): the local store is *owned* (`GroupStore.libraryGroupId`/`libraryUserId`, recorded only after a successful pull) and `SupabaseSync.sync` is the single place that replaces it — when the owner isn't the signed-in account (decidable offline), the group changed (card refresh), a store nobody had claimed (pre-ownership installs, incl. iCloud-era duplicates), or a leave just happened (`replaceLibrary`). Order: salvage-push this person's own unsynced edits (403s set aside) → close item sheets → wipe → pull → record owner → rebuild Spotlight/widget/URL index/last-chance notifications, members/home/digest. Same-account changes get one "Now showing X" notice; account switches are silent behind the first-pull curtain. Leaving flushes edits *before* the server call. 403 on push now quarantines the row instead of freezing the cursor. **The SwiftData store is no longer mirrored to iCloud** (`cloudKitDatabase: .none`, same store name): the mirror resurrected old libraries after reinstall/account change and produced the duplicates seen on 9 Sep; Supabase is the one source of truth
@@ -678,7 +683,7 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [x] ~~Per-user daily AI quota (10 free / 50 Plus)~~ — replaced 4 Oct by a limit people can understand: **10 new saves a day per person free, 50 with Plus** (`0043_daily_adds.sql`: counted from home midnight, a delete frees the slot, server-enforced and mirrored by `DailyCap`; "That's ten for today" paywall, "Busy day!" at fifty, share-sheet and Siri saves over it land the next morning). Lookups keep a hidden ceiling of 20 / 100 a day in `_shared/quota.ts`, and from the fifth vague search of the day a quick check turns searches away ("We save, we don't search") without spending one
 
 ### Phase 4
-- [x] Legal pages — support, privacy and terms on GitHub Pages (`docs/`)
+- [x] Legal pages — support, privacy and terms, on `wegocan.com` since 20 Nov (GitHub Pages and `docs/` retired)
 - [ ] App Store assets (screenshots, description) and App Privacy labels
 - [x] Export my data — build 77, as three files people can open anywhere rather than JSON: a spreadsheet (CSV, every field), a calendar (ICS of dated events) and a readable list (Markdown), behind a half-height sheet explaining each; also offered before account deletion
 - [ ] App Review kit: free-tier demo group seeded to the cap, permanent invite code, nightly reset; review notes carry the code only — never an account password
@@ -701,12 +706,78 @@ Found by the rehearsal, fixed before production: tokens registered between 1a an
 - [ ] 5.7 Localisation: String Catalog, six languages reviewed by native speakers, summaries in the saver's language, localised listing
 - [ ] Featuring Nomination filed in App Store Connect once 5.2–5.3 are in TestFlight
 
+## Since build 83
+
+Builds 84–149, 25 Sep to 24 Nov 2026. Commit messages carry the detail; this
+is the shape of it.
+
+- **Reading saves (builds 84–105, 129).** The parser takes typed saves,
+  JSON-LD dates, nights past midnight and screenings a page keeps in its
+  scripts; showings sync to the group (0044) and become one-tap chips in the
+  plan sheet. Pages that wall off the server (Cloudflare) are read by the
+  phone instead. Geocoding moved to Photon and postcodes.io. A test set
+  (`scripts/parse-eval`) and `supabase/tests/parse_gate.ts` guard prompt
+  changes; page reads run on Sonnet.
+- **Plans and the day itself (builds 95–132).** Pick a day to go, with a
+  bell for the reminder; a one-month calendar with showing dots; the
+  morning-after check-in; live opening hours from Google; Lock Screen and
+  Live Activity on the day, never doubled with the reminder push.
+- **Siri and the system (builds 96–105).** Ask your saves with Apple
+  Intelligence; Siri lists, calendar and one-sentence adds on iOS 27; Lock
+  Screen Up Next and On Now widgets; a Control Center add button.
+- **Limits and Plus (build 97 onwards).** 10 new saves a day free, 50 with
+  Plus (0043), counted from home midnight; a hidden lookup ceiling; the
+  paywall reworked; renewal state in Settings.
+- **City picks (builds 127–140).** "Trending in <home city>" from the
+  city's guides (Time Out, The Infatuation…), stored whole so a tap opens a
+  ready card without a lookup; `warm-cities` keeps the pools fresh by demand.
+- **Onboarding and Settings (builds 120–136, 141).** One together question,
+  ticked first saves, "Here's the idea" with the looping card strip, a
+  closing page; Settings as one page with three doors and the group as the
+  hero.
+- **Sharing and wegocan.com (builds 129–130).** A save travels as a
+  wegocan.com link that opens it ready to save; universal links for invites
+  and saves; the site (landing, invite and save pages, legal pages) on
+  Cloudflare Pages.
+- **iPhone Duo (builds 143–145, 148–149).** List and save side by side when
+  open, bars down the side, onboarding as one column, actions clear of the
+  outer display's camera.
+- **The November audit (builds 146–149, 19–24 Nov).** Eleven groups from a
+  full audit, tracked on the audit canvas:
+  - cost holes closed (atomic quotas, run ledgers, timeouts, 12k-character cap);
+  - never lose a save (inbox, sign-out, deletion and swap paths);
+  - privacy policy and deletion copy say exactly what happens; no member
+    emails on the server, server-stamped rows, a nightly purge (0053–0054);
+  - site hardening (CSP, HSTS, capped invite lookups);
+  - readability at 4.5:1 in every theme;
+  - activation: the second-save nudge and the "Did you go?" pass;
+  - server robustness: `job_runs` for every cron job and a daily alert push
+    (`job-health`), capped page reads, MetricKit reports (0055);
+  - sync v2: column-level merge, changed-only pushes, incremental pulls on
+    `touched_at` (0056), a versioned store set aside only when damaged;
+  - release hygiene: version 1.0, `release.sh`, `deploy-functions.sh`,
+    `deno.lock`.
+
+## Still before launch
+
+- App Store assets (screenshots, description) and App Privacy labels
+- App Review kit: demo group at the cap, permanent invite code, nightly reset
+- Featuring work (audit group 11): layered icon with dark and tinted
+  variants, iPad layout, String Catalog and languages, configurable widget,
+  App Clip for invites, Accessibility Nutrition Labels, the nomination
+- On a device: Siri phrases, Visual Intelligence with a real poster, a
+  day-of Live Activity, an offline draft, and two phones editing one save
+- Google Places key: daily quota caps and a budget alert
+- Apple Small Business Program; external TestFlight beta; attach the Plus
+  products to the submitted version
+
 ## Post-launch backlog (cut from launch, not forgotten)
 
 Add these in response to real users, not guesses:
 
-- **Universal links + landing page** (`canwego.app/join/…` with Open Graph
-  preview) — codes already carry the format.
+- ~~**Universal links + landing page**~~ — shipped on `wegocan.com` (site 26
+  Oct, app build 129): landing page, invite and shared-save pages with Open
+  Graph previews.
 - **Google sign-in** and account linking, if anyone asks for it.
 - **Tuned-city boosts**: an optional table of prompt examples and sample
   links for cities where the experience has been hand-checked — a boost on

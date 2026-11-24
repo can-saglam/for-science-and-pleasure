@@ -98,6 +98,6 @@ Check after each deploy that
 `curl -sI https://wegocan.com/.well-known/apple-app-site-association`
 answers 200 with `content-type: application/json`.
 
-The old GitHub Pages site (`docs/`) stays up until after launch. When App
-Store Connect points at `wegocan.com/privacy/`, `/terms/` and `/support/`,
-it can go.
+The old GitHub Pages site (`docs/`) was retired on 20 Nov 2026; App Store
+Connect's privacy, terms and support links point at `wegocan.com/privacy/`,
+`/terms/` and `/support/`.
