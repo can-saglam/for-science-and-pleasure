@@ -12,7 +12,7 @@
 // already recorded for another account is never moved. Founder and promo
 // rows are left alone: they never expire, so there is nothing to record.
 import { createClient } from "npm:@supabase/supabase-js@2.117.3";
-import { corsHeaders } from "../_shared/extract.ts";
+import { corsHeaders } from "../_shared/geo.ts";
 import { admin } from "../_shared/groups.ts";
 import { appStoreConfigured, entitlementRow, jwsPayload, subscriptionStatus } from "../_shared/appstore.ts";
 

@@ -5,7 +5,7 @@
 // so a failure leaves the account whole and the person can try again. An Apple sign-in sends a fresh authorization code, and the app's
 // Sign in with Apple access is revoked once the account is gone. JWT
 // required; work runs as the service role.
-import { corsHeaders } from "../_shared/extract.ts";
+import { corsHeaders } from "../_shared/geo.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { admin, displayName } from "../_shared/groups.ts";
 import { notifyGroupOfMember } from "../_shared/notify.ts";

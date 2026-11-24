@@ -126,7 +126,8 @@ for (const [prefix, name] of [["claude", "ANTHROPIC_API_KEY"], ["gpt-", "OPENAI_
     Deno.exit(1);
   }
 }
-const { extractCard, looksLikeSearch } = await import("../../supabase/functions/_shared/extract.ts");
+const { extractCard } = await import("../../supabase/functions/_shared/extract.ts");
+const { looksLikeSearch } = await import("../../supabase/functions/_shared/ask.ts");
 
 const typed = JSON.parse(await Deno.readTextFile("scripts/parse-eval/typed.json")) as Case[];
 

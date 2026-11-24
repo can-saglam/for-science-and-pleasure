@@ -15,20 +15,16 @@
 // server read the page itself.
 import { internalErrorBody } from "../_shared/auth.ts";
 import {
-  corsHeaders,
-  extractCard,
-  firstUrl,
   looksLikeSearch,
   OutOfTimeError,
-  type Page,
-  pageFromHtml,
-  pageLink,
   type ParseRun,
-  readPage,
-  SocialUnreadableError,
   UnreadableAnswerError,
   VagueInputError,
-} from "../_shared/extract.ts";
+} from "../_shared/ask.ts";
+import { extractCard } from "../_shared/extract.ts";
+import { corsHeaders } from "../_shared/geo.ts";
+import { firstUrl, type Page, pageFromHtml, pageLink, readPage } from "../_shared/read.ts";
+import { SocialUnreadableError } from "../_shared/social.ts";
 import { assertImageWithinLimit } from "../_shared/limits.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { groupHome, homeToday } from "../_shared/home.ts";

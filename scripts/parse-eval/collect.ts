@@ -8,7 +8,7 @@
 // Writes scripts/parse-eval/data/cases.json, which holds library content
 // and stays out of git. Handwritten cases live in typed.json beside this.
 
-import { type Page, pageFromHtml } from "../../supabase/functions/_shared/extract.ts";
+import { type Page, pageFromHtml } from "../../supabase/functions/_shared/read.ts";
 import type { Case } from "./score.ts";
 
 const env = new TextDecoder().decode(await Deno.readFile(".supabase.env"));

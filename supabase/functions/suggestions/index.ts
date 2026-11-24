@@ -8,7 +8,7 @@
 // has something, with curated starters behind it; the searched pool
 // replaces it in the background. Only a brand-new city
 // counts against the caller's daily limit. Authenticated (member JWT).
-import { corsHeaders } from "../_shared/extract.ts";
+import { corsHeaders } from "../_shared/geo.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { reserveQuota } from "../_shared/quota.ts";
 import { runCost } from "../_shared/warm_plan.ts";

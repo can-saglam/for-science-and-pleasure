@@ -18,7 +18,7 @@
 // are 200s with a `status`/`error` field so the app shows a screen, not an
 // error; only malformed requests and missing auth are 4xx.
 import { createClient } from "npm:@supabase/supabase-js@2.117.3";
-import { corsHeaders } from "../_shared/extract.ts";
+import { corsHeaders } from "../_shared/geo.ts";
 import { admin, displayName } from "../_shared/groups.ts";
 import { notifyGroupOfMember } from "../_shared/notify.ts";
 import { formatCode, inviteMessage, isAction, NEEDS_CODE, normaliseCode } from "../_shared/membership.ts";

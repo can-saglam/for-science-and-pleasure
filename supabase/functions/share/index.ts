@@ -12,7 +12,7 @@
 //     An unknown code answers as an expired one. An address that keeps
 //     guessing gets that answer for every code for an hour, and so does
 //     everyone once wrong guesses pile up site-wide.
-import { corsHeaders } from "../_shared/extract.ts";
+import { corsHeaders } from "../_shared/geo.ts";
 import { admin, resolveCaller } from "../_shared/groups.ts";
 import { normaliseCode } from "../_shared/membership.ts";
 import { firstName, publicInvite, sharedCard, shareToken, SITE } from "../_shared/share.ts";

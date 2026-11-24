@@ -1,7 +1,7 @@
+import { cleanShowings } from "./ask.ts";
+import { isAnchored } from "./lookup.ts";
 import {
   cleanLink,
-  cleanShowings,
-  isAnchored,
   isThisRun,
   jsonLdEvents,
   ldClosing,
@@ -10,7 +10,7 @@ import {
   pageFromHtml,
   pageLink,
   scriptedTimes,
-} from "./extract.ts";
+} from "./read.ts";
 
 Deno.test("screenings a page keeps in its scripts reach the model", () => {
   const html = `<script>var searchResults = [

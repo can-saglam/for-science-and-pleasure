@@ -1,6 +1,7 @@
 // What a test case expects, what a run produced, and how the two compare.
 
-import type { EarlyCard, Page } from "../../supabase/functions/_shared/extract.ts";
+import type { EarlyCard } from "../../supabase/functions/_shared/extract.ts";
+import type { Page } from "../../supabase/functions/_shared/read.ts";
 import { cost } from "./prices.ts";
 
 export interface Case {

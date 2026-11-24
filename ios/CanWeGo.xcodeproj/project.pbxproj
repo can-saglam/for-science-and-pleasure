@@ -81,7 +81,14 @@
 				Support/SiriLists.swift,
 				Support/VisualSearch.swift,
 				Views/AskLibraryRow.swift,
-				Views/OnboardingView.swift,
+				Views/Onboarding/OnboardingShowcase.swift,
+				"Views/Onboarding/OnboardingView+FirstSave.swift",
+				"Views/Onboarding/OnboardingView+Home.swift",
+				"Views/Onboarding/OnboardingView+InviteAndNotify.swift",
+				"Views/Onboarding/OnboardingView+NameAndIntro.swift",
+				"Views/Onboarding/OnboardingView+Together.swift",
+				"Views/Onboarding/OnboardingView+Welcome.swift",
+				Views/Onboarding/OnboardingView.swift,
 			);
 			target = CA00000000000000000F0002 /* CanWeGoShare */;
 		};

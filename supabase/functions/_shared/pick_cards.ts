@@ -7,7 +7,9 @@
 // for everyone after. A new pool replaces the old one, cards and all.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { isThumbnail } from "./color.ts";
-import { extractCard, linkKey, type ParseRun } from "./extract.ts";
+import type { ParseRun } from "./ask.ts";
+import { extractCard } from "./extract.ts";
+import { linkKey } from "./read.ts";
 import type { Home } from "./home.ts";
 import { findPlace } from "./places.ts";
 import { starterKey } from "./starters.ts";

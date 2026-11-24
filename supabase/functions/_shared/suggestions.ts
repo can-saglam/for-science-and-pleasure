@@ -7,7 +7,8 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { EVENT_CATEGORIES, normaliseCategory, PLACE_CATEGORIES } from "./categories.ts";
 import { colorFromImageUrl, heroImageFromUrl } from "./color.ts";
-import { cleanLink, type extractCard, linkKey, ownPage } from "./extract.ts";
+import type { extractCard } from "./extract.ts";
+import { cleanLink, linkKey, ownPage } from "./read.ts";
 import type { Home } from "./home.ts";
 import { publicFetch } from "./netguard.ts";
 import { findPlace, isVenue, namedVenue, type PlaceMatch, photoUri, placePhotoLink } from "./places.ts";
