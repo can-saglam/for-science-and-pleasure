@@ -13,9 +13,8 @@ extension EnvironmentValues {
     /// of the safe area. Measured by the page, not the row, so moving the
     /// row can't move it.
     @Entry var floatingRowFloor: CGFloat?
-    /// The row's trailing inset when it runs on into the side bar's column
-    /// (a drawer on iPhone Duo's outer display): in line with the bar's
-    /// buttons above it.
+    /// The row's trailing inset when it ends at the side bar's column (a
+    /// drawer on iPhone Duo's outer display), whose foot is the camera's.
     @Entry var floatingRowTrailing: CGFloat?
 }
 

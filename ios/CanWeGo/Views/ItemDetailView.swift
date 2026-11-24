@@ -91,9 +91,10 @@ struct ItemDetailView: View {
     private var photoUnderBar: Bool { showsHero && (onClose != nil || barsEdge != nil) }
     private var barClearance: EdgeInsets { photoUnderBar ? sideInsets : EdgeInsets() }
     /// As a drawer with the bar down the right (iPhone Duo's outer
-    /// display), the actions sit in the corner below the bar's buttons.
-    /// Beside the library's list, the side bar's Add has that corner.
-    private var rowIntoBarColumn: Bool { onClose == nil && barsEdge == .trailing && sideInsets.trailing > 48 }
+    /// display), the actions stop where the bar's column starts: the front
+    /// camera is at the foot of that column, inside the safe area, and the
+    /// system doesn't say where.
+    private var rowBesideBarColumn: Bool { onClose == nil && barsEdge == .trailing && sideInsets.trailing > 48 }
 
     var body: some View {
         withOwnBars {
@@ -135,8 +136,7 @@ struct ItemDetailView: View {
                         went: confirmWent,
                         putBack: putBack
                     )
-                    .ignoresSafeArea(edges: rowIntoBarColumn ? .trailing : [])
-                    .environment(\.floatingRowTrailing, rowIntoBarColumn ? max(sideInsets.trailing - 48, 0) / 2 : nil)
+                    .environment(\.floatingRowTrailing, rowBesideBarColumn ? 0 : nil)
                 }
             }
             // Without a photo, the item's color breathes at the top instead.
