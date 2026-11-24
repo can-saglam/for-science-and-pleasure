@@ -13,6 +13,8 @@ ios/CanWeGo/Resources/seed-items.json
 ios/**/xcuserdata/
 ios/**/*.xcuserstate
 ios/build/
+ios/.build/
+ios/.swiftpm/
 
 # Trial-licensed font: not redistributable, so it stays local.
 ios/UnbundledFonts/

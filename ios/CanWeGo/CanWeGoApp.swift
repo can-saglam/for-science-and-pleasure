@@ -1,3 +1,5 @@
+import CoreData
+import SQLite3
 import SwiftData
 import SwiftUI
 import UserNotifications
@@ -35,23 +37,80 @@ enum LibraryStore {
         // same phone saw the previous member's saves; deleted rows came
         // back as duplicates). Same store name, so existing data opens as-is.
         let local = ModelConfiguration("CanWeGo", cloudKitDatabase: .none)
+        if let container = open(local) { return container }
+        switch health(of: local.url) {
+        case .corrupt, .otherModel:
+            // A store this build can never open (a damaged file, a
+            // downgrade): its files go aside, unsynced edits and all, for
+            // recovery by hand, and a fresh store fills from a full pull.
+            // The sync cursor belongs to the old file, so it goes too.
+            print("[store] the library can't be opened by this build, setting it aside")
+            setAside(local.url)
+            SupabaseSync.resetCursor()
+            if let container = open(local) { return container }
+        case .unreadable:
+            // Readable later (the phone not yet unlocked since a restart,
+            // a full disk): the store stays put, and this launch runs on
+            // an empty stand-in that nothing is synced or mirrored from.
+            print("[store] the library can't be read right now")
+        }
+        StandInStore.active = true
+        SyncStatus.shared.problem = SyncProblem(
+            message: "Couldn\u{2019}t open your saves on this phone. Close Can We Go and open it again."
+        )
+        do {
+            return try ModelContainer(for: Item.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        } catch {
+            fatalError("Could not create any model container: \(error)")
+        }
+    }()
+
+    /// The versioned schema first; a store from before it (or one SwiftData
+    /// can migrate by itself) opens the plain way.
+    private static func open(_ local: ModelConfiguration) -> ModelContainer? {
+        do {
+            return try ModelContainer(
+                for: Schema(versionedSchema: LibrarySchemaV1.self),
+                migrationPlan: LibraryMigrations.self,
+                configurations: local
+            )
+        } catch {
+            print("[store] versioned open failed: \(error)")
+        }
         do {
             return try ModelContainer(for: Item.self, configurations: local)
         } catch {
-            // A store this build can't open (corrupt file, downgrade): its
-            // files go aside, unsynced edits and all, for recovery by hand,
-            // and a fresh store fills from a full pull. The sync cursor
-            // belongs to the old file, so it goes too.
-            print("[store] couldn't open the library, setting it aside: \(error)")
-            setAside(local.url)
-            SupabaseSync.resetCursor()
-            do {
-                return try ModelContainer(for: Item.self, configurations: local)
-            } catch {
-                fatalError("Could not create any model container: \(error)")
-            }
+            print("[store] open failed: \(error)")
+            return nil
         }
-    }()
+    }
+
+    private enum Health {
+        case corrupt, otherModel, unreadable
+    }
+
+    /// Why a store didn't open. Only a file SQLite itself calls damaged, or
+    /// one written for a model this build doesn't know, is beyond a retry.
+    private static func health(of store: URL) -> Health {
+        guard FileManager.default.fileExists(atPath: store.path(percentEncoded: false)) else { return .unreadable }
+        var db: OpaquePointer?
+        defer { sqlite3_close(db) }
+        func failure() -> Health {
+            let code = sqlite3_extended_errcode(db) & 0xff
+            return code == SQLITE_CORRUPT || code == SQLITE_NOTADB ? .corrupt : .unreadable
+        }
+        guard sqlite3_open_v2(store.path(percentEncoded: false), &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return failure() }
+        var check: OpaquePointer?
+        defer { sqlite3_finalize(check) }
+        guard sqlite3_prepare_v2(db, "PRAGMA quick_check", -1, &check, nil) == SQLITE_OK,
+              sqlite3_step(check) == SQLITE_ROW
+        else { return failure() }
+        guard let text = sqlite3_column_text(check, 0), String(cString: text) == "ok" else { return .corrupt }
+        guard let metadata = try? NSPersistentStoreCoordinator.metadataForPersistentStore(type: .sqlite, at: store),
+              let model = NSManagedObjectModel.makeManagedObjectModel(for: [Item.self])
+        else { return .unreadable }
+        return model.isConfiguration(withName: nil, compatibleWithStoreMetadata: metadata) ? .unreadable : .otherModel
+    }
 
     /// Moves a store's files (with its -wal and -shm) into
     /// Application Support/Set aside.
@@ -61,8 +120,8 @@ enum LibraryStore {
         try? files.createDirectory(at: folder, withIntermediateDirectories: true)
         let stamp = Int(Date.now.timeIntervalSince1970)
         for suffix in ["", "-wal", "-shm"] {
-            let file = URL(filePath: store.path() + suffix)
-            guard files.fileExists(atPath: file.path()) else { continue }
+            let file = URL(filePath: store.path(percentEncoded: false) + suffix)
+            guard files.fileExists(atPath: file.path(percentEncoded: false)) else { continue }
             try? files.moveItem(at: file, to: folder.appending(path: "\(stamp)-\(file.lastPathComponent)"))
         }
     }

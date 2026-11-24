@@ -5,8 +5,12 @@ import SwiftData
 /// web app reads. SwiftData stays the source for the UI; this engine pushes
 /// anything edited since the last sync and pulls everyone else's changes.
 ///
-/// Conflict policy is last-write-wins by `updated_at`, and deletions travel
-/// as the web's soft delete (`deleted_at`), so nothing is lost to races.
+/// Conflicts are settled column by column (`RowMerge`): the phone remembers
+/// each save as the server last had it, sends only the columns it changed,
+/// and a pull keeps its unsent edits over the server's copy. A save with no
+/// such memory yet falls back to last-write-wins by `updated_at`. Deletions
+/// travel as the web's soft delete (`deleted_at`), so nothing is lost to
+/// races.
 @MainActor
 enum SupabaseSync {
     private static let cursorKey = "supabaseLastSyncAt"
@@ -26,10 +30,58 @@ enum SupabaseSync {
     /// status the last account left behind goes with it.
     static func resetCursor() {
         defaults.removeObject(forKey: cursorKey)
+        defaults.removeObject(forKey: pullCursorKey)
+        defaults.removeObject(forKey: fullPullKey)
+        bases = [:]
+        saveBases()
         SyncStatus.shared.lastSyncedAt = nil
         SyncStatus.shared.problem = nil
         SyncStatus.shared.librarySwappedTo = nil
         SyncStatus.shared.staleBannerDismissedAt = nil
+    }
+
+    // MARK: - Bases
+
+    /// Each save as the server last had it, as this phone saw it, in the
+    /// phone's own form (`localForm`). In a file of its own rather than the
+    /// store: losing it only means a round of whole-row last-write-wins.
+    private static let basesURL = URL.applicationSupportDirectory.appending(path: "sync-bases.json")
+    private static var bases: [UUID: Fields] = loadBases()
+
+    private static func loadBases() -> [UUID: Fields] {
+        guard let data = try? Data(contentsOf: basesURL),
+              let raw = try? JSONDecoder().decode([String: Fields].self, from: data)
+        else { return [:] }
+        return Dictionary(raw.compactMap { key, value in UUID(uuidString: key).map { ($0, value) } }) { a, _ in a }
+    }
+
+    private static func saveBases() {
+        let raw = Dictionary(bases.map { ($0.key.uuidString, $0.value) }) { a, _ in a }
+        do {
+            try FileManager.default.createDirectory(at: .applicationSupportDirectory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(raw).write(to: basesURL, options: .atomic)
+        } catch {
+            print("[sync] couldn't save bases: \(error)")
+        }
+    }
+
+    /// A row as columns, in the wire format.
+    private static func fields(_ row: Row) -> Fields {
+        (try? JSONDecoder().decode(Fields.self, from: encoder.encode(row))) ?? [:]
+    }
+
+    /// The server's row as this phone would hold it: through `apply` and
+    /// back, so times, showings and defaults compare like for like with an
+    /// item's own columns.
+    private static func localForm(_ row: Row) -> Fields {
+        let scratch = Item()
+        apply(row, to: scratch)
+        return fields(self.row(from: scratch))
+    }
+
+    private static func row(_ fields: Fields) -> Row? {
+        guard let data = try? JSONEncoder().encode(fields) else { return nil }
+        return try? decoder.decode(Row.self, from: data)
     }
 
     // MARK: - Library ownership
@@ -47,7 +99,9 @@ enum SupabaseSync {
     /// still stuck — the caller should not leave a group with edits that
     /// would be refused once the membership has moved.
     static func flush(context: ModelContext) async -> Bool {
-        guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired else { return false }
+        guard SupabaseAuth.shared.signedIn, !SyncStatus.shared.updateRequired, !StandInStore.active else {
+            return false
+        }
         while running, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
         do {
             // A cursor at the epoch (signed out and back in) means every
@@ -113,6 +167,7 @@ enum SupabaseSync {
             guard !isQuarantined(item) else { return false }
             if let me, item.createdBy == me || item.updatedBy == me { return true }
             if sameAccount, item.updatedAt > lastSyncAt { return true }
+            if sameAccount, case .columns = pending(item, since: lastSyncAt) { return true }
             // Saves made before the app stamped ids, or offline before the
             // first pull: the email is the only attribution they carry.
             return item.createdBy == nil && item.addedByEmail != nil && item.addedByEmail == email
@@ -218,7 +273,7 @@ enum SupabaseSync {
     }
 
     static func sync(context: ModelContext) async {
-        guard SupabaseAuth.shared.signedIn else { return }
+        guard SupabaseAuth.shared.signedIn, !StandInStore.active else { return }
         if running { rerun = true; return }
         running = true
         SyncStatus.shared.syncing = true
@@ -291,10 +346,10 @@ enum SupabaseSync {
                     do { try await push(context: context, since: cursor, serverTimes: serverTimes) } catch { pushError = error }
                 }
             } else {
-                // Push first: a failed push must not let pull destroy a
-                // newer local row. Pull itself is last-write-wins.
+                // Push first, so what this phone changed is on the server
+                // before the pull. A pull still keeps unsent edits.
                 do { try await push(context: context, since: cursor) } catch { pushError = error }
-                _ = try await pull(context: context)
+                _ = try await pull(context: context, full: fullPullDue)
                 // An empty store nobody had claimed is this account's now.
                 if group.libraryGroupId == nil, group.card != nil { group.libraryReplaced() }
             }
@@ -340,7 +395,11 @@ enum SupabaseSync {
         guard SupabaseAuth.shared.signedIn,
               let locals = try? context.fetch(FetchDescriptor<Item>()) else { return 0 }
         let cursor = lastSyncAt
-        return locals.filter { $0.updatedAt > cursor && !isQuarantined($0) }.count
+        return locals.filter { item in
+            guard !isQuarantined(item) else { return false }
+            if case .clean = pending(item, since: cursor) { return false }
+            return true
+        }.count
     }
 
     private static func quarantineProblem(context: ModelContext) -> SyncProblem? {
@@ -381,6 +440,8 @@ enum SupabaseSync {
     static let buildNumber: Int =
         Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
 
+    private static var configCheckedAt: Date?
+
     private struct AppConfig: Decodable {
         var min_build: Int
         var store_url: String?
@@ -392,6 +453,11 @@ enum SupabaseSync {
     /// fetched (offline, transient error) the sync proceeds as normal; the
     /// switch is for dormant clients waking up, not for a flaky connection.
     private static func buildIsCurrent() async -> Bool {
+        // Checked once per launch, then every six hours: not a request
+        // ahead of every sync.
+        if let at = configCheckedAt, Date.now.timeIntervalSince(at) < 6 * 3600, !SyncStatus.shared.updateRequired {
+            return true
+        }
         do {
             var request = try await request(path: "rest/v1/app_config", query: [
                 .init(name: "select", value: "min_build,store_url"),
@@ -407,6 +473,7 @@ enum SupabaseSync {
             if SyncStatus.shared.storeURL != store { SyncStatus.shared.storeURL = store }
             let current = buildNumber >= config.min_build
             if SyncStatus.shared.updateRequired == current { SyncStatus.shared.updateRequired = !current }
+            configCheckedAt = .now
             return current
         } catch {
             return true
@@ -452,6 +519,9 @@ enum SupabaseSync {
         var created_at: Date
         var updated_at: Date
         var deleted_at: Date?
+        /// Read, never written: the server's own clock of the row's last
+        /// write of any kind (0056), for pulling only what changed.
+        var touched_at: Date?
 
         /// PostgREST insists every object in a bulk upsert has the *same*
         /// keys ("All object keys must match"). The synthesised encoder
@@ -559,14 +629,22 @@ enum SupabaseSync {
 
     private struct LenientRow: Decodable {
         let row: Row?
-        init(from decoder: Decoder) { row = try? Row(from: decoder) }
+        /// Even a row that doesn't decode is still on the server.
+        let id: UUID?
+        private enum Key: CodingKey { case id }
+        init(from decoder: Decoder) {
+            row = try? Row(from: decoder)
+            id = try? decoder.container(keyedBy: Key.self).decode(UUID.self, forKey: .id)
+        }
     }
 
     /// One pull page, decoded off the main actor. `served` counts every row
-    /// the server sent, including any that didn't decode, for paging.
-    nonisolated private static func decodePage(_ data: Data) throws -> (rows: [Row], served: Int) {
+    /// the server sent, including any that didn't decode, for paging; `ids`
+    /// is nil when one came without a readable id.
+    nonisolated private static func decodePage(_ data: Data) throws -> (rows: [Row], served: Int, ids: [UUID]?) {
         let page = try decoder.decode([LenientRow].self, from: data)
-        return (page.compactMap(\.row), page.count)
+        let ids = page.compactMap(\.id)
+        return (page.compactMap(\.row), page.count, ids.count == page.count ? ids : nil)
     }
 
     private static var encoder: JSONEncoder {
@@ -594,47 +672,117 @@ enum SupabaseSync {
 
     // MARK: - Push
 
+    /// What of a save hasn't reached the server: the columns changed since
+    /// its base, or, with no base, the whole row when it's newer than what
+    /// the server had (or than the cursor).
+    private enum Pending {
+        case clean
+        case columns(Fields)
+        case whole
+    }
+
+    private static func pending(_ item: Item, since cursor: Date, serverTimes: [UUID: Date] = [:]) -> Pending {
+        if let base = bases[item.id] {
+            let changes = RowMerge.changes(base: base, local: fields(row(from: item)))
+            return changes.isEmpty ? .clean : .columns(changes)
+        }
+        if let server = serverTimes[item.id] { return item.updatedAt > server ? .whole : .clean }
+        return item.updatedAt > cursor ? .whole : .clean
+    }
+
     private static func push(
         context: ModelContext, since cursor: Date, serverTimes: [UUID: Date] = [:]
     ) async throws {
         releaseDailyRefusals()
         releaseStaleRefusals()
         let locals = try context.fetch(FetchDescriptor<Item>())
-        let dirty = locals.filter { item in
-            guard !isQuarantined(item) else { return false }
-            if let server = serverTimes[item.id] {
-                return item.updatedAt > server
+        var whole: [Item] = []
+        var columns: [(Item, Fields)] = []
+        for item in locals where !isQuarantined(item) {
+            switch pending(item, since: cursor, serverTimes: serverTimes) {
+            case .clean: break
+            case .whole: whole.append(item)
+            case .columns(let changes): columns.append((item, changes))
             }
-            return item.updatedAt > cursor
         }
-        guard !dirty.isEmpty else { return }
-        do {
-            try await upsert(rows: dirty.map(row(from:)))
-        } catch let error as SyncProblem where error.rowRejected && dirty.count > 1 {
-            // The server rejected the batch. Find out which row: push them
-            // one at a time so the good ones land now and only the culprit
-            // is set aside. Network trouble (no status) isn't isolated —
-            // that's just retried whole next time.
-            var refused: [(Item, SyncProblem)] = []
-            for item in dirty {
-                do { try await upsert(rows: [row(from: item)]) } catch let e as SyncProblem where e.rowRejected {
-                    refused.append((item, e))
+        guard !whole.isEmpty || !columns.isEmpty else { return }
+        defer { saveBases() }
+        var refused: [(Item, SyncProblem)] = []
+        if !whole.isEmpty {
+            do {
+                try await upsert(rows: whole.map(row(from:)))
+                for item in whole { landedWhole(item) }
+            } catch let error as SyncProblem where error.rowRejected && whole.count > 1 {
+                // The server rejected the batch. Find out which row: push them
+                // one at a time so the good ones land now and only the culprit
+                // is set aside. Network trouble (no status) isn't isolated —
+                // that's just retried whole next time.
+                for item in whole {
+                    do {
+                        try await upsert(rows: [row(from: item)])
+                        landedWhole(item)
+                    } catch let e as SyncProblem where e.rowRejected {
+                        refused.append((item, e))
+                    }
                 }
+            } catch let error as SyncProblem where error.rowRejected {
+                refused.append((whole[0], error))
             }
-            guard !refused.isEmpty else { return }
-            // Every row refused, and not for a limit: that's the server (a
-            // bad deploy), not the rows. Nothing is set aside, and the
-            // cursor stays put so they all go again next time.
-            if refused.count == dirty.count, !refused.contains(where: { $0.1.isLimit }) {
-                throw SyncProblem(
-                    message: "Couldn\u{2019}t save your latest changes. They\u{2019}re kept on this phone and will try again.",
-                    detail: refused.first?.1.detail,
-                    status: refused.first?.1.status ?? 0
-                )
+        }
+        // A save the server already has gets only what changed here, so a
+        // partner's edit to another column of it is never written over.
+        for (item, changes) in columns {
+            do {
+                try await update(item.id, changes)
+                landed(item.id, changes)
+            } catch let e as SyncProblem where e.rowRejected {
+                refused.append((item, e))
             }
-            quarantine(refused)
-        } catch let error as SyncProblem where error.rowRejected {
-            quarantine(dirty.map { ($0, error) })
+        }
+        guard !refused.isEmpty else { return }
+        // Every row refused, and not for a limit: that's the server (a
+        // bad deploy), not the rows. Nothing is set aside, and the
+        // cursor stays put so they all go again next time.
+        let tried = whole.count + columns.count
+        if tried > 1, refused.count == tried, !refused.contains(where: { $0.1.isLimit }) {
+            throw SyncProblem(
+                message: "Couldn\u{2019}t save your latest changes. They\u{2019}re kept on this phone and will try again.",
+                detail: refused.first?.1.detail,
+                status: refused.first?.1.status ?? 0
+            )
+        }
+        quarantine(refused)
+    }
+
+    /// A whole row the server took: it's the base now.
+    private static func landedWhole(_ item: Item) {
+        bases[item.id] = fields(row(from: item))
+    }
+
+    /// Columns the server took, on top of the base.
+    private static func landed(_ id: UUID, _ changes: Fields) {
+        guard var base = bases[id] else { return }
+        for (key, value) in changes { base[key] = value }
+        bases[id] = base
+    }
+
+    /// Writes some columns of one row. The server stamps who and when.
+    private static func update(_ id: UUID, _ changes: Fields) async throws {
+        var request = try await request(
+            path: "rest/v1/items",
+            query: [.init(name: "id", value: "eq.\(id.uuidString.lowercased())")]
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONEncoder().encode(changes)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw SyncProblem(
+                message: "Changes on this phone haven't reached the server yet.",
+                detail: "Push failed (\(status)): \(String(data: data, encoding: .utf8) ?? "")",
+                status: status
+            )
         }
     }
 
@@ -716,7 +864,19 @@ enum SupabaseSync {
         let id = item.id
         let context = item.modelContext
         do {
-            try await upsert(rows: [row(from: item)])
+            switch pending(item, since: .distantPast) {
+            case .columns(let changes):
+                try await update(id, changes)
+                landed(id, changes)
+            case .whole:
+                let row = row(from: item)
+                try await upsert(rows: [row])
+                bases[id] = fields(row)
+            case .clean:
+                // The regular sync already carried it.
+                break
+            }
+            saveBases()
             // Gone in a library swap meanwhile: it landed, nothing to add.
             guard let item = context?.item(id) else { return }
             // Undone while the upsert was in flight. That write can land
@@ -782,18 +942,46 @@ enum SupabaseSync {
 
     private static let pageSize = 1000
 
-    /// Full snapshot in Range pages. Returns each row's server `updated_at`
-    /// so a fresh-cursor push only sends locals that are actually newer.
+    /// Where the last pull got to, on the server's clock (`touched_at`).
+    /// Nil until a pull has seen the column, so a server without it keeps
+    /// getting whole snapshots.
+    private static let pullCursorKey = "supabasePullCursor"
+    /// When the last whole snapshot was taken. One a day catches what an
+    /// incremental pull can't see: rows that are gone altogether.
+    private static let fullPullKey = "supabaseFullPullAt"
+    /// Rows written in a transaction that commits late carry an earlier
+    /// stamp; pulling a little behind the cursor still catches them.
+    private static let pullOverlap: TimeInterval = 300
+
+    private static var fullPullDue: Bool {
+        guard defaults.object(forKey: pullCursorKey) is Date,
+              let last = defaults.object(forKey: fullPullKey) as? Date else { return true }
+        return Date.now.timeIntervalSince(last) > 86_400
+    }
+
+    /// Pulls the server's rows: all of them, or with `full` false only
+    /// those written since the last pull. Returns each row's server
+    /// `updated_at` so a fresh-cursor push only sends locals that are
+    /// actually newer.
     @discardableResult
-    private static func pull(context: ModelContext) async throws -> [UUID: Date] {
+    private static func pull(context: ModelContext, full: Bool = true) async throws -> [UUID: Date] {
+        let since = (defaults.object(forKey: pullCursorKey) as? Date)?.addingTimeInterval(-pullOverlap)
+        guard full || since != nil else { return try await pull(context: context, full: true) }
+        // Saves the server had before this pull: only those can have gone.
+        let known = Set(bases.keys)
         var rows: [Row] = []
+        var present: Set<UUID>? = []
         var offset = 0
         while true {
             let end = offset + pageSize - 1
-            var request = try await request(path: "rest/v1/items", query: [
-                .init(name: "select", value: "*"),
-                .init(name: "order", value: "updated_at.asc"),
-            ])
+            var query: [URLQueryItem] = [.init(name: "select", value: "*")]
+            if !full, let since {
+                query.append(.init(name: "touched_at", value: "gte.\(isoFractional.string(from: since))"))
+                query.append(.init(name: "order", value: "touched_at.asc,id.asc"))
+            } else {
+                query.append(.init(name: "order", value: "updated_at.asc,id.asc"))
+            }
+            var request = try await request(path: "rest/v1/items", query: query)
             request.httpMethod = "GET"
             request.setValue("\(offset)-\(end)", forHTTPHeaderField: "Range")
             request.setValue("count=exact", forHTTPHeaderField: "Prefer")
@@ -801,6 +989,12 @@ enum SupabaseSync {
             let (data, response) = try await URLSession.shared.data(for: request)
             let http = response as? HTTPURLResponse
             let status = http?.statusCode ?? 0
+            // A server without the column (rolled back) answers 400: back
+            // to whole snapshots.
+            if !full, status == 400 {
+                defaults.removeObject(forKey: pullCursorKey)
+                return try await pull(context: context, full: true)
+            }
             guard status == 200 || status == 206 else {
                 throw SyncProblem(
                     message: "Couldn't fetch the latest saves.",
@@ -812,6 +1006,7 @@ enum SupabaseSync {
                 try decodePage(data)
             }.value
             rows.append(contentsOf: page.rows)
+            if let ids = page.ids { present?.formUnion(ids) } else { present = nil }
 
             let range = http?.value(forHTTPHeaderField: "Content-Range")
             if let total = contentRangeTotal(range) {
@@ -838,57 +1033,119 @@ enum SupabaseSync {
 
         for row in rows {
             serverTimes[row.id] = row.updated_at
-            if let deleted = row.deleted_at {
-                if let local = byID[row.id] {
-                    // Last-write-wins: a newer local edit keeps the row and
-                    // retries on the next push.
-                    // Assigning an unchanged value still dirties the model,
-                    // and every save schedules a sync: an already-deleted
-                    // row rewritten on each pull kept syncing forever.
-                    if row.updated_at >= local.updatedAt {
-                        if local.deletedAt != deleted { local.deletedAt = deleted }
-                        if local.updatedAt != row.updated_at { local.updatedAt = row.updated_at }
-                    }
-                }
-                continue
-            }
-            if let local = byID[row.id] {
-                if row.updated_at > local.updatedAt {
-                    apply(row, to: local)
-                } else if row.updated_at == local.updatedAt {
-                    // Thumbnails and colours filled in on the server leave
-                    // updated_at alone (0015), so an unedited row can still
-                    // carry a new picture.
-                    if local.imageUrl != row.image_url { local.imageUrl = row.image_url }
-                    if local.colorHex != row.color { local.colorHex = row.color }
-                    if local.placeId != row.place_id { local.placeId = row.place_id }
-                    // Emails cleared on the server (0053) without a bump.
-                    if row.added_by_email == nil, local.addedByEmail != nil { local.addedByEmail = nil }
-                }
-            } else {
+            let server = localForm(row)
+            guard let local = byID[row.id] else {
+                // Deleted before this phone ever had it: nothing to show.
+                if row.deleted_at != nil { continue }
                 let item = Item()
                 apply(row, to: item)
                 context.insert(item)
                 byID[row.id] = item
+                bases[row.id] = server
+                continue
             }
+            let mine = fields(self.row(from: local))
+            let merged: Fields
+            if let base = bases[row.id] {
+                merged = RowMerge.merge(base: base, local: mine, server: server)
+                bases[row.id] = server
+            } else {
+                merged = RowMerge.wholeRow(
+                    local: mine, server: server, localStamp: local.updatedAt, serverStamp: row.updated_at
+                )
+                // A newer local copy has yet to land; until it does, the
+                // server's isn't the base of anything here.
+                if row.updated_at >= local.updatedAt { bases[row.id] = server }
+            }
+            // Assigning an unchanged value still dirties the model, and
+            // every save schedules a sync: a row rewritten on each pull
+            // kept syncing forever.
+            guard merged != mine, let next = self.row(merged) else { continue }
+            apply(next, to: local)
         }
 
-        // After a complete snapshot, drop leftovers from another group.
-        if let gid = GroupStore.shared.card?.groupId {
-            let leftover = ((try? context.fetch(FetchDescriptor<Item>())) ?? [])
-                .filter { $0.groupId != nil && $0.groupId != gid }
-            if !leftover.isEmpty {
-                // One may be open: its sheet closes before the row goes.
-                NotificationCenter.default.post(name: .cwgLibraryWillSwap, object: nil)
-                try? await Task.sleep(for: .milliseconds(350))
-                for local in leftover { context.delete(local) }
+        if full {
+            // After a complete snapshot, drop leftovers from another group.
+            if let gid = GroupStore.shared.card?.groupId {
+                let leftover = ((try? context.fetch(FetchDescriptor<Item>())) ?? [])
+                    .filter { $0.groupId != nil && $0.groupId != gid }
+                if !leftover.isEmpty {
+                    // One may be open: its sheet closes before the row goes.
+                    NotificationCenter.default.post(name: .cwgLibraryWillSwap, object: nil)
+                    try? await Task.sleep(for: .milliseconds(350))
+                    for local in leftover { context.delete(local) }
+                }
             }
+            if let present { await dropGone(context: context, present: present, known: known) }
+            defaults.set(Date.now, forKey: fullPullKey)
         }
         if context.hasChanges {
             pullSaves += 1
             do { try context.save() } catch { pullSaves -= 1; throw error }
         }
+        if let newest = rows.compactMap(\.touched_at).max(),
+           newest > (defaults.object(forKey: pullCursorKey) as? Date ?? .distantPast) {
+            defaults.set(newest, forKey: pullCursorKey)
+        }
+        saveBases()
         return serverTimes
+    }
+
+    /// Saves the server no longer has at all: deleted long enough ago to be
+    /// purged (90 days), or removed by hand. A save goes only when this
+    /// phone knew the server had it and holds nothing unsent for it; a
+    /// trashed save with no record goes when nothing about it is unsent.
+    private static func dropGone(context: ModelContext, present: Set<UUID>, known: Set<UUID>) async {
+        let locals = (try? context.fetch(FetchDescriptor<Item>())) ?? []
+        let cursor = lastSyncAt
+        let gone = locals.filter { item in
+            guard !present.contains(item.id), !isQuarantined(item) else { return false }
+            if known.contains(item.id), bases[item.id] != nil {
+                if case .clean = pending(item, since: cursor) { return true }
+                return false
+            }
+            return bases[item.id] == nil && item.isTrashed && item.updatedAt <= cursor
+        }.map(\.id)
+        // A row can slip between pages when another is written or purged
+        // mid-pull: only what the server confirms it lacks goes.
+        let confirmed = gone.isEmpty ? [] : await absent(gone)
+        if !confirmed.isEmpty {
+            NotificationCenter.default.post(name: .cwgLibraryWillSwap, object: nil)
+            try? await Task.sleep(for: .milliseconds(350))
+            for id in confirmed {
+                bases[id] = nil
+                // Looked up again: a model deleted meanwhile traps when touched.
+                if let current = context.item(id) { context.delete(current) }
+            }
+        }
+        // Nothing to remember for saves this phone no longer has.
+        let ids = Set(((try? context.fetch(FetchDescriptor<Item>())) ?? []).map(\.id))
+        bases = bases.filter { ids.contains($0.key) }
+    }
+
+    /// Of these ids, the ones the server has no row for. Empty when it
+    /// can't be asked: nothing is dropped on a guess.
+    private static func absent(_ ids: [UUID]) async -> [UUID] {
+        var missing: [UUID] = []
+        for start in stride(from: 0, to: ids.count, by: 100) {
+            let chunk = Array(ids[start..<min(start + 100, ids.count)])
+            let list = chunk.map { $0.uuidString.lowercased() }.joined(separator: ",")
+            do {
+                var request = try await request(path: "rest/v1/items", query: [
+                    .init(name: "select", value: "id"),
+                    .init(name: "id", value: "in.(\(list))"),
+                ])
+                request.httpMethod = "GET"
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
+                struct Found: Decodable { let id: UUID }
+                let found = Set(try JSONDecoder().decode([Found].self, from: data).map(\.id))
+                missing += chunk.filter { !found.contains($0) }
+            } catch {
+                return []
+            }
+        }
+        return missing
     }
 
     /// PostgREST `Content-Range: 0-999/1234` (or `*/0`).
@@ -957,7 +1214,16 @@ enum SupabaseSync {
             request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
             request.httpBody = try JSONSerialization.data(withJSONObject: fields)
             let (_, response) = try await URLSession.shared.data(for: request)
-            return (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0)
+            guard (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return false }
+            // What landed is the server's now, so the next push doesn't
+            // send it again. A fill-only patch that matched nothing is put
+            // right by the next pull: the server's value differs from it.
+            if let data = try? JSONSerialization.data(withJSONObject: fields),
+               let sent = try? JSONDecoder().decode(Fields.self, from: data) {
+                landed(id, sent)
+                saveBases()
+            }
+            return true
         } catch {
             return false
         }

@@ -417,12 +417,15 @@ struct ContentView: View {
         // Sweep anything the share extension parked in the App Group inbox,
         // then refresh the shared URL index.
         .onChange(of: scenePhase, initial: true) { _, phase in
+            // On a stand-in store nothing is mirrored out: it's empty.
+            guard !StandInStore.active else { return }
             if phase == .active { becameActive() }
             if phase == .background { WidgetStore.syncLock(items: items.filter { !$0.isTrashed }) }
         }
         // Any local save (add, edit, done, delete-undo…) syncs to the shared
         // table after a short debounce.
         .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { _ in
+            guard !StandInStore.active else { return }
             SupabaseSync.saved(context: context)
             #if !APP_EXTENSION
             Task { await SecondSaveNudge.refresh(items: items) }
