@@ -6,7 +6,7 @@
 //   SIWA_KEY_ID       — the key's 10-char id
 //   SIWA_TEAM_ID      — the developer team id
 //   SIWA_PRIVATE_KEY  — the .p8 file contents (PKCS#8 PEM)
-import { decodeJwt, importPKCS8, SignJWT } from "npm:jose@5";
+import { decodeJwt, importPKCS8, SignJWT } from "npm:jose@5.10.0";
 
 const CLIENT_ID = "com.cansaglam.CanWeGo";
 const APPLE = "https://appleid.apple.com";

@@ -1,6 +1,6 @@
 // One-off: sample an accent colour for existing items from their source URL.
 // Run: deno run -A scripts/backfill-colors.ts   (reads .supabase.env)
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.117.3";
 import { colorFromPageUrl } from "../supabase/functions/_shared/color.ts";
 
 const env = new TextDecoder().decode(await Deno.readFile(".supabase.env"));

@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { firstName, publicInvite, sharedCard, shareToken } from "./share.ts";
 
 Deno.test("a shared card keeps the public fields and drops the rest", () => {

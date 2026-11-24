@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { aboutEvent, answerText, applyAbouts, applyCategories, blockSummary, undescribed, busyMatters, interleave, isDue, isTicketEventPage, lastListIn, leaseFree, mergePicks, readItems, servePool, shapeSuggestions, stillOn, type Suggestion, triedRecently, undressed, unlabelled, withCardPhoto, forPhone, namedVenue, needsPicture } from "./suggestions.ts";
 
 Deno.test("a listing that mentions the event isn't its page", () => {

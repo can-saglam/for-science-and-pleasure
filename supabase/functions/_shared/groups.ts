@@ -1,7 +1,7 @@
 // Group resolution for edge functions (Phase 1b). The unit of access is
 // the caller's group: RLS scopes every table by it, and these helpers give
 // functions the same answer RLS would.
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 export interface Caller {
   /** RLS-scoped client carrying the caller's JWT. */
   client: SupabaseClient;

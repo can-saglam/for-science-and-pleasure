@@ -1,7 +1,7 @@
 // Entitlement states against stubbed App Store Server API replies: what a
 // subscriber gets for each status Apple can report.
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { exportPKCS8, generateKeyPair } from "npm:jose@5";
+import { exportPKCS8, generateKeyPair } from "npm:jose@5.10.0";
 import { BUNDLE_ID, entitlementRow, subscriptionStatus } from "./appstore.ts";
 
 const { privateKey } = await generateKeyPair("ES256", { extractable: true });

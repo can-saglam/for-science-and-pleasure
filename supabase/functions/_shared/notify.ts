@@ -3,7 +3,7 @@
 // written by the iOS app after sign-in). Scoped by group since 1b — a token
 // outside the group never hears about it. Save pings carry the save's id,
 // so a tap opens it.
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { apnsConfigured, sendApnsAlert } from "./apns.ts";
 import { displayName, groupTokens } from "./groups.ts";
 

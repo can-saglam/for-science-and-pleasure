@@ -1,7 +1,7 @@
 // The work behind a city's suggestions, shared by the app's ask
 // (suggestions) and the scheduled warm-up (warm-cities): one job per row at
 // a time, a search that replaces the pool, or pictures for a stored one.
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { card, uncarded } from "./pick_cards.ts";
 import {
   addUsage,

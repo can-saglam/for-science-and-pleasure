@@ -6,7 +6,7 @@
 // Sign in with Apple access is revoked once the account is gone. JWT
 // required; work runs as the service role.
 import { corsHeaders } from "../_shared/extract.ts";
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { admin, displayName } from "../_shared/groups.ts";
 import { notifyGroupOfMember } from "../_shared/notify.ts";
 import { revokeAppleAccess, type RevokeOutcome } from "../_shared/siwa.ts";

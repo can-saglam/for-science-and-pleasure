@@ -1,6 +1,6 @@
 // Group helpers against a stub Supabase client: the fallbacks and the
 // exclusion logic are what a wrong line would silently break.
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { displayName, groupForFeedKey, groupTokens, steadyFetch } from "./groups.ts";
 
 function assert(cond: unknown, msg: string) {

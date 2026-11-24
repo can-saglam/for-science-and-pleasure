@@ -3,6 +3,10 @@ dist/
 .supabase.env
 .env
 .env.*
+*.env
+# App Store Connect and APNs keys never belong in the repo.
+*.p8
+.wrangler/
 .DS_Store
 supabase/.temp/
 # Parser test cases and results: built from the library, so personal.

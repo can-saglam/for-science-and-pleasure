@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1";
 import { type Candidate, type Context, type Pool, candidates, kept, runCost, wanted } from "./warm_plan.ts";
 
 const DAY = 86_400_000;

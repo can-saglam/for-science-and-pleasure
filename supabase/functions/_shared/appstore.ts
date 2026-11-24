@@ -12,7 +12,7 @@
 //   ASC_ISSUER_ID     — the issuer id shown above the keys
 //   ASC_KEY_ID        — the key's 10-char id
 //   ASC_PRIVATE_KEY   — the .p8 file contents (PKCS#8 PEM)
-import { importPKCS8, SignJWT } from "npm:jose@5";
+import { importPKCS8, SignJWT } from "npm:jose@5.10.0";
 
 export const BUNDLE_ID = "com.cansaglam.CanWeGo";
 export const PLUS_PRODUCTS = new Set([

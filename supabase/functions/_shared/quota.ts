@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 
 /** AI calls per person per day, parse + suggest together. Plus
  * comes from the group: anyone covered by a member's subscription gets it.

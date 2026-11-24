@@ -2,7 +2,7 @@
 // job-health can tell a job that stopped from one with nothing to do.
 // Recording never fails the job: a missing row reads as a missed run,
 // which is the right alarm anyway.
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 
 export async function recordRun(
   db: SupabaseClient,

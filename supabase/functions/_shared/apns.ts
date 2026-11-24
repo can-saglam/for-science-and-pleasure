@@ -3,7 +3,7 @@
 //   APNS_KEY_ID       — the key's 10-char id
 //   APNS_TEAM_ID      — the developer team id
 //   APNS_PRIVATE_KEY  — the .p8 file contents (PKCS#8 PEM)
-import { importPKCS8, SignJWT } from "npm:jose@5";
+import { importPKCS8, SignJWT } from "npm:jose@5.10.0";
 
 const TOPIC = "com.cansaglam.CanWeGo";
 

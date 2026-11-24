@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { keepable, uncarded, withPickLook } from "./pick_cards.ts";
 import { type PickCard, placeCard, type Suggestion } from "./suggestions.ts";
 

@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1";
 import { problems, type RunRow } from "./runs.ts";
 
 const now = new Date("2026-11-24T08:00:00Z");

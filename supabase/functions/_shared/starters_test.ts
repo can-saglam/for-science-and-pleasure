@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1";
 import { chooseStarters, fallbackStarters, readModelStarters, shapeStarters, starterFresh, starterKey } from "./starters.ts";
 
 

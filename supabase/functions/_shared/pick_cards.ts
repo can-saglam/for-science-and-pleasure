@@ -5,7 +5,7 @@
 // kept warm on spec never pays to read pages nobody taps. Anything still
 // without a card is looked up on its first tap, by parse, and kept here
 // for everyone after. A new pool replaces the old one, cards and all.
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { isThumbnail } from "./color.ts";
 import { extractCard, linkKey, type ParseRun } from "./extract.ts";
 import type { Home } from "./home.ts";

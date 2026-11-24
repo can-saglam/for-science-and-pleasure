@@ -6,7 +6,7 @@
 //
 // I/O-free apart from groupHome(), so the prompt and geocoder rules can be
 // unit-tested.
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { localClock, localDate } from "./schedule.ts";
 
 export interface Home {

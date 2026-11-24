@@ -1,4 +1,4 @@
-import { exportPKCS8, generateKeyPair } from "npm:jose@5";
+import { exportPKCS8, generateKeyPair } from "npm:jose@5.10.0";
 import { revokeAppleAccess } from "./siwa.ts";
 
 function assert(cond: unknown, msg: string): asserts cond {
