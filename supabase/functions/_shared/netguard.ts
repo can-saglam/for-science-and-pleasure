@@ -2,7 +2,9 @@
 // site the model named, a redirect) must never reach the server's own
 // network: loopback, private ranges, link-local and cloud metadata. Every
 // such fetch goes through `publicFetch`, which checks the address a name
-// resolves to and follows redirects one hop at a time, checking each.
+// resolves to and follows redirects one hop at a time, checking each. Their
+// bodies are read through `readCapped`, so a link to something huge can't
+// run the worker out of memory.
 
 export class BlockedAddress extends Error {
   constructor(url: string) {
@@ -12,6 +14,9 @@ export class BlockedAddress extends Error {
 }
 
 const MAX_REDIRECTS = 6;
+
+/// As much of a page as is read: well past where the useful markup ends.
+export const PAGE_BYTES = 2_000_000;
 
 function v4Parts(ip: string): number[] | null {
   const parts = ip.split(".");
@@ -75,30 +80,56 @@ export function isPublicUrl(raw: string): boolean {
   return !/(^|\.)(localhost|local|internal|intranet|lan|home|corp|localdomain|home\.arpa|svc|cluster\.local)$/.test(host);
 }
 
-async function lookup(host: string, type: "A" | "AAAA"): Promise<string[] | null> {
+export type Resolver = (host: string, type: "A" | "AAAA", options: { signal: AbortSignal }) => Promise<string[]>;
+
+const systemResolver: Resolver = (host, type, options) => Deno.resolveDns(host, type, options);
+
+/// What a runtime throws when it won't look names up at all: NotCapable is
+/// Deno 2's refusal, PermissionDenied Deno 1's, TypeError a missing API.
+const noDns: (new (...args: never[]) => Error)[] = [
+  Deno.errors.NotCapable,
+  Deno.errors.PermissionDenied,
+  Deno.errors.NotSupported,
+  TypeError,
+].filter(Boolean);
+
+/// Addresses, or why there are none: "failed" (a timeout, a server error)
+/// is not knowing; "unavailable" is a runtime that can't look names up.
+async function lookup(resolve: Resolver, host: string, type: "A" | "AAAA"): Promise<string[] | "failed" | "unavailable"> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3_000);
   try {
-    return await Deno.resolveDns(host, type, { signal: controller.signal });
+    return await resolve(host, type, { signal: controller.signal });
   } catch (error) {
-    // No records of this type is an answer; anything else (the runtime
-    // not offering DNS, a timeout) is not knowing.
-    return error instanceof Deno.errors.NotFound ? [] : null;
+    if (error instanceof Deno.errors.NotFound) return [];
+    return noDns.some((kind) => error instanceof kind) ? "unavailable" : "failed";
   } finally {
     clearTimeout(timer);
   }
 }
 
-/// Every address the name resolves to is public. When the runtime can't
-/// resolve at all, the hostname checks above are what's left.
-export async function resolvesPublic(raw: string): Promise<boolean> {
+let warnedUnavailable = false;
+
+/// Every address the name resolves to is public. A lookup that fails is a
+/// refusal: not knowing where a name points is no reason to go there. Only
+/// a runtime with no DNS at all falls back to the hostname checks above.
+export async function resolvesPublic(raw: string, resolve: Resolver = systemResolver): Promise<boolean> {
   if (!isPublicUrl(raw)) return false;
   const host = new URL(raw).hostname.toLowerCase().replace(/\.$/, "");
   if (host.startsWith("[") || v4Parts(host)) return true;
-  const [a, aaaa] = await Promise.all([lookup(host, "A"), lookup(host, "AAAA")]);
-  if (a === null && aaaa === null) return true;
-  const addresses = [...(a ?? []), ...(aaaa ?? [])];
-  return addresses.length > 0 && addresses.every((ip) => !isPrivateIp(ip));
+  const answers = await Promise.all([lookup(resolve, host, "A"), lookup(resolve, host, "AAAA")]);
+  if (answers.every((a) => a === "unavailable")) {
+    if (!warnedUnavailable) console.warn("netguard: no DNS in this runtime; hostname checks only");
+    warnedUnavailable = true;
+    return true;
+  }
+  const addresses = answers.flatMap((a) => (Array.isArray(a) ? a : []));
+  if (addresses.some(isPrivateIp)) return false;
+  if (addresses.length === 0) {
+    if (answers.some((a) => a === "failed")) console.warn("netguard: lookup failed, refused", host);
+    return false;
+  }
+  return true;
 }
 
 /// `fetch` for links someone else chose. Redirects are followed by hand
@@ -122,4 +153,44 @@ export async function publicFetch(url: string, init: RequestInit = {}): Promise<
     current = new URL(location, current).toString();
   }
   throw new Error(`too many redirects: ${url}`);
+}
+
+/// At most `limit` bytes of a body; the rest is never downloaded. With
+/// `whole`, a body over the limit (by its declared length, or by what
+/// arrives) is null instead of cut short: half an image is no image.
+export async function readCapped(res: Response, limit: number, whole = false): Promise<Uint8Array | null> {
+  const declared = Number(res.headers.get("content-length"));
+  if (whole && declared > limit) {
+    await res.body?.cancel();
+    return null;
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let done = false;
+  while (!done && size <= limit) {
+    const next = await reader.read();
+    done = next.done;
+    if (next.value) {
+      chunks.push(next.value);
+      size += next.value.length;
+    }
+  }
+  if (!done) await reader.cancel();
+  if (whole && size > limit) return null;
+  const out = new Uint8Array(Math.min(size, limit));
+  let at = 0;
+  for (const chunk of chunks) {
+    if (at >= out.length) break;
+    const part = chunk.subarray(0, out.length - at);
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+/// A page's text from at most `limit` bytes of it.
+export async function readTextCapped(res: Response, limit: number): Promise<string> {
+  return new TextDecoder().decode((await readCapped(res, limit)) ?? new Uint8Array());
 }

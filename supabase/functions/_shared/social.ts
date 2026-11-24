@@ -14,7 +14,7 @@
 // reading on-screen text and picking the accent colour *now*, never for
 // storing as the thumbnail — the venue's own site supplies that.
 
-import { publicFetch } from "./netguard.ts";
+import { PAGE_BYTES, publicFetch, readCapped, readTextCapped } from "./netguard.ts";
 
 export type SocialPlatform = "instagram" | "tiktok" | "facebook";
 
@@ -139,7 +139,7 @@ async function fetchInstagram(url: string): Promise<SocialPost | null> {
       headers: { "User-Agent": MOBILE_UA, Accept: "text/html" },
     });
     if (!res.ok) return null;
-    const html = (await res.text()).slice(0, 400_000);
+    const html = (await readTextCapped(res, PAGE_BYTES)).slice(0, 400_000);
     const description = metaContent(html, "og:description");
     const parsed = description ? parseInstagramDescription(description) : null;
     const image = metaContent(html, "og:image");
@@ -211,9 +211,12 @@ export async function fetchImageBase64(
     });
     if (!res.ok) return null;
     const type = res.headers.get("content-type")?.split(";")[0].trim() ?? "";
-    if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) return null;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > 4_000_000) return null;
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) {
+      await res.body?.cancel();
+      return null;
+    }
+    const bytes = await readCapped(res, 4_000_000, true);
+    if (!bytes || bytes.length === 0) return null;
     let binary = "";
     const chunk = 0x8000;
     for (let i = 0; i < bytes.length; i += chunk) {

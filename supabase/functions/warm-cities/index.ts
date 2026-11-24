@@ -14,6 +14,7 @@
 // - Warm-up spend stops at MONTHLY_BUDGET_USD a month; asks never wait on it.
 import { sameSecret } from "../_shared/auth.ts";
 import { admin } from "../_shared/groups.ts";
+import { recordResponse } from "../_shared/runs.ts";
 import { cityJobs, EXTRAS } from "../_shared/suggestion_jobs.ts";
 import { starterKey } from "../_shared/starters.ts";
 import { BUSY_CITY_PEOPLE, type SuggestionKind, busyMatters } from "../_shared/suggestions.ts";
@@ -73,8 +74,12 @@ const daysBefore = (now: number, days: number) => new Date(now - days * DAY).toI
 Deno.serve(async (req) => {
   const expected = Deno.env.get("REMINDERS_CRON_SECRET");
   if (!expected || !sameSecret(req.headers.get("x-cron-secret"), expected)) return json({ error: "forbidden" }, 403);
-
   const db = admin();
+  const started = new Date();
+  return await recordResponse(db, "warm-cities", started, await warm(db));
+});
+
+async function warm(db: ReturnType<typeof admin>): Promise<Response> {
   const now = Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 7)}-01T00:00:00Z`;
@@ -136,4 +141,4 @@ Deno.serve(async (req) => {
     return json({ warming: c.key, kinds, askers: c.askers, spent: Math.round(spent) });
   }
   return json({ warming: null, spent: Math.round(spent) });
-});
+}

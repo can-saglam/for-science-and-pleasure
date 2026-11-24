@@ -25,7 +25,7 @@ import {
   socialPlatform,
   SocialUnreadableError,
 } from "./social.ts";
-import { publicFetch } from "./netguard.ts";
+import { PAGE_BYTES, publicFetch, readTextCapped } from "./netguard.ts";
 
 export { corsHeaders, geocode, SocialUnreadableError };
 
@@ -546,7 +546,7 @@ export async function ownPage(
       await res.body?.cancel();
       return res.status === 404 || res.status === 410 ? null : vouched();
     }
-    const html = (await res.text()).slice(0, 600_000);
+    const html = (await readTextCapped(res, PAGE_BYTES)).slice(0, 600_000);
     if (looksBlocked(html.replace(/<[^>]+>/g, " "))) return vouched();
     const final = cleanLink(res.url || clean) ?? clean;
     // Sites that answer a missing page by redirecting home.
@@ -578,7 +578,7 @@ async function fetchPage(url: string): Promise<Page | null> {
       },
     });
     if (!res.ok) return null;
-    return pageOf(await res.text(), res.url || url);
+    return pageOf(await readTextCapped(res, PAGE_BYTES), res.url || url);
   } catch {
     return null;
   }

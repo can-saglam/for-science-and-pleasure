@@ -10,6 +10,7 @@ Can We Go? is a shared list of places and events you mean to go to.
 - A home city, if you set one, so dates and distances read in that city.
 - Which city you asked for suggestions in, once a day, and whether your copy came from the App Store, so we keep suggestions ready in the cities people use. These are deleted after 120 days.
 - Whether you subscribe to Can We Go? Plus, and until when, so your group gets its benefits.
+- The reports iOS makes about the app itself, once a day: how quickly it opens, whether it hung or crashed, and its memory and battery use. They carry the app’s build number and your account, never anything you saved, and are deleted after 90 days.
 - A device token, if you allow notifications, so someone else in the group can be told when you save something. It is stored with an ID Apple gives the app on your phone, so a reinstall replaces the old token instead of adding another.
 
 Your phone’s own location stays on your phone. It is only used there, to show how far away a place is.

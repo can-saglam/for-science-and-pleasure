@@ -303,6 +303,7 @@ final class PushRegistrar: NSObject, UIApplicationDelegate, UNUserNotificationCe
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         LiveDay.listen()
+        MetricReporter.shared.start()
         return true
     }
 

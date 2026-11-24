@@ -6,7 +6,7 @@
 // function down. imagescript was abandoned — its npm build requires native
 // FFI codecs, which edge workers refuse (it crashed boots and every decode).
 import { Buffer } from "node:buffer";
-import { publicFetch } from "./netguard.ts";
+import { PAGE_BYTES, publicFetch, readCapped, readTextCapped } from "./netguard.ts";
 
 interface Rgba {
   data: Uint8Array;
@@ -118,9 +118,8 @@ export async function colorFromImageUrl(url: string): Promise<string | null> {
       },
     });
     if (!res.ok) return null;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length > 8_000_000) return null;
-    return await colorFromImageBytes(bytes);
+    const bytes = await readCapped(res, 8_000_000, true);
+    return bytes ? await colorFromImageBytes(bytes) : null;
   } catch {
     return null;
   }
@@ -401,7 +400,7 @@ export async function heroImageFromUrl(pageUrl: string): Promise<string | null> 
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
     });
     if (!res.ok) return null;
-    const html = (await res.text()).slice(0, 600_000);
+    const html = (await readTextCapped(res, PAGE_BYTES)).slice(0, 600_000);
     return heroImageFromHtml(html, res.url || pageUrl);
   } catch {
     return null;
@@ -494,7 +493,7 @@ export async function colorFromPageUrl(pageUrl: string): Promise<string | null> 
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
     });
     if (!res.ok) return null;
-    const image = ogImageFromHtml(await res.text(), pageUrl);
+    const image = ogImageFromHtml(await readTextCapped(res, PAGE_BYTES), pageUrl);
     return image ? await colorFromImageUrl(image) : null;
   } catch {
     return null;

@@ -32,6 +32,7 @@ import {
   reminderBody,
 } from "../_shared/reminders.ts";
 import { dayBefore, isMorningHour, localClock } from "../_shared/schedule.ts";
+import { recordRun } from "../_shared/runs.ts";
 
 type GroupResult =
   | { group_id: string; skipped: true; reason: string }
@@ -311,13 +312,20 @@ Deno.serve(async (req) => {
   const at = typeof body.at === "string" && !Number.isNaN(Date.parse(body.at))
     ? new Date(body.at)
     : new Date();
+  // Only the dispatcher's calls go in job_runs (each says what day it's
+  // for): a test run proves nothing about the schedule.
+  const scheduled = !force && body.at === undefined && typeof body.scheduled_for === "string";
+  const started = new Date();
 
   let groupIds: string[] = [];
   if (typeof body.group_id === "string") {
     groupIds = [body.group_id];
   } else {
     const { data, error } = await supabase.from("groups").select("id");
-    if (error) return Response.json({ error: error.message }, { status: 500 });
+    if (error) {
+      if (scheduled) await recordRun(supabase, "send-reminders", started, false, { error: error.message });
+      return Response.json({ error: error.message }, { status: 500 });
+    }
     groupIds = (data ?? []).map((g: { id: string }) => g.id);
   }
 
@@ -351,6 +359,13 @@ Deno.serve(async (req) => {
       console.error(e);
       results.push({ group_id: groupId, error: force ? String(e).slice(0, 300) : "internal error" });
     }
+  }
+  if (scheduled) {
+    const failedGroups = [...results, ...activities, ...plans].filter((r) => "error" in r && r.error).length;
+    await recordRun(supabase, "send-reminders", started, failedGroups === 0, {
+      groups: groupIds.length,
+      ...(failedGroups > 0 ? { error: `${failedGroups} group step${failedGroups === 1 ? "" : "s"} failed` } : {}),
+    });
   }
   return Response.json({ groups: results, activities, plans });
 });

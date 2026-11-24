@@ -1,5 +1,14 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
-import { BlockedAddress, isPrivateIp, isPublicUrl, publicFetch, resolvesPublic } from "./netguard.ts";
+import {
+  BlockedAddress,
+  isPrivateIp,
+  isPublicUrl,
+  publicFetch,
+  readCapped,
+  readTextCapped,
+  type Resolver,
+  resolvesPublic,
+} from "./netguard.ts";
 
 Deno.test("private and special addresses are recognised", () => {
   for (const ip of [
@@ -34,6 +43,66 @@ Deno.test({ name: "a public name that resolves to a private address is refused",
   // localtest.me and its subdomains resolve to 127.0.0.1 by design.
   assertEquals(await resolvesPublic("http://localtest.me/"), false);
   assertEquals(await resolvesPublic("https://example.com/"), true);
+});
+
+/// Stand-in DNS: per record type, addresses or an error to throw.
+const fakeDns = (answers: Partial<Record<"A" | "AAAA", string[] | Error>>): Resolver => (_host, type) => {
+  const answer = answers[type] ?? new Deno.errors.NotFound("no records");
+  return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+};
+
+Deno.test("a name that can't be looked up is refused", async () => {
+  const timeout = new Error("timed out");
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({ A: timeout, AAAA: timeout })), false);
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({ A: timeout })), false);
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({})), false);
+});
+
+Deno.test("one family answering is enough, unless it names a private address", async () => {
+  const timeout = new Error("timed out");
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({ A: ["93.184.215.14"], AAAA: timeout })), true);
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({ A: ["93.184.215.14"], AAAA: ["::1"] })), false);
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({ A: ["127.0.0.1"], AAAA: timeout })), false);
+});
+
+Deno.test("a runtime without DNS falls back to the hostname checks", async () => {
+  const none = new Deno.errors.NotSupported("no dns");
+  assertEquals(await resolvesPublic("https://example.com/", fakeDns({ A: none, AAAA: none })), true);
+  assertEquals(await resolvesPublic("http://localhost/", fakeDns({ A: none, AAAA: none })), false);
+});
+
+/// A body arriving in `chunks` pieces of `size` bytes, counting how many
+/// were pulled.
+function streamed(chunks: number, size: number, headers: HeadersInit = {}) {
+  let pulled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulled === chunks) return controller.close();
+      pulled++;
+      controller.enqueue(new Uint8Array(size).fill(65));
+    },
+  });
+  return { res: new Response(body, { headers }), pulled: () => pulled };
+}
+
+Deno.test("a capped read stops downloading at the limit", async () => {
+  const { res, pulled } = streamed(100, 1000);
+  const bytes = await readCapped(res, 2500);
+  assertEquals(bytes?.length, 2500);
+  assert(pulled() <= 4, `pulled ${pulled()} chunks`);
+});
+
+Deno.test("a whole read refuses what's too big, by header or by bytes", async () => {
+  const declared = streamed(1, 10, { "content-length": "9000000" });
+  assertEquals(await readCapped(declared.res, 8_000_000, true), null);
+  assertEquals(declared.pulled(), 0);
+  assertEquals(await readCapped(streamed(5, 1000).res, 4000, true), null);
+  assertEquals((await readCapped(streamed(4, 1000).res, 4000, true))?.length, 4000);
+});
+
+Deno.test("capped text reads what's there", async () => {
+  assertEquals(await readTextCapped(new Response("hello"), 100), "hello");
+  assertEquals(await readTextCapped(new Response("hello"), 3), "hel");
 });
 
 /// Stand-in network: each URL answers with a redirect or a page.
