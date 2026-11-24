@@ -1,7 +1,7 @@
 // Group helpers against a stub Supabase client: the fallbacks and the
 // exclusion logic are what a wrong line would silently break.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { displayName, groupForFeedKey, groupTokens } from "./groups.ts";
+import { displayName, groupForFeedKey, groupTokens, steadyFetch } from "./groups.ts";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);
@@ -74,4 +74,33 @@ Deno.test("displayName: profile name, else email local part, else Someone", asyn
   assert(await displayName(db, "blank", "blank@example.com") === "blank", "empty profile → email");
   assert(await displayName(db, "unknown", "joyce.c@example.com") === "joyce.c", "no profile → email");
   assert(await displayName(db, null, null) === "Someone", "nothing known");
+});
+
+/** Answers in turn, counting the calls. */
+async function withAnswers(answers: [number, string][], run: (calls: () => number) => Promise<void>) {
+  const real = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (() => {
+    const [status, body] = answers[Math.min(calls++, answers.length - 1)];
+    return Promise.resolve(new Response(body, { status }));
+  }) as typeof fetch;
+  try {
+    await run(() => calls);
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+Deno.test("a token stamped ahead of the database's clock is retried", async () => {
+  await withAnswers([[401, '{"message":"JWT issued at future"}'], [200, "[]"]], async (calls) => {
+    const res = await steadyFetch("https://db.example/rest/v1/x");
+    assert(res.status === 200 && calls() === 2, `status ${res.status}, calls ${calls()}`);
+  });
+});
+
+Deno.test("any other refusal comes straight back", async () => {
+  await withAnswers([[401, '{"message":"JWT expired"}'], [200, "[]"]], async (calls) => {
+    const res = await steadyFetch("https://db.example/rest/v1/x");
+    assert(res.status === 401 && calls() === 1, `status ${res.status}, calls ${calls()}`);
+  });
 });

@@ -41,7 +41,21 @@ export function admin(): SupabaseClient {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { global: { fetch: steadyFetch } },
   );
+}
+
+/// The service key's token is sometimes stamped a moment ahead of the
+/// database's clock, and the request is refused ("JWT issued at future");
+/// the same request a second or two later goes through.
+export async function steadyFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(input, init);
+    if (res.status !== 401 || attempt === 3) return res;
+    if (!(await res.clone().text()).includes("JWT issued at future")) return res;
+    await res.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+  }
 }
 
 /**
