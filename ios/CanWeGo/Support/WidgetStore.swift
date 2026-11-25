@@ -16,6 +16,10 @@ enum WidgetStore {
         var timeLabel: String?
         var colorHex: String?
         var hasImage: Bool
+        /// What the widget's Show and Category settings filter on.
+        var kind: String?
+        var category: String?
+        var planned: Bool?
     }
 
     /// What the Lock Screen widget picks from (mirrored there as
@@ -83,7 +87,10 @@ enum WidgetStore {
                         ? item.category.flatMap { $0 == "other" ? nil : Item.categoryLabel($0) }
                         : item.timeLabel,
                     colorHex: item.colorHex,
-                    hasImage: item.imageUrl != nil
+                    hasImage: item.imageUrl != nil,
+                    kind: item.isPlace ? "place" : "event",
+                    category: item.category.map(Item.categoryKey),
+                    planned: item.upcomingPlan != nil
                 ),
                 imageURL: item.imageUrl.flatMap(URL.init(string:))
             )

@@ -18,11 +18,11 @@ struct CanWeGoWidgets: WidgetBundle {
 
 struct RandomSaveWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "RandomSave", provider: Provider()) { entry in
+        AppIntentConfiguration(kind: "RandomSave", intent: SaveWidgetIntent.self, provider: Provider()) { entry in
             RandomSaveView(entry: entry)
         }
         .configurationDisplayName("Can We Go?")
-        .description("What's up next, or a save from your list, rotating through the day.")
+        .description("What's up next, or a save from your list, rotating through the day. Edit it to show only events, places, plans or one category.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
     }
@@ -39,6 +39,9 @@ struct SnapshotItem: Codable, Identifiable {
     var timeLabel: String?
     var colorHex: String?
     var hasImage: Bool
+    var kind: String?
+    var category: String?
+    var planned: Bool?
 }
 
 enum Snapshot {
@@ -155,9 +158,10 @@ struct SaveEntry: TimelineEntry {
     let photo: Data?
     let theme: ThemeSnapshot
     var canSkip = false
+    var emptyMessage = "Save something to see it here"
 }
 
-struct Provider: TimelineProvider {
+struct Provider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> SaveEntry {
         SaveEntry(
             date: .now,
@@ -174,11 +178,11 @@ struct Provider: TimelineProvider {
         )
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (SaveEntry) -> Void) {
-        completion(entry(at: .now, in: context))
+    func snapshot(for configuration: SaveWidgetIntent, in context: Context) async -> SaveEntry {
+        entry(at: .now, showing: configuration, in: context)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<SaveEntry>) -> Void) {
+    func timeline(for configuration: SaveWidgetIntent, in context: Context) async -> Timeline<SaveEntry> {
         // A fresh random save every hour, four hours ahead; then WidgetKit
         // asks again. The app also reloads the timeline whenever it writes
         // a fresh snapshot.
@@ -186,19 +190,21 @@ struct Provider: TimelineProvider {
         let top = calendar.date(
             from: calendar.dateComponents([.year, .month, .day, .hour], from: .now)
         ) ?? .now
-        var entries = [entry(at: .now, in: context)]
+        var entries = [entry(at: .now, showing: configuration, in: context)]
         for hour in 1...4 {
             if let date = calendar.date(byAdding: .hour, value: hour, to: top) {
-                entries.append(entry(at: date, in: context))
+                entries.append(entry(at: date, showing: configuration, in: context))
             }
         }
-        completion(Timeline(entries: entries, policy: .atEnd))
+        return Timeline(entries: entries, policy: .atEnd)
     }
 
-    private func entry(at date: Date, in context: Context) -> SaveEntry {
-        let all = Snapshot.load()
+    private func entry(at date: Date, showing configuration: SaveWidgetIntent, in context: Context) -> SaveEntry {
+        let all = Snapshot.load().filter(configuration.includes)
         let theme = ThemeSnapshot.load()
-        guard !all.isEmpty else { return SaveEntry(date: date, item: nil, photo: nil, theme: theme) }
+        guard !all.isEmpty else {
+            return SaveEntry(date: date, item: nil, photo: nil, theme: theme, emptyMessage: configuration.emptyMessage)
+        }
         let order = Self.order(all, at: date)
         let item = order[Snapshot.skip % order.count]
         // Decode at the widget's real pixel size: displaySize is in points,
@@ -390,7 +396,7 @@ struct RandomSaveView: View {
             Image(systemName: "sparkles")
                 .font(.title3)
                 .foregroundStyle(entry.theme.ink.opacity(0.8))
-            Text("Save something to see it here")
+            Text(entry.emptyMessage)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(entry.theme.ink.opacity(0.75))
                 .multilineTextAlignment(.center)
