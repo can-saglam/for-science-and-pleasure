@@ -164,6 +164,16 @@ private struct RootGate: View {
             PlusStore.shared.start()
             if auth.signedIn { await decideOnboarding() }
         }
+        // A theme for Light mode and one for Dark: the phone may have
+        // changed while the app was away (or Control Centre was over it),
+        // and can change on its schedule while the app is open.
+        .task(id: scenePhase == .active && ThemeStore.shared.followsSystem) {
+            guard scenePhase == .active, ThemeStore.shared.followsSystem else { return }
+            while !Task.isCancelled {
+                ThemeStore.shared.catchUpWithSystem()
+                try? await Task.sleep(for: .seconds(4))
+            }
+        }
         // The first run's theme choice reaches the home-screen icon here,
         // in the background, where iOS swaps it without the alert.
         .onChange(of: scenePhase) { old, phase in

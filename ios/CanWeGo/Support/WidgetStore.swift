@@ -51,16 +51,26 @@ enum WidgetStore {
     /// fetch, JPEG encode, disk writes) hops off it.
     /// The widget's empty state and no-photo wash follow the app theme.
     struct ThemePayload: Codable {
+        /// The theme on screen when this was written.
         var theme: String
         var isLight: Bool
+        /// Set when the theme follows the phone's appearance: the widget
+        /// then picks between them itself, with the app closed.
+        var day: String?
+        var night: String?
     }
 
     /// Takes the theme in — never reads `ThemeStore.shared`. Doing that
     /// from `ThemeStore.init` re-enters `dispatch_once` and traps at launch.
-    static func writeTheme(_ theme: AppTheme) {
+    static func writeTheme(_ theme: AppTheme, pair: (day: AppTheme, night: AppTheme)?) {
         guard let directory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let payload = ThemePayload(theme: theme.rawValue, isLight: theme.isLight)
+        let payload = ThemePayload(
+            theme: theme.rawValue,
+            isLight: theme.isLight,
+            day: pair?.day.rawValue,
+            night: pair?.night.rawValue
+        )
         if let data = try? JSONEncoder().encode(payload) {
             try? data.write(to: directory.appending(path: "theme.json"), options: .atomic)
         }
@@ -97,7 +107,7 @@ enum WidgetStore {
         }
         let lock = lockData(items)
 
-        writeTheme(ThemeStore.shared.current)
+        writeTheme(ThemeStore.shared.current, pair: ThemeStore.shared.pair)
         // One at a time: a run's sweep would take the photos another run
         // has just written for items it didn't know about.
         let previous = writing

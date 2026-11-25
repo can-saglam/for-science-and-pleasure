@@ -107,16 +107,32 @@ struct ThemeSnapshot {
     var paper: Color
     var ink: Color
 
+    /// The theme the app last had on screen.
     static func load() -> ThemeSnapshot {
+        named(payload()?.theme ?? "midnight")
+    }
+
+    /// The Light mode theme and, when the app's theme follows the phone,
+    /// the Dark mode one for the view to switch to.
+    static func loadPair() -> (day: ThemeSnapshot, night: ThemeSnapshot?) {
+        let payload = payload()
+        if let day = payload?.day, let night = payload?.night {
+            return (named(day), named(night))
+        }
+        return (named(payload?.theme ?? "midnight"), nil)
+    }
+
+    private static func payload() -> Payload? {
         let url = Snapshot.directory?.appending(path: "theme.json")
         let data = url.flatMap { try? Data(contentsOf: $0) }
-        let decoded = data.flatMap { try? JSONDecoder().decode(Payload.self, from: $0) }
-        return named(decoded?.theme ?? "midnight")
+        return data.flatMap { try? JSONDecoder().decode(Payload.self, from: $0) }
     }
 
     private struct Payload: Codable {
         var theme: String
         var isLight: Bool?
+        var day: String?
+        var night: String?
     }
 
     private static func named(_ name: String) -> ThemeSnapshot {
@@ -130,6 +146,12 @@ struct ThemeSnapshot {
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#440015") ?? .black, ink: .white)
         case "ink":
             ThemeSnapshot(name: name, isLight: false, paper: .black, ink: .white)
+        case "graphite":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#1F2023") ?? .black, ink: Color.fromHex("#F4F1EA") ?? .white)
+        case "plum":
+            ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#2E1437") ?? .black, ink: .white)
+        case "chalk":
+            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#F4F3EF") ?? .white, ink: Color.fromHex("#16171A") ?? .black)
         case "cobalt":
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#365AA8") ?? .black, ink: Color.fromHex("#FAF8F0") ?? .white)
         case "moss":
@@ -140,7 +162,7 @@ struct ThemeSnapshot {
         case "petrol":
             ThemeSnapshot(name: name, isLight: false, paper: Color.fromHex("#0F4C4F") ?? .black, ink: Color.fromHex("#F6E2B6") ?? .white)
         case "stone":
-            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#C8CBC4") ?? .white, ink: Color.fromHex("#0D0F0A") ?? .black)
+            ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#D9DCD6") ?? .white, ink: Color.fromHex("#0D0F0A") ?? .black)
         case "blush":
             ThemeSnapshot(name: name, isLight: true, paper: Color.fromHex("#EBDAD3") ?? .white, ink: Color.fromHex("#43201D") ?? .black)
         default:
@@ -156,7 +178,10 @@ struct SaveEntry: TimelineEntry {
     /// entries, and five decoded photos can push a large widget past its
     /// memory limit. It's decoded only while this entry is drawn.
     let photo: Data?
+    /// The app's theme; its Light mode one when there is a `night`.
     let theme: ThemeSnapshot
+    /// Set when the app's theme follows the phone's appearance.
+    var night: ThemeSnapshot?
     var canSkip = false
     var emptyMessage = "Save something to see it here"
 }
@@ -174,7 +199,8 @@ struct Provider: AppIntentTimelineProvider {
                 hasImage: false
             ),
             photo: nil,
-            theme: ThemeSnapshot.load()
+            theme: ThemeSnapshot.loadPair().day,
+            night: ThemeSnapshot.loadPair().night
         )
     }
 
@@ -201,9 +227,9 @@ struct Provider: AppIntentTimelineProvider {
 
     private func entry(at date: Date, showing configuration: SaveWidgetIntent, in context: Context) -> SaveEntry {
         let all = Snapshot.load().filter(configuration.includes)
-        let theme = ThemeSnapshot.load()
+        let (theme, night) = ThemeSnapshot.loadPair()
         guard !all.isEmpty else {
-            return SaveEntry(date: date, item: nil, photo: nil, theme: theme, emptyMessage: configuration.emptyMessage)
+            return SaveEntry(date: date, item: nil, photo: nil, theme: theme, night: night, emptyMessage: configuration.emptyMessage)
         }
         let order = Self.order(all, at: date)
         let item = order[Snapshot.skip % order.count]
@@ -213,7 +239,7 @@ struct Provider: AppIntentTimelineProvider {
         let photo = item.hasImage
             ? Snapshot.image(for: item.id, maxSide: side)?.jpegData(compressionQuality: 0.85)
             : nil
-        return SaveEntry(date: date, item: item, photo: photo, theme: theme, canSkip: all.count > 1)
+        return SaveEntry(date: date, item: item, photo: photo, theme: theme, night: night, canSkip: all.count > 1)
     }
 
     /// The next button's order. Up next leads, labelled the Lock Screen's
@@ -240,6 +266,12 @@ struct RandomSaveView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.widgetRenderingMode) private var renderingMode
     @Environment(\.widgetContentMargins) private var margins
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// With a theme pair, the widget follows the phone on its own.
+    private var theme: ThemeSnapshot {
+        colorScheme == .dark ? entry.night ?? entry.theme : entry.theme
+    }
 
     private var accent: Color {
         entry.item?.colorHex.flatMap(Color.fromHex) ?? Color(red: 0.35, green: 0.42, blue: 0.62)
@@ -299,14 +331,14 @@ struct RandomSaveView: View {
         } else if entry.item != nil {
             LinearGradient(
                 colors: [
-                    accent.mix(with: entry.theme.paper, by: entry.theme.isLight ? 0.72 : 0.45),
-                    accent.mix(with: entry.theme.paper, by: entry.theme.isLight ? 0.88 : 0.7),
+                    accent.mix(with: theme.paper, by: theme.isLight ? 0.72 : 0.45),
+                    accent.mix(with: theme.paper, by: theme.isLight ? 0.88 : 0.7),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         } else {
-            entry.theme.paper
+            theme.paper
         }
     }
 
@@ -375,7 +407,7 @@ struct RandomSaveView: View {
                 .foregroundStyle(typeColor)
                 .frame(width: 32, height: 32)
                 .background(
-                    Circle().fill(entry.photo != nil ? Color.black.opacity(0.45) : entry.theme.ink.opacity(0.2))
+                    Circle().fill(entry.photo != nil ? Color.black.opacity(0.45) : theme.ink.opacity(0.2))
                 )
                 .overlay(
                     Circle().strokeBorder(typeColor.opacity(entry.photo != nil ? 0.3 : 0.18), lineWidth: 0.75)
@@ -388,17 +420,17 @@ struct RandomSaveView: View {
     /// Photo sits on a dark scrim, so type stays white. Empty and no-photo
     /// follow the app theme — cream paper gets black ink.
     private var typeColor: Color {
-        entry.photo != nil ? .white : entry.theme.ink
+        entry.photo != nil ? .white : theme.ink
     }
 
     private var empty: some View {
         VStack(spacing: 6) {
             Image(systemName: "sparkles")
                 .font(.title3)
-                .foregroundStyle(entry.theme.ink.opacity(0.8))
+                .foregroundStyle(theme.ink.opacity(0.8))
             Text(entry.emptyMessage)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(entry.theme.ink.opacity(0.75))
+                .foregroundStyle(theme.ink.opacity(0.75))
                 .multilineTextAlignment(.center)
         }
     }

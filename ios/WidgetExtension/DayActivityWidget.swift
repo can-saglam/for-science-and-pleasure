@@ -125,7 +125,7 @@ struct DayLook {
     var card: Color {
         theme.paper
             .mix(with: accent, by: theme.isLight ? 0.16 : 0.32)
-            .mix(with: theme.isLight ? .black : theme.ink, by: theme.isLight ? 0.05 : 0.06)
+            .mix(with: theme.isLight ? .white : theme.ink, by: theme.isLight ? 0.45 : 0.06)
     }
 
     var ink: Color { theme.ink }

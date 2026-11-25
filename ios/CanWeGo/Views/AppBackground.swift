@@ -2,24 +2,30 @@ import SwiftUI
 
 // MARK: - Themes
 
-/// Eleven moods, one app. The deep set: the signature midnight blue, a
-/// pure black, a petrol teal, a dark forest green, a deep wine red. The
-/// mid-tones from the print sheet: cobalt, moss, terracotta. And three
-/// papers for daylight — oat, stone and blush. Each theme derives its
-/// whole palette — tab shades, sheet depth, control accent — from one
-/// base color, so everything stays tuned. Declared in picker order.
+/// Fourteen moods, one app. The deep set: the signature midnight blue, a
+/// pure black and its softer graphite, a petrol teal, a dark olive, a deep
+/// wine red, a plum. The mid-tones from the print sheet: cobalt, moss,
+/// terracotta. And four papers for daylight — oat, stone, blush and a
+/// near-white chalk. Each theme derives its whole palette — tab shades,
+/// sheet depth, card lift — from one base color, so everything stays
+/// tuned. Declared in picker order.
 enum AppTheme: String, CaseIterable, Identifiable {
     case midnight
     case ink
+    case graphite
     case petrol
+    /// Named Olive: the colour is an olive, and moss is the green. The raw
+    /// value stays, since it is what people's phones have saved.
     case forest
     case wine
+    case plum
     case cobalt
     case moss
     case terracotta
     case oat
     case stone
     case blush
+    case chalk
 
     var id: String { rawValue }
 
@@ -28,8 +34,11 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: "Midnight Blue"
         case .cobalt: "Cobalt"
         case .ink: "Pure Black"
+        case .graphite: "Graphite"
         case .petrol: "Petrol"
-        case .forest: "Forest Green"
+        case .forest: "Olive"
+        case .plum: "Plum"
+        case .chalk: "Chalk"
         case .moss: "Moss"
         case .terracotta: "Terracotta"
         case .wine: "Wine Red"
@@ -39,11 +48,11 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The papers — oat, stone and blush — are light pages with dark
-    /// type; everything else is a dark base.
+    /// The papers — oat, stone, blush and chalk — are light pages with
+    /// dark type; everything else is a dark base.
     var isLight: Bool {
         switch self {
-        case .oat, .stone, .blush: true
+        case .oat, .stone, .blush, .chalk: true
         default: false
         }
     }
@@ -63,11 +72,14 @@ enum AppTheme: String, CaseIterable, Identifiable {
     /// Logo, titles, and anything that used to be hardcoded white.
     /// Midnight, petrol and forest print in the warm cream of the olive
     /// reference; terracotta in a warmer shell; cobalt and moss in a soft
-    /// white; stone flips to near-black, oat to a dark brown, blush to a
-    /// deep maroon; ink and wine stay white.
+    /// white; graphite in a warm one; stone and chalk flip to near-black,
+    /// oat to a dark brown, blush to a deep maroon; ink, wine and plum
+    /// stay white.
     var ink: Color {
         switch self {
         case .stone: Color(hex: "#0D0F0A") ?? .black
+        case .chalk: Color(hex: "#16171A") ?? .black
+        case .graphite: Color(hex: "#F4F1EA") ?? .white
         case .oat: Color(hex: "#3E2C14") ?? Color(red: 0.243, green: 0.173, blue: 0.078)
         case .blush: Color(hex: "#43201D") ?? Color(red: 0.263, green: 0.125, blue: 0.114)
         case .midnight, .petrol, .forest: Self.forestCream
@@ -87,6 +99,12 @@ enum AppTheme: String, CaseIterable, Identifiable {
             Color(hex: "#365AA8") ?? Color(red: 0.212, green: 0.353, blue: 0.659)
         case .ink:
             .black
+        case .graphite:
+            Color(hex: "#1F2023") ?? Color(red: 0.122, green: 0.125, blue: 0.137)
+        case .plum:
+            Color(hex: "#2E1437") ?? Color(red: 0.180, green: 0.078, blue: 0.216)
+        case .chalk:
+            Color(hex: "#F4F3EF") ?? Color(red: 0.957, green: 0.953, blue: 0.937)
         case .petrol:
             Color(hex: "#0F4C4F") ?? Color(red: 0.059, green: 0.298, blue: 0.310)
         case .forest:
@@ -100,7 +118,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .oat:
             Color(hex: "#E3DDCF") ?? Color(red: 0.890, green: 0.867, blue: 0.812)
         case .stone:
-            Color(hex: "#C8CBC4") ?? Color(red: 0.784, green: 0.796, blue: 0.769)
+            Color(hex: "#D9DCD6") ?? Color(red: 0.851, green: 0.863, blue: 0.839)
         case .blush:
             Color(hex: "#EBDAD3") ?? Color(red: 0.922, green: 0.855, blue: 0.827)
         }
@@ -116,6 +134,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: nil
         case .cobalt: "AppIconCobalt"
         case .ink: "AppIconInk"
+        case .graphite: "AppIconGraphite"
+        case .plum: "AppIconPlum"
+        case .chalk: "AppIconChalk"
         case .petrol: "AppIconPetrol"
         case .forest: "AppIconForest"
         case .moss: "AppIconMoss"
@@ -134,6 +155,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .midnight: "IconPreviewMidnight"
         case .cobalt: "IconPreviewCobalt"
         case .ink: "IconPreviewInk"
+        case .graphite: "IconPreviewGraphite"
+        case .plum: "IconPreviewPlum"
+        case .chalk: "IconPreviewChalk"
         case .petrol: "IconPreviewPetrol"
         case .forest: "IconPreviewForest"
         case .moss: "IconPreviewMoss"
@@ -145,19 +169,26 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Tint for controls: toolbar buttons, the selected tab, links.
-    /// Papers use their ink; the mid-tones and petrol lift a pale wash of
-    /// their own hue, like midnight's periwinkle.
+    /// Tint for controls: toolbar buttons, the selected tab, links. The
+    /// mid-tones and petrol lift a pale wash of their own hue, like
+    /// midnight's periwinkle. Each paper has a deep colour of its own — a
+    /// rust, a pine, a rose, and the signature blue on chalk — dark enough
+    /// to hold 4.5:1 on its page.
     var accent: Color {
         switch self {
         case .midnight: Color(hex: "#97A4FF") ?? .white
         case .cobalt: Color(hex: "#D3DEFF") ?? .white
         case .ink: .white
+        case .graphite: ink
+        case .plum: Color(hex: "#E0B8FF") ?? .white
+        case .oat: Color(hex: "#9A3F16") ?? ink
+        case .stone: Color(hex: "#2B5A45") ?? ink
+        case .blush: Color(hex: "#96334A") ?? ink
+        case .chalk: Color(hex: "#0C169D") ?? ink
         case .petrol: Color(hex: "#9EE3DA") ?? .white
         case .forest: Self.forestCream
         case .moss: Color(hex: "#DCE8C8") ?? .white
         case .terracotta: Color(hex: "#FFD3BF") ?? .white
-        case .oat, .stone, .blush: ink
         case .wine: Color(hex: "#FFA2B8") ?? .white
         }
     }
@@ -166,7 +197,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     /// to deepen into a swipe fill.
     var accentIsNeutral: Bool {
         switch self {
-        case .ink, .forest, .oat, .stone, .blush: true
+        case .ink, .graphite, .forest: true
         default: false
         }
     }
@@ -178,7 +209,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var cardAccentMix: Double {
         switch self {
         case .ink: 0.30
-        case .oat, .stone, .blush: 0.16
+        case .oat, .stone, .blush, .chalk: 0.16
         case .cobalt, .moss, .terracotta: 0.28
         default: 0.34
         }
@@ -193,21 +224,23 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .cobalt: 0.90
         case .moss: 0.85
         case .petrol: 0.80
-        case .oat, .stone, .blush: 0.78
+        case .oat, .stone, .blush, .chalk: 0.78
         case .terracotta: 0.75
         default: 0.70
         }
     }
 
     /// The lift that separates a card from the page behind it. Dark
-    /// themes mix in their ink (white, or forest's cream); the papers mix
-    /// in black so cards sit *on* the page instead of bleaching out.
-    var cardLiftColor: Color { isLight ? .black : ink }
+    /// themes mix in their ink (white, or forest's cream). The papers go
+    /// toward white, well past the page: a lighter sheet laid on it, the
+    /// way their chips and buttons already sit. (A shade darker read as
+    /// muddy, most of all on stone.)
+    var cardLiftColor: Color { isLight ? .white : ink }
 
     var cardLiftAmount: Double {
         switch self {
         case .ink: 0.07
-        case .oat, .stone, .blush: 0.05
+        case .oat, .stone, .blush, .chalk: 0.45
         default: 0.06
         }
     }
@@ -234,6 +267,19 @@ final class ThemeStore {
     /// Increase Contrast: quiet type goes to full ink and cards aim higher.
     private(set) var highContrast = UIAccessibility.isDarkerSystemColorsEnabled
 
+    /// On, the theme follows the phone: `day` in Light mode, `night` in
+    /// Dark. `current` is still whichever is on screen.
+    private(set) var followsSystem: Bool
+    private(set) var day: AppTheme
+    private(set) var night: AppTheme
+
+    /// The phone's own appearance. Not the windows': they carry the
+    /// theme's override, so a paper reads as light whatever the phone says.
+    private(set) var systemIsDark: Bool
+
+    /// Both themes, for the widget to choose between; nil with one theme.
+    var pair: (day: AppTheme, night: AppTheme)? { followsSystem ? (day, night) : nil }
+
     /// When false, `current` is a live preview only — no disk, widgets,
     /// or window-style flip. The onboarding slider uses this so a swipe
     /// does not stall on `WidgetCenter.reloadAllTimelines`.
@@ -244,7 +290,68 @@ final class ThemeStore {
         scheme = theme
         applyInterfaceStyle()
         #if !APP_EXTENSION
-        WidgetStore.writeTheme(theme)
+        WidgetStore.writeTheme(theme, pair: pair)
+        #endif
+    }
+
+    // MARK: Light and dark
+
+    /// Turning it on moves nothing: the theme in use takes the slot the
+    /// phone is in now, and the other keeps its last pick. Off, the theme
+    /// on screen simply stays.
+    @MainActor
+    func setFollowsSystem(_ on: Bool) {
+        guard on != followsSystem else { return }
+        catchUpWithSystem()
+        if on {
+            if systemIsDark { night = current } else { day = current }
+        }
+        followsSystem = on
+        savePair()
+        writeWidgets()
+    }
+
+    /// A pick for Light or Dark mode. Only the one the phone is in now
+    /// repaints the app; the other waits for its turn.
+    @MainActor
+    func pick(_ theme: AppTheme, inDark: Bool) {
+        catchUpWithSystem()
+        if inDark { night = theme } else { day = theme }
+        savePair()
+        // `select` tells the widgets itself when it has something to change.
+        if inDark == systemIsDark, theme != current { select(theme) } else { writeWidgets() }
+    }
+
+    private func savePair() {
+        defaults?.set(followsSystem, forKey: "themeFollowsSystem")
+        defaults?.set(day.rawValue, forKey: "themeDay")
+        defaults?.set(night.rawValue, forKey: "themeNight")
+    }
+
+    private func writeWidgets() {
+        #if !APP_EXTENSION
+        WidgetStore.writeTheme(current, pair: pair)
+        #endif
+    }
+
+    /// The phone went light or dark, or the app came back to find it had.
+    func systemAppearance(isDark: Bool) {
+        systemIsDark = isDark
+        guard followsSystem else { return }
+        select(isDark ? night : day)
+    }
+
+    /// Catches up with the phone's appearance. Nothing in the app hears
+    /// it change: SwiftUI pins the theme's light or dark on the scene, so
+    /// every window's traits are the theme's. The screen sits above that
+    /// and still has the phone's own, so the app looks whenever it comes
+    /// to the front, and now and then while it stays there.
+    @MainActor
+    func catchUpWithSystem() {
+        #if !APP_EXTENSION
+        let scene = UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first
+        guard let scene else { return }
+        systemAppearance(isDark: scene.screen.traitCollection.userInterfaceStyle == .dark)
         #endif
     }
 
@@ -272,10 +379,28 @@ final class ThemeStore {
             ?? defaults?.string(forKey: "appTheme")
         // Retired themes hand over to their nearest: cream to oat, umber to
         // terracotta (saved, and its icon swapped on the next background).
-        let initial = stored.flatMap(AppTheme.init(rawValue:))
+        let single = stored.flatMap(AppTheme.init(rawValue:))
             ?? Self.successor(of: stored)
+        // A pair picks by the phone's appearance, which may have changed
+        // since the last run. Nothing is on screen yet, so the current
+        // traits are still the phone's own.
+        let dark = UITraitCollection.current.userInterfaceStyle == .dark
+        let pinned = ProcessInfo.processInfo.environment["CWG_THEME"] != nil
+        let follows = !pinned && defaults?.bool(forKey: "themeFollowsSystem") == true
+        let day = defaults?.string(forKey: "themeDay").flatMap(AppTheme.init(rawValue:))
+            ?? (single.isLight ? single : .oat)
+        let night = defaults?.string(forKey: "themeNight").flatMap(AppTheme.init(rawValue:))
+            ?? (single.isLight ? .midnight : single)
+        let initial = follows ? (dark ? night : day) : single
         current = initial
         scheme = initial
+        followsSystem = follows
+        self.day = day
+        self.night = night
+        systemIsDark = dark
+        if follows, stored != initial.rawValue {
+            defaults?.set(initial.rawValue, forKey: "appTheme")
+        }
         if stored == "umber", ProcessInfo.processInfo.environment["CWG_THEME"] == nil {
             defaults?.set(initial.rawValue, forKey: "appTheme")
             defaults?.set(true, forKey: "iconSyncPending")
@@ -286,8 +411,9 @@ final class ThemeStore {
         applyInterfaceStyle()
         #if !APP_EXTENSION
         let theme = current
+        let pair = pair
         DispatchQueue.main.async {
-            WidgetStore.writeTheme(theme)
+            WidgetStore.writeTheme(theme, pair: pair)
         }
         #endif
         NotificationCenter.default.addObserver(
@@ -354,14 +480,17 @@ final class ThemeStore {
         #endif
     }
 
-    /// Flips the home-screen icon to match the theme. Safe to call often:
+    /// Flips the home-screen icon to match the theme: the Light mode one
+    /// when the theme follows the phone, since iOS announces every icon
+    /// change with an alert and a pair would raise one twice a day. Safe
+    /// to call often:
     /// it does nothing when the icon already matches, and the system
     /// refuses the change while the app isn't active, so callers run it
     /// at moments the app is (a picker change, a sheet closing, onboarding
     /// finishing).
     func syncAppIcon() {
         #if !APP_EXTENSION
-        let wanted = current.iconName
+        let wanted = (followsSystem ? day : current).iconName
         guard UIApplication.shared.supportsAlternateIcons,
               UIApplication.shared.alternateIconName != wanted
         else { return }
@@ -439,8 +568,9 @@ enum AppBackground {
 
     /// A switch's track when on. The knob is always white, so the dark
     /// themes' pale accents (white itself on ink) would swallow it: they
-    /// sink the accent halfway into the page, keeping its hue.
-    static var toggleTint: Color { theme.isLight ? ink : accent.mix(with: base, by: 0.45) }
+    /// sink the accent halfway into the page, keeping its hue. The papers'
+    /// accents are deep already.
+    static var toggleTint: Color { theme.isLight ? accent : accent.mix(with: base, by: 0.45) }
 
     /// Logo and primary marks — cream on midnight and forest, dark on the papers, white elsewhere.
     static var ink: Color { theme.ink }
@@ -557,7 +687,7 @@ enum AppBackground {
     /// Stock green/red swipe buttons clashed with every theme, so these
     /// derive from the palette. Deepened accent — dark enough that the
     /// system's white label stays readable. Themes whose accent is just
-    /// their ink (or black, on the papers) use charcoal instead.
+    /// their ink use charcoal instead.
     static var swipeDone: Color {
         theme.accentIsNeutral
             ? Color(white: 0.24)

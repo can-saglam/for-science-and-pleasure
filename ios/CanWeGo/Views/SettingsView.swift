@@ -120,15 +120,7 @@ struct SettingsView: View {
                 onTheDay
                 #endif
 
-                Section {
-                    // The same one-tap swatch row as the first run: the
-                    // whole sheet repaints under the finger, no sub-screen.
-                    ThemeSwatchRow(title: "Theme") { option in
-                        theme.wrappedValue = option
-                    }
-                    .padding(.vertical, 6)
-                }
-                .listRowBackground(Self.rowBackground)
+                themeSection
 
                 if auth.signedIn {
                     Section {
@@ -794,6 +786,42 @@ struct SettingsView: View {
         }
     }
     #endif
+
+    /// One theme, or one each for Light and Dark mode. The same one-tap
+    /// swatch row as the first run: the whole sheet repaints under the
+    /// finger, no sub-screen.
+    private var themeSection: some View {
+        Section {
+            if themes.followsSystem {
+                ThemeSwatchRow(title: "In Light mode", selected: themes.day) { option in
+                    themes.pick(option, inDark: false)
+                    themes.syncAppIconWhenSettled()
+                }
+                .padding(.vertical, 6)
+                ThemeSwatchRow(title: "In Dark mode", selected: themes.night) { option in
+                    themes.pick(option, inDark: true)
+                }
+                .padding(.vertical, 6)
+            } else {
+                ThemeSwatchRow(title: "Theme") { option in
+                    theme.wrappedValue = option
+                }
+                .padding(.vertical, 6)
+            }
+            Toggle(isOn: Binding(
+                get: { themes.followsSystem },
+                set: { on in
+                    withAnimation(.snappy) { themes.setFollowsSystem(on) }
+                    themes.syncAppIconWhenSettled()
+                }
+            )) {
+                SettingsRow(title: "Switch with Light and Dark mode")
+            }
+            .tint(AppBackground.toggleTint)
+            .sensoryFeedback(.selection, trigger: themes.followsSystem)
+        }
+        .listRowBackground(Self.rowBackground)
+    }
 
     /// Writes the store; the window cross-fades in one step, and the
     /// home-screen icon follows right away. iOS confirms every icon change

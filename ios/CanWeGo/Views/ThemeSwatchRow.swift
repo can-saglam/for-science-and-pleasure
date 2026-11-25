@@ -5,6 +5,9 @@ import SwiftUI
 /// first-run's "There it is." page and in Settings, so the two agree.
 struct ThemeSwatchRow: View {
     var title = "Choose your theme"
+    /// The disc to mark, when it isn't the theme on screen: Settings shows
+    /// one row for Light mode and one for Dark.
+    var selected: AppTheme?
     /// Runs on a pick of a *different* theme; the caller decides how to
     /// commit (the first run previews and commits, Settings also flips
     /// the home-screen icon).
@@ -20,11 +23,11 @@ struct ThemeSwatchRow: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(AppBackground.secondaryInk)
                 Spacer()
-                Text(themes.current.name)
+                Text(marked.name)
                     .font(.footnote)
                     .foregroundStyle(AppBackground.secondaryInk)
                     .contentTransition(.numericText())
-                    .animation(.snappy, value: themes.current)
+                    .animation(.snappy, value: marked)
             }
             // More discs than fit: open scrolled to the one in use. A scroll
             // position, not a ScrollViewReader: `scrollTo` also scrolls the
@@ -41,21 +44,26 @@ struct ThemeSwatchRow: View {
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
             .scrollPosition(id: $shown, anchor: .center)
-            .onAppear { shown = themes.current }
+            .onAppear { shown = marked }
         }
     }
 
+    private var marked: AppTheme { selected ?? themes.current }
+
     private func swatch(_ option: AppTheme) -> some View {
-        let on = themes.current == option
+        let on = marked == option
         return Button {
             guard !on else { return }
             Haptics.selection()
             onPick(option)
         } label: {
-            // Just the base colour: the disc is the theme.
+            // The page with a dot of its accent: the papers are too close
+            // to tell apart by their page alone, and a dark disc says
+            // nothing of the tint it comes with.
             Circle()
                 .fill(option.base)
                 .frame(width: 38, height: 38)
+                .overlay(Circle().fill(option.accent).frame(width: 14, height: 14))
                 .overlay(
                     Circle().strokeBorder(
                         on ? AppBackground.ink : AppBackground.ink.opacity(0.2),
