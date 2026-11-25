@@ -461,32 +461,22 @@ struct CaptureDrawer<Actions: View>: View {
     }
 }
 
-/// The wait, in the strip where the card's actions will be: what the
-/// parser is doing, in a glass capsule the Save button grows out of. Give
-/// it and the button the same `glassEffectID` inside one `FloatingActions`.
+/// The wait, in the strip where the card's actions will be: one line
+/// saying what the parser is doing, in a glass capsule the Save button
+/// grows out of. Give it and the button the same `glassEffectID` inside
+/// one `FloatingActions`.
+///
+/// The line is moved on by the clock: what was sent first, then the same
+/// few steps for everything, holding on the last for a slow read — or
+/// going straight to it once the parser's fields are in. Each new line
+/// ticks in letter by letter as the old one lifts away, and the capsule
+/// eases to its width. VoiceOver hears the first line once.
 struct CaptureStatusPill: View {
     let input: CaptureInput
     /// The fields are in; only the photo and the map are left.
     var finishing = false
-    @Environment(\.floatingRowMatch) private var match
-
-    var body: some View {
-        CaptureStatus(input: input, finishing: finishing)
-            .padding(.horizontal, 20)
-            .frame(minHeight: match?.height ?? 54)
-            .glassEffect(.regular, in: .capsule)
-    }
-}
-
-/// One line saying what the parser is doing, moved on by the clock: what
-/// it was sent first, then the same few steps for everything, holding on
-/// the last for a slow read — or going straight to it once the parser's
-/// fields are in. VoiceOver hears the first line once.
-struct CaptureStatus: View {
-    let input: CaptureInput
-    /// The fields are in; only the photo and the map are left.
-    var finishing = false
     @State private var step = 0
+    @Environment(\.floatingRowMatch) private var match
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Seconds each line stays before the next — a normal read is five or six.
@@ -501,27 +491,57 @@ struct CaptureStatus: View {
         return [opener, "Finding the venue…", "Checking the dates…", "Almost there…"]
     }
 
+    /// The capsule's place in the row and its glass are the row's to move,
+    /// so the change is made in an animation rather than given one here.
+    private func show(_ line: Int) {
+        let line = min(line, phrases.count - 1)
+        guard line != step else { return }
+        // Closing in on a shorter line waits for the old one's last
+        // letters to go; a longer one needs the room straight away.
+        let shorter = phrases[line].count < phrases[step].count
+        let move: Animation = reduceMotion
+            ? .easeInOut(duration: 0.25)
+            : .spring(duration: 0.55, bounce: 0.24).delay(shorter ? 0.12 : 0)
+        withAnimation(move) { step = line }
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             SmallRing()
-            // Only the words are clipped, for the push between lines: the
-            // ring's stroke reaches just past its own frame.
-            ZStack(alignment: .leading) {
-                // Every line, unseen: the capsule is as wide as the
-                // longest from the start, and holds still while the
-                // words change inside it.
-                ForEach(phrases, id: \.self) { phrase in
-                    Text(phrase).hidden()
+            // This copy only measures: the capsule is as wide as the line
+            // it's showing, and gets there in one move, whatever the
+            // letters over it are doing.
+            Text(phrases[step])
+                .lineLimit(1)
+                .fixedSize()
+                .hidden()
+                .overlay(alignment: .leading) {
+                    ZStack(alignment: .leading) {
+                        Text(phrases[step])
+                            .lineLimit(1)
+                            .fixedSize()
+                            .id(step)
+                            .transition(reduceMotion ? .opacity : AnyTransition(TickerTransition()))
+                    }
                 }
-                Text(phrases[step])
-                    .id(step)
-                    .transition(reduceMotion ? .opacity : .push(from: .bottom))
-            }
-            .clipped()
         }
         .font(.subheadline)
         .foregroundStyle(AppBackground.secondaryInk)
-        .animation(.snappy, value: step)
+        .padding(.horizontal, 20)
+        .frame(minHeight: match?.height ?? 54)
+        // A line can be wider than the capsule for a moment, on the way
+        // to a longer one or from one: it melts at the edge rather than
+        // being cut by it.
+        .mask {
+            HStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 18)
+            }
+        }
+        // The ring and the letters ride with the capsule's edge as it moves.
+        .geometryGroup()
+        .glassEffect(.regular, in: .capsule)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(phrases[0])
         .task {
@@ -529,11 +549,11 @@ struct CaptureStatus: View {
             for hold in Self.holds {
                 try? await Task.sleep(for: .seconds(hold))
                 guard !Task.isCancelled else { return }
-                step = min(step + 1, phrases.count - 1)
+                show(step + 1)
             }
         }
         .onChange(of: finishing, initial: true) { _, done in
-            if done { step = phrases.count - 1 }
+            if done { show(phrases.count - 1) }
         }
     }
 }

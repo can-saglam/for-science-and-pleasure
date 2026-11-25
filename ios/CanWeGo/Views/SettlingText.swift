@@ -103,3 +103,79 @@ struct WordsSettle: Transition {
         }
     }
 }
+
+/// A line of text changing places with the next, a letter at a time: the
+/// old one lifts away and blurs out from its first letter, the new one
+/// rises into focus behind it.
+struct TickerRenderer: TextRenderer, Animatable {
+    /// -1 not in yet, 0 in place, 1 gone.
+    var phase: Double
+
+    /// The share of the change one letter takes; the rest is the wait
+    /// between the first letter's turn and the last's.
+    private static let letter = 0.55
+    /// Lands a hair past its place and settles back.
+    private static let rise = UnitCurve.bezier(
+        startControlPoint: UnitPoint(x: 0.25, y: 1),
+        endControlPoint: UnitPoint(x: 0.4, y: 1.25)
+    )
+
+    var animatableData: Double {
+        get { phase }
+        set { phase = newValue }
+    }
+
+    /// Room for the blur and the travel past the text's own bounds.
+    var displayPadding: EdgeInsets { EdgeInsets(top: 14, leading: 8, bottom: 14, trailing: 8) }
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        guard phase != 0 else {
+            for line in layout { context.draw(line) }
+            return
+        }
+        var letters: [Text.Layout.RunSlice] = []
+        for line in layout {
+            for run in line {
+                letters.append(contentsOf: run)
+            }
+        }
+        let leaving = phase > 0
+        let time = leaving ? phase : 1 + phase
+        let gap = letters.count > 1 ? (1 - Self.letter) / Double(letters.count - 1) : 0
+        for (index, letter) in letters.enumerated() {
+            let progress = min(1, max(0, (time - Double(index) * gap) / Self.letter))
+            var copy = context
+            if leaving {
+                guard progress < 1 else { continue }
+                let eased = UnitCurve.easeIn.value(at: progress)
+                copy.opacity = 1 - eased
+                copy.translateBy(x: 0, y: -9 * eased)
+                copy.addFilter(.blur(radius: 5 * eased))
+            } else {
+                guard progress > 0 else { continue }
+                let eased = UnitCurve.easeOut.value(at: progress)
+                copy.opacity = eased
+                copy.translateBy(x: 0, y: 11 * (1 - Self.rise.value(at: progress)))
+                copy.addFilter(.blur(radius: 5 * (1 - eased)))
+            }
+            copy.draw(letter)
+        }
+    }
+}
+
+/// One line ticking over to the next: see `TickerRenderer`. The new line
+/// starts a beat after the old one has begun to go.
+struct TickerTransition: Transition {
+    static var properties: TransitionProperties { TransitionProperties(hasMotion: true) }
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.transaction { transaction in
+            guard !transaction.disablesAnimations else { return }
+            transaction.animation = phase.isIdentity
+                ? .linear(duration: 0.55).delay(0.12)
+                : .linear(duration: 0.26)
+        } body: { view in
+            view.textRenderer(TickerRenderer(phase: phase.value))
+        }
+    }
+}
