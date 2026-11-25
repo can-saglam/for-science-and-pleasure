@@ -8,6 +8,12 @@ import UIKit
 /// drop once it has loaded.
 enum PagePhotos {
     static func candidates(at url: URL, limit: Int = 18) async -> [URL] {
+        await scan(url, limit: limit).found
+    }
+
+    /// `named` is how many of them, from the front, are the pictures the
+    /// page puts forward for itself (Open Graph, Twitter).
+    private static func scan(_ url: URL, limit: Int) async -> (found: [URL], named: Int) {
         var request = URLRequest(url: url, timeoutInterval: 12)
         request.setValue(
             "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
@@ -15,10 +21,10 @@ enum PagePhotos {
         )
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false
-        else { return [] }
+        else { return ([], 0) }
         let head = data.prefix(600_000)
         guard let html = String(data: head, encoding: .utf8) ?? String(data: head, encoding: .isoLatin1)
-        else { return [] }
+        else { return ([], 0) }
 
         let patterns = [
             #"<meta[^>]+(?:property|name)=["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["'][^>]+content=["']([^"']+)["']"#,
@@ -28,7 +34,9 @@ enum PagePhotos {
         ]
         var seen = Set<String>()
         var found: [URL] = []
-        for pattern in patterns {
+        var named = 0
+        for (order, pattern) in patterns.enumerated() {
+            if order == 2 { named = found.count }
             guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { continue }
             for match in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
                 guard let range = Range(match.range(at: 1), in: html) else { continue }
@@ -40,27 +48,33 @@ enum PagePhotos {
                       seen.insert(resolved.absoluteString).inserted
                 else { continue }
                 found.append(resolved)
-                if found.count == limit { return found }
+                if found.count == limit { return (found, order < 2 ? found.count : named) }
             }
         }
-        return found
+        return (found, named)
     }
 
     struct Lead: Sendable {
         let url: URL
         let colour: String?
+        /// The picture the page names as its own, first of all: the one
+        /// the parser takes too, so it can be shown before the card says so.
+        /// Anything further down the page is a fair stand-in, but the
+        /// parser may well choose differently.
+        let named: Bool
     }
 
     /// The page's own picture, the way the parser would have chosen it had
     /// it been let in: the first card image that loads at photo size.
     static func lead(at page: URL) async -> Lead? {
-        for url in await candidates(at: page, limit: 3) {
+        let (found, named) = await scan(page, limit: 3)
+        for (index, url) in found.enumerated() {
             guard let (data, response) = try? await URLSession.shared.data(from: url),
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
                   let image = UIImage(data: data),
                   min(image.size.width * image.scale, image.size.height * image.scale) >= 300
             else { continue }
-            return Lead(url: url, colour: colour(of: image))
+            return Lead(url: url, colour: colour(of: image), named: index == 0 && named > 0)
         }
         return nil
     }

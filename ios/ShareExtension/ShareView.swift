@@ -36,6 +36,8 @@ struct ShareView: View {
     @State private var peekTask: Task<Void, Never>?
     /// The parser's fields, while its lookups finish the card.
     @State private var early: Item?
+    /// The status capsule and the Save button are one piece of glass.
+    @Namespace private var glass
 
     private var isPreview: Bool {
         if case .preview = stage { return true }
@@ -45,6 +47,10 @@ struct ShareView: View {
     private var draft: Item? {
         if case .preview(let item) = stage { return item }
         return nil
+    }
+
+    private var input: CaptureInput {
+        payloadImage != nil ? .image : (extractedURL != nil || payloadText == nil ? .link : .text)
     }
 
     /// Mirrors the in-app capture flow: the wait and the card share one
@@ -65,10 +71,11 @@ struct ShareView: View {
                         draft: draft,
                         early: early,
                         peek: peek,
-                        input: payloadImage != nil ? .image : (extractedURL != nil || payloadText == nil ? .link : .text),
+                        input: input,
                         showsMap: false,
                         notice: alreadySaved ? AnyView(duplicateStrip) : nil,
-                        editFirst: { withAnimation(.snappy) { editing = true } }
+                        editFirst: { withAnimation(.snappy) { editing = true } },
+                        site: extractedURL.flatMap(LinkPeek.site(in:))
                     ) {
                         if let draft {
                             VStack(alignment: .leading, spacing: 16) {
@@ -87,8 +94,8 @@ struct ShareView: View {
             }
             .ignoresSafeArea(edges: showsDrawer ? .top : [])
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if let draft {
-                    previewActions(draft)
+                if draft != nil || showsDrawer {
+                    previewActions
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
@@ -228,40 +235,53 @@ struct ShareView: View {
         }
     }
 
-    /// The card's actions, floating bottom right like the app's.
-    private func previewActions(_ draft: Item) -> some View {
+    /// The card's actions, floating bottom right like the app's. While
+    /// the card is read, the same strip says what's happening, in a
+    /// capsule that becomes Save.
+    private var previewActions: some View {
         FloatingActions {
-            if !saved {
-                FloatingCircleButton(
-                    editing ? "Show card" : "Edit first",
-                    systemImage: editing ? "rectangle.on.rectangle" : "pencil"
-                ) {
-                    withAnimation(.snappy) { editing.toggle() }
-                }
-                .contentTransition(.symbolEffect(.replace))
-
-                FloatingCircleButton("Discard", systemImage: "trash", tint: AppBackground.destructive) {
-                    confirmDiscard = true
-                }
-                .confirmationDialog(
-                    "Discard this save?",
-                    isPresented: $confirmDiscard,
-                    titleVisibility: .visible
-                ) {
-                    Button("Discard", role: .destructive) { cancel() }
-                    Button("Keep editing", role: .cancel) {}
-                }
+            if let draft {
+                cardActions(draft)
+            } else {
+                CaptureStatusPill(input: input, finishing: early != nil)
+                    .glassEffectID("main", in: glass)
             }
-
-            FloatingMainButton(
-                saved ? "Saved" : (alreadySaved ? "Save anyway" : "Save"),
-                systemImage: saved ? "checkmark.circle.fill" : (alreadySaved ? "plus" : "checkmark")
-            ) {
-                save(draft)
-            }
-            .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
-            .allowsHitTesting(!saved)
         }
+    }
+
+    @ViewBuilder
+    private func cardActions(_ draft: Item) -> some View {
+        if !saved {
+            FloatingCircleButton(
+                editing ? "Show card" : "Edit first",
+                systemImage: editing ? "rectangle.on.rectangle" : "pencil"
+            ) {
+                withAnimation(.snappy) { editing.toggle() }
+            }
+            .contentTransition(.symbolEffect(.replace))
+
+            FloatingCircleButton("Discard", systemImage: "trash", tint: AppBackground.destructive) {
+                confirmDiscard = true
+            }
+            .confirmationDialog(
+                "Discard this save?",
+                isPresented: $confirmDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("Discard", role: .destructive) { cancel() }
+                Button("Keep editing", role: .cancel) {}
+            }
+        }
+
+        FloatingMainButton(
+            saved ? "Saved" : (alreadySaved ? "Save anyway" : "Save"),
+            systemImage: saved ? "checkmark.circle.fill" : (alreadySaved ? "plus" : "checkmark")
+        ) {
+            save(draft)
+        }
+        .glassEffectID("main", in: glass)
+        .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+        .allowsHitTesting(!saved)
     }
 
     /// The shared link is already in the library. The extension only has

@@ -21,7 +21,10 @@ enum CaptureInput {
 /// first, then the parser's fields confirming or correcting them, then its
 /// finished card with the photo and the map — and once the card is in, the
 /// same drawer is the "Looks right?" preview, with the actions unfolding
-/// below. Shared with the share extension.
+/// below. Each piece arrives as the thing it is: the photo develops, words
+/// settle into focus, the map finds its street. What the parser is doing
+/// is said in the strip underneath (`CaptureStatusPill`), where Save will
+/// be. Shared with the share extension.
 struct CaptureDrawer<Actions: View>: View {
     /// The parser's card; nil while it's still reading.
     let draft: Item?
@@ -31,6 +34,9 @@ struct CaptureDrawer<Actions: View>: View {
     /// The on-device model's quick guess.
     var look: Item? = nil
     var peek: LinkPeek? = nil
+    /// The picture on the page the parser found for typed words or a
+    /// screenshot, read by the phone while the card is finished.
+    var foundPhoto: URL? = nil
     let input: CaptureInput
     /// Off in the share extension, where a live map is too much memory.
     var showsMap = true
@@ -41,6 +47,9 @@ struct CaptureDrawer<Actions: View>: View {
     var editFirst: (() -> Void)? = nil
     /// The words that were sent, as the title until anything better is in.
     var typed: String? = nil
+    /// The pasted link's site, "stonenest.org": named in the title's place
+    /// until the page's own title is in.
+    var site: String? = nil
     /// Shared with the add page's question, so it carries into the title.
     var titleSpace: Namespace.ID? = nil
     /// The photo grows down from the top on arrival rather than being
@@ -53,6 +62,9 @@ struct CaptureDrawer<Actions: View>: View {
 
     @State private var choosingPhoto = false
     @State private var grown = false
+    /// The drawer was open while the card was read, so its map arrives;
+    /// a card that was already finished is simply shown.
+    @State private var watched = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -65,22 +77,42 @@ struct CaptureDrawer<Actions: View>: View {
         return raw?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? raw : nil
     }
 
-    private var photoURL: URL? { draft?.imageUrl.flatMap(URL.init(string:)) }
+    /// The card's own photo once there's a card: a page's picture the
+    /// card didn't keep isn't shown as if it had.
+    private var photoURL: URL? {
+        guard let draft else { return foundPhoto }
+        return draft.imageUrl.flatMap(URL.init(string:))
+    }
+
+    /// Room is kept for the map while reading, unless the parser's fields
+    /// name nowhere to put a pin.
+    private var expectsPlace: Bool {
+        guard let early else { return true }
+        return early.venue != nil || early.area != nil
+    }
 
     /// While it's reading there's always room for a photo — a placeholder
     /// until one turns up. A card that came back without one folds it away.
     private var showsPhoto: Bool { draft == nil || photoURL != nil }
 
-    private var settle: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6))
-    }
-
-    /// Fields that land together settle one after another, top to bottom.
+    /// Fields that land together settle one after another, top to bottom,
+    /// and each one word by word; whatever they replace fades.
     private func arrival(_ order: Int) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
+        let delay = Double(order) * 0.07
         return .asymmetric(
-            insertion: settle.animation(.spring(duration: 0.45).delay(Double(order) * 0.07)),
+            // The fade is for what isn't words: a line's symbol.
+            insertion: AnyTransition(WordsSettle(delay: delay))
+                .combined(with: .opacity.animation(.easeOut(duration: 0.3).delay(delay))),
             removal: .opacity
+        )
+    }
+
+    private var retitling: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: AnyTransition(WordsSettle(delay: 0.12)),
+            removal: .opacity.animation(.easeOut(duration: 0.15))
         )
     }
 
@@ -96,10 +128,14 @@ struct CaptureDrawer<Actions: View>: View {
                 HeroPhoto(
                     url: photoURL,
                     image: peek?.image,
-                    placeholder: draft?.accentColor ?? AppBackground.ink.opacity(0.4)
+                    placeholder: draft?.accentColor ?? AppBackground.ink.opacity(0.4),
+                    develops: true,
+                    // Held a touch close while reading; it eases back as
+                    // the card lands.
+                    zoom: draft == nil && !reduceMotion ? 1.05 : 1
                 )
                 .overlay {
-                    if draft == nil, peek?.image == nil {
+                    if draft == nil, peek?.image == nil, foundPhoto == nil {
                         Shimmer(highlight: AppBackground.ink.opacity(0.07)).clipped()
                     }
                 }
@@ -146,16 +182,22 @@ struct CaptureDrawer<Actions: View>: View {
                 }
                 summary
                 lines
-                if showsMap, let draft {
-                    PlaceMap(item: draft)
-                        .transition(finishing(7))
+                if showsMap {
+                    // The map's place is held from the start, so nothing
+                    // under it jumps when it's found.
+                    if let draft {
+                        if draft.lat != nil, draft.lng != nil {
+                            PlaceMap(item: draft, arrives: watched)
+                                .transition(.opacity)
+                        }
+                    } else if expectsPlace {
+                        mapPlaceholder
+                            .transition(.opacity)
+                    }
                 }
                 if draft != nil {
                     actions()
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
-                } else {
-                    CaptureStatus(input: input, finishing: early != nil)
-                        .transition(.opacity)
                 }
             }
             .padding(20)
@@ -163,9 +205,17 @@ struct CaptureDrawer<Actions: View>: View {
             .padding(.trailing, sideInsets.trailing)
         }
         .onChange(of: draft != nil) { _, ready in
-            if ready { AccessibilityNotification.Announcement("Ready").post() }
+            guard ready else { return }
+            AccessibilityNotification.Announcement("Ready").post()
+            // The card landing, felt.
+            Haptics.settle(1)
+        }
+        // The first real fields: a lighter touch, so a glance comes back.
+        .onChange(of: early != nil) { _, heard in
+            if heard, draft == nil { Haptics.settle(0.4) }
         }
         .onAppear {
+            watched = draft == nil
             guard growsIn, !grown else { return }
             withAnimation(.spring(duration: 0.6).delay(0.05)) { grown = true }
         }
@@ -192,12 +242,22 @@ struct CaptureDrawer<Actions: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .leading) {
                 if let title {
-                    Text(title)
+                    Text(words: title)
                         .font(.displaySmallBold(28, relativeTo: .title2))
                         .foregroundStyle(AppBackground.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                        // A corrected title cross-fades rather than snapping.
+                        // A corrected title settles in as the old one
+                        // clears, quickly: two titles in one place read
+                        // as a muddle.
                         .id(title)
+                        .transition(retitling)
+                } else if let site {
+                    // The page has a name before it has a title.
+                    Text(site)
+                        .font(.displaySmallBold(28, relativeTo: .title2))
+                        .foregroundStyle(AppBackground.ink.opacity(0.3))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .transition(.opacity)
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
@@ -236,14 +296,14 @@ struct CaptureDrawer<Actions: View>: View {
         if draft.headerTimeLabel != nil || draft.category != nil {
             layout {
                 if let label = draft.headerTimeLabel {
-                    Text(label)
+                    Text(words: label)
                         .foregroundStyle(draft.headerTimeLabelIsUrgent ? AppBackground.destructive : AppBackground.secondaryInk)
                 }
                 if !stacked && draft.headerTimeLabel != nil && draft.category != nil {
                     Text("·").foregroundStyle(AppBackground.secondaryInk.opacity(0.6))
                 }
                 if let category = draft.category {
-                    Text(Item.categoryLabel(category)).foregroundStyle(AppBackground.secondaryInk)
+                    Text(words: Item.categoryLabel(category)).foregroundStyle(AppBackground.secondaryInk)
                 }
             }
             .font(.subheadline.weight(.medium))
@@ -258,7 +318,7 @@ struct CaptureDrawer<Actions: View>: View {
     private var summary: some View {
         if let fields {
             if let text = fields.summary, !text.isEmpty {
-                Text(text)
+                Text(words: text)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(arrival(1))
@@ -331,7 +391,7 @@ struct CaptureDrawer<Actions: View>: View {
     private func line(_ symbol: String, _ text: String?, placeholder width: CGFloat? = nil, order: Int) -> some View {
         if let text {
             Label {
-                Text(text)
+                Text(words: text)
                     .foregroundStyle(AppBackground.secondaryInk)
                     .id(text)
                     .transition(.opacity)
@@ -383,11 +443,38 @@ struct CaptureDrawer<Actions: View>: View {
             .frame(width: 20)
     }
 
+    /// Where the map will be, in the photo placeholder's tone.
+    private var mapPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(AppBackground.ink.opacity(0.07))
+            .frame(height: 190)
+            .overlay { Shimmer(highlight: AppBackground.ink.opacity(0.06)) }
+            .clipShape(.rect(cornerRadius: 18, style: .continuous))
+            .accessibilityHidden(true)
+    }
+
     private func skeleton(width: CGFloat, height: CGFloat) -> some View {
         SkeletonLine(width: width, height: height)
             .overlay { Shimmer(highlight: AppBackground.ink.opacity(0.12)) }
             .clipShape(.capsule)
             .accessibilityHidden(true)
+    }
+}
+
+/// The wait, in the strip where the card's actions will be: what the
+/// parser is doing, in a glass capsule the Save button grows out of. Give
+/// it and the button the same `glassEffectID` inside one `FloatingActions`.
+struct CaptureStatusPill: View {
+    let input: CaptureInput
+    /// The fields are in; only the photo and the map are left.
+    var finishing = false
+    @Environment(\.floatingRowMatch) private var match
+
+    var body: some View {
+        CaptureStatus(input: input, finishing: finishing)
+            .padding(.horizontal, 20)
+            .frame(minHeight: match?.height ?? 54)
+            .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -420,6 +507,12 @@ struct CaptureStatus: View {
             // Only the words are clipped, for the push between lines: the
             // ring's stroke reaches just past its own frame.
             ZStack(alignment: .leading) {
+                // Every line, unseen: the capsule is as wide as the
+                // longest from the start, and holds still while the
+                // words change inside it.
+                ForEach(phrases, id: \.self) { phrase in
+                    Text(phrase).hidden()
+                }
                 Text(phrases[step])
                     .id(step)
                     .transition(reduceMotion ? .opacity : .push(from: .bottom))

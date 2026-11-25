@@ -47,8 +47,12 @@ struct CaptureView: View {
     @State private var reading: CaptureInput? = CaptureGate.pendingPick == nil ? nil : .link
     /// The phone's own preview of the link, while the parser reads.
     @State private var peek: LinkPeek?
+    /// The picture on the page the parser found for typed words or a
+    /// screenshot, which have no preview of their own.
+    @State private var foundPhoto: URL?
     @State private var parseTask: Task<Void, Never>?
     @State private var peekTask: Task<Void, Never>?
+    @State private var photoTask: Task<Void, Never>?
     /// The last parse failed for want of a connection.
     @State private var offline = false
     @State private var sync = SyncStatus.shared
@@ -66,6 +70,8 @@ struct CaptureView: View {
     @State private var pickedLook: Item?
     /// The question and the drawer's title are one thing on screen.
     @Namespace private var titleSpace
+    /// The status capsule and the Save button are one piece of glass.
+    @Namespace private var glass
 
     private var canParse: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
@@ -104,12 +110,14 @@ struct CaptureView: View {
             ScrollView {
                 if showsDrawer {
                     CaptureDrawer(
-                        draft: draft, early: early, look: pickedLook ?? firstLook, peek: peek, input: reading ?? .text,
+                        draft: draft, early: early, look: pickedLook ?? firstLook, peek: peek,
+                        foundPhoto: foundPhoto, input: reading ?? .text,
                         notice: draft.flatMap(twin(of:)).map { twin in
                             AnyView(DuplicateStrip(twin: twin, open: { openExisting(twin) }))
                         },
                         editFirst: { withAnimation(.snappy) { editing = true } },
                         typed: reading == .text ? trimmedText : nil,
+                        site: reading == .link ? LinkPeek.site(in: text) : nil,
                         titleSpace: titleSpace,
                         growsIn: true,
                         sideInsets: sideInsets
@@ -143,13 +151,13 @@ struct CaptureView: View {
             // and under the camera when held sideways.
             .ignoresSafeArea(edges: showsDrawer ? [.top, .horizontal] : [])
             .scrollDismissesKeyboard(.interactively)
-            // The bar and the card's actions take the same strip, so the
-            // thumb ends where it started.
+            // The bar, the wait and the card's actions take the same
+            // strip, so the thumb ends where it started.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if let draft {
-                    previewActions(draft)
+                if draft != nil || reading != nil {
+                    previewActions
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
-                } else if reading == nil {
+                } else {
                     composerBar
                         .transition(.opacity)
                 }
@@ -209,6 +217,7 @@ struct CaptureView: View {
         .onDisappear {
             parseTask?.cancel()
             peekTask?.cancel()
+            photoTask?.cancel()
         }
         .onAppear {
             loadLibrary()
@@ -513,66 +522,80 @@ struct CaptureView: View {
     }
 
     /// The card's actions, floating bottom right like the detail drawer's.
-    private func previewActions(_ draft: Item) -> some View {
-        let match = twin(of: draft)
-        return FloatingActions {
-            if !saved, manual {
-                // A blank card is always in edit mode and the × already
-                // throws it away, so the one side action is the way back
-                // to the composer.
-                FloatingCircleButton("Back", systemImage: "chevron.backward") {
-                    leaveManual()
-                }
-            } else if !saved {
-                FloatingCircleButton(
-                    editing ? "Show card" : "Edit first",
-                    systemImage: editing ? "rectangle.on.rectangle" : "pencil"
-                ) {
-                    withAnimation(.snappy) { editing.toggle() }
-                }
-                .contentTransition(.symbolEffect(.replace))
-
-                FloatingCircleButton("Discard", systemImage: "trash", tint: AppBackground.destructive) {
-                    confirmDiscard = true
-                }
-                .confirmationDialog(
-                    "Discard this save?",
-                    isPresented: $confirmDiscard,
-                    titleVisibility: .visible
-                ) {
-                    Button("Discard", role: .destructive) {
-                        withAnimation(.snappy) {
-                            self.draft = nil
-                            early = nil
-                            reading = nil
-                            peek = nil
-                            editing = false
-                            manual = false
-                        }
-                        // Typed words go back in the bar; a recommendation
-                        // leaves the page as it was, its list included.
-                        if pickedLook != nil {
-                            pickedLook = nil
-                            text = ""
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("The card goes away. Nothing is saved.")
-                }
+    /// While the card is read, the same strip says what's happening, in a
+    /// capsule that becomes Save.
+    private var previewActions: some View {
+        FloatingActions {
+            if let draft {
+                cardActions(draft)
+            } else {
+                CaptureStatusPill(input: reading ?? .text, finishing: early != nil)
+                    .glassEffectID("main", in: glass)
             }
-
-            FloatingMainButton(
-                saved ? "Saved" : (match != nil ? "Save anyway" : "Save"),
-                systemImage: saved ? "checkmark.circle.fill" : (match != nil ? "plus" : "checkmark")
-            ) {
-                save(draft)
-            }
-            .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
-            // Not `.disabled`: that would grey the button out under "Saved".
-            .allowsHitTesting(!saved)
         }
         .animation(reduceMotion ? nil : .snappy, value: editing)
+    }
+
+    @ViewBuilder
+    private func cardActions(_ draft: Item) -> some View {
+        let match = twin(of: draft)
+        if !saved, manual {
+            // A blank card is always in edit mode and the × already
+            // throws it away, so the one side action is the way back
+            // to the composer.
+            FloatingCircleButton("Back", systemImage: "chevron.backward") {
+                leaveManual()
+            }
+        } else if !saved {
+            FloatingCircleButton(
+                editing ? "Show card" : "Edit first",
+                systemImage: editing ? "rectangle.on.rectangle" : "pencil"
+            ) {
+                withAnimation(.snappy) { editing.toggle() }
+            }
+            .contentTransition(.symbolEffect(.replace))
+
+            FloatingCircleButton("Discard", systemImage: "trash", tint: AppBackground.destructive) {
+                confirmDiscard = true
+            }
+            .confirmationDialog(
+                "Discard this save?",
+                isPresented: $confirmDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("Discard", role: .destructive) {
+                    withAnimation(.snappy) {
+                        self.draft = nil
+                        early = nil
+                        reading = nil
+                        peek = nil
+                        foundPhoto = nil
+                        editing = false
+                        manual = false
+                    }
+                    // Typed words go back in the bar; a recommendation
+                    // leaves the page as it was, its list included.
+                    if pickedLook != nil {
+                        pickedLook = nil
+                        text = ""
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The card goes away. Nothing is saved.")
+            }
+        }
+
+        FloatingMainButton(
+            saved ? "Saved" : (match != nil ? "Save anyway" : "Save"),
+            systemImage: saved ? "checkmark.circle.fill" : (match != nil ? "plus" : "checkmark")
+        ) {
+            save(draft)
+        }
+        .glassEffectID("main", in: glass)
+        .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+        // Not `.disabled`: that would grey the button out under "Saved".
+        .allowsHitTesting(!saved)
     }
 
     // MARK: - Actions
@@ -637,6 +660,7 @@ struct CaptureView: View {
         offline = false
         firstLook = nil
         early = nil
+        foundPhoto = nil
         defer { busy = false }
         let trimmed = (link ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
         withAnimation(reveal) {
@@ -657,18 +681,32 @@ struct CaptureView: View {
             guard let quick = await look.value, busy, draft == nil else { return }
             withAnimation(reveal) { firstLook = quick.item }
         }
+        photoTask?.cancel()
         defer {
             look.cancel()
             peekTask?.cancel()
+            photoTask?.cancel()
         }
         do {
             let card = try await ParseClient.parse(
                 text: trimmed.isEmpty ? nil : trimmed,
-                imageJPEG: imageJPEG
-            ) { fields in
-                guard !Task.isCancelled, busy, draft == nil else { return }
-                withAnimation(reveal) { early = item(from: fields) }
-            }
+                imageJPEG: imageJPEG,
+                early: { fields in
+                    guard !Task.isCancelled, busy, draft == nil else { return }
+                    withAnimation(reveal) { early = item(from: fields) }
+                },
+                pagePhoto: { url in
+                    // A link has the phone's own preview. Typed words and
+                    // screenshots get the picture of the page the parser
+                    // found, rather than a blank until the card is in.
+                    guard reading != .link, busy, draft == nil else { return }
+                    photoTask = Task {
+                        await ImageStore.warm(url, variant: .hero, limit: .seconds(3))
+                        guard !Task.isCancelled, busy, draft == nil else { return }
+                        withAnimation(reveal) { foundPhoto = url }
+                    }
+                }
+            )
             guard !Task.isCancelled else { return }
             // The card's photo lands with the card when it can.
             if let url = card.image_url.flatMap(URL.init(string:)) {
@@ -689,6 +727,7 @@ struct CaptureView: View {
                 reading = nil
                 peek = nil
                 early = nil
+                foundPhoto = nil
                 pickedLook = nil
             }
             // ParseError already speaks to a person; everything else

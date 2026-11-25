@@ -36,6 +36,14 @@ struct LinkPeek {
         }
     }
 
+    /// The first link's site as people say it, "stonenest.org": what the
+    /// drawer calls the page until it knows its title.
+    static func site(in text: String) -> String? {
+        guard let host = firstURL(in: text)?.host() else { return nil }
+        let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return bare.isEmpty ? nil : bare
+    }
+
     /// Nil for a link that isn't worth a look, or when nothing usable came
     /// back within the timeout. Cancelling the task stops the fetch.
     @MainActor

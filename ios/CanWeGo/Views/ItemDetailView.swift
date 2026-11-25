@@ -661,12 +661,24 @@ struct HeroPhoto: View {
     /// Beside the library list (iPhone Duo open): the leading edge melts
     /// into the pane, as the bottom does, instead of a hard line by the list.
     var fadesLeading = false
+    /// The capture drawer's, where the picture turns up while you watch:
+    /// it comes in soft and rich and sharpens as it settles, rather than
+    /// popping in.
+    var develops = false
+    /// How large the picture is held, 1 being its own size. The capture
+    /// drawer keeps it a touch close while the card is read and lets it
+    /// ease back as the card lands.
+    var zoom: CGFloat = 1
 
     var body: some View {
         Color.clear
             .frame(height: height)
             .overlay {
-                if let image {
+                if let image, develops {
+                    Image(uiImage: image).resizable().scaledToFill()
+                        .modifier(Develops(soft: true))
+                        .scaleEffect(zoom)
+                } else if let image {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     placeholder.opacity(0.25)
@@ -676,12 +688,21 @@ struct HeroPhoto: View {
                 if let url {
                     // Hero tier: the one place full-size pixels are worth it.
                     CachedImage(url: url, variant: .hero) { phase in
-                        if case .success(let image) = phase {
-                            image.resizable().scaledToFill()
+                        if case .success(let photo) = phase {
+                            if develops {
+                                photo.resizable().scaledToFill()
+                                    // Over the link preview it's the same
+                                    // picture, finer: no second arrival.
+                                    .modifier(Develops(soft: image == nil))
+                            } else {
+                                photo.resizable().scaledToFill()
+                            }
                         }
                     }
+                    .scaleEffect(zoom)
                 }
             }
+            .animation(.easeOut(duration: 0.9), value: zoom)
             .overlay {
                 LinearGradient(
                     stops: [
@@ -723,6 +744,34 @@ struct HeroPhoto: View {
     }
 }
 
+/// A photo arriving the way a print develops: soft, rich and a little
+/// close, sharpening as it settles. Over a picture that's already there
+/// it's a short fade, sharp from the start.
+private struct Develops: ViewModifier {
+    /// Decided once, as the picture arrives: what's under it may change
+    /// while it's still coming in.
+    @State private var soft: Bool
+    @State private var arrived = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(soft: Bool) {
+        _soft = State(initialValue: soft)
+    }
+
+    func body(content: Content) -> some View {
+        let unsettled = soft && !arrived && !reduceMotion
+        content
+            .blur(radius: unsettled ? 18 : 0)
+            .saturation(unsettled ? 1.35 : 1)
+            .scaleEffect(unsettled ? 1.1 : 1)
+            .animation(.easeOut(duration: 0.9), value: arrived)
+            // Seen at once, then sharpened: the fade is the short part.
+            .opacity(arrived ? 1 : 0)
+            .animation(.easeOut(duration: 0.35), value: arrived)
+            .onAppear { arrived = true }
+    }
+}
+
 /// The hero's leading edge melting into the pane. Off, nothing is
 /// applied: a mask would also clip the strip that hides the photo's
 /// bottom pixel row.
@@ -759,17 +808,35 @@ private struct LeadingFade: ViewModifier {
 /// drawer and the capture drawer; nothing for a save without a location.
 struct PlaceMap: View {
     let item: Item
+    /// Found a moment ago (the capture drawer): the map opens on the
+    /// neighbourhood, eases down to the street, and the pin lands once
+    /// it's there. Reduce Motion gets it as it will stay.
+    var arrives = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Degrees across: the few streets the map shows.
+    fileprivate static let span = 0.012
 
     var body: some View {
         if let lat = item.lat, let lng = item.lng {
             let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
-            Map(initialPosition: .region(.init(
-                center: coord,
-                span: .init(latitudeDelta: 0.012, longitudeDelta: 0.012)
-            ))) {
-                Marker(item.venue ?? item.title, coordinate: coord)
-                    .tint(item.accentColor)
+            Group {
+                if arrives, !reduceMotion {
+                    ArrivingMap(
+                        coordinate: coord,
+                        title: item.venue ?? item.title,
+                        tint: UIColor(item.accentColor)
+                    )
+                } else {
+                    Map(initialPosition: .region(.init(
+                        center: coord,
+                        span: .init(latitudeDelta: Self.span, longitudeDelta: Self.span)
+                    ))) {
+                        Marker(item.venue ?? item.title, coordinate: coord)
+                            .tint(item.accentColor)
+                    }
+                }
             }
             .frame(height: 190)
             .allowsHitTesting(false)
@@ -799,6 +866,105 @@ struct PlaceMap: View {
                 : "Open in \(TransportApp.current.name)")
             .accessibilityAddTraits(item.directionsURL == nil ? [] : .isButton)
         }
+    }
+}
+
+/// `PlaceMap` arriving. SwiftUI's `Map` moves its camera at its own pace
+/// and adds a marker without ceremony; the map view underneath can take
+/// as long over the move as it's told, and its marker can be dropped in.
+/// Once it has settled it's the same picture `Map` draws.
+private struct ArrivingMap: UIViewRepresentable {
+    let coordinate: CLLocationCoordinate2D
+    let title: String
+    let tint: UIColor
+
+    /// How much more of the neighbourhood it opens on. Small enough that
+    /// the streets it ends on are already drawn when it gets there.
+    private static let wider = 2.4
+
+    func makeCoordinator() -> Coordinator { Coordinator(tint: tint) }
+
+    func makeUIView(context: Context) -> ArrivingMapView {
+        let map = ArrivingMapView()
+        map.delegate = context.coordinator
+        map.isUserInteractionEnabled = false
+        map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: Coordinator.pin)
+        let place = MKPointAnnotation()
+        place.coordinate = coordinate
+        place.title = title
+        map.arrive(
+            from: region(across: PlaceMap.span * Self.wider),
+            to: region(across: PlaceMap.span),
+            at: place
+        )
+        return map
+    }
+
+    func updateUIView(_ map: ArrivingMapView, context: Context) {}
+
+    private func region(across span: Double) -> MKCoordinateRegion {
+        MKCoordinateRegion(center: coordinate, span: .init(latitudeDelta: span, longitudeDelta: span))
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate {
+        static let pin = "pin"
+        private let tint: UIColor
+
+        init(tint: UIColor) {
+            self.tint = tint
+        }
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: Self.pin, for: annotation)
+            if let marker = view as? MKMarkerAnnotationView {
+                marker.markerTintColor = tint
+                marker.titleVisibility = .visible
+            }
+            return view
+        }
+
+        /// The pin comes down from just above and lands with a small
+        /// bounce. (`animatesWhenAdded` only fades it in.)
+        func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
+            for view in views {
+                view.alpha = 0
+                view.transform = CGAffineTransform(translationX: 0, y: -34)
+                UIView.animate(withDuration: 0.15) { view.alpha = 1 }
+                UIView.animate(
+                    withDuration: 0.6, delay: 0,
+                    usingSpringWithDamping: 0.5, initialSpringVelocity: 0
+                ) {
+                    view.transform = .identity
+                }
+            }
+        }
+    }
+}
+
+/// A map view that makes its entrance once it has a size: a region set
+/// on a view with no bounds yet has nothing to fit itself to, and nothing
+/// animates before the view is on screen.
+final class ArrivingMapView: MKMapView {
+    private var entrance: (() -> Void)?
+
+    func arrive(from wide: MKCoordinateRegion, to close: MKCoordinateRegion, at place: MKPointAnnotation) {
+        entrance = { [weak self] in
+            guard let self else { return }
+            setRegion(wide, animated: false)
+            // A beat for the tile to fade in before anything moves.
+            UIView.animate(withDuration: 0.9, delay: 0.3, options: [.curveEaseInOut]) {
+                self.setRegion(close, animated: true)
+            } completion: { _ in
+                self.addAnnotation(place)
+            }
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard window != nil, bounds.width > 0, let entrance else { return }
+        self.entrance = nil
+        entrance()
     }
 }
 

@@ -84,7 +84,16 @@ enum ParseClient {
     /// lookup has been done and asking again would do it twice. Anything
     /// that reads like a real answer ("couldn't find a venue", 4xx)
     /// surfaces straight away.
-    static func parse(text: String?, imageJPEG: Data?, early: Early? = nil) async throws -> Card {
+    ///
+    /// `pagePhoto` hears the picture the page the model found names as its
+    /// own, as soon as the phone has read it: the one the card will carry,
+    /// a few seconds sooner. A page that doesn't name one says nothing.
+    static func parse(
+        text: String?,
+        imageJPEG: Data?,
+        early: Early? = nil,
+        pagePhoto: (@MainActor (URL) -> Void)? = nil
+    ) async throws -> Card {
         // Social links pick up their caption and cover on-device first —
         // the phone can read what the server's IP is often walled from.
         let input = await SocialPrefetch.enrich(text: text, imageJPEG: imageJPEG)
@@ -95,7 +104,14 @@ enum ParseClient {
         let heard = Flag()
         let watch: Early = { card in
             heard.set()
-            if let link = card.link.flatMap(URL.init(string:)) { photo.start(link) }
+            if let link = card.link.flatMap(URL.init(string:)) {
+                photo.start(link)
+                if let pagePhoto {
+                    Task {
+                        if let lead = await photo.lead(), lead.named { pagePhoto(lead.url) }
+                    }
+                }
+            }
             early?(card)
         }
         var card: Card
@@ -129,6 +145,12 @@ enum ParseClient {
             lock.withLock {
                 if task == nil { task = Task { await PagePhotos.lead(at: page) } }
             }
+        }
+
+        /// The picture once the page has been read; nil if it has none,
+        /// or nothing was started.
+        func lead() async -> PagePhotos.Lead? {
+            await lock.withLock { task }?.value
         }
 
         /// The picture, or nil if it isn't in by `limit`.
