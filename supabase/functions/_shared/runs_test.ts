@@ -34,11 +34,32 @@ Deno.test("a job with no run at all says so", () => {
 
 Deno.test("failures are counted, with the latest error", () => {
   const runs = [
-    ...healthy,
+    ...healthy.filter((r) => r.job !== "verify-entitlements"),
+    run("verify-entitlements", 150),
     run("verify-entitlements", 100, false, "old"),
     run("verify-entitlements", 70, false, "apple said 401"),
   ];
   assertEquals(problems(runs, now), ["verify-entitlements failed 2 times: apple said 401"]);
+});
+
+Deno.test("a failure or two followed by good runs is quiet", () => {
+  const runs = [
+    ...healthy,
+    run("warm-cities", 1350, false, "JWT issued at future"),
+    run("verify-entitlements", 100, false, "old"),
+    run("verify-entitlements", 70, false, "apple said 401"),
+  ];
+  assertEquals(problems(runs, now), []);
+});
+
+Deno.test("repeated failures are named even after the job recovered", () => {
+  const runs = [
+    ...healthy,
+    run("warm-cities", 300, false, "a"),
+    run("warm-cities", 200, false, "b"),
+    run("warm-cities", 100, false, "JWT issued at future"),
+  ];
+  assertEquals(problems(runs, now), ["warm-cities failed 3 times, fine since: JWT issued at future"]);
 });
 
 Deno.test("only failing runs since the last good one still count as stopped", () => {

@@ -52,8 +52,13 @@ export interface RunRow {
   detail: Record<string, unknown> | null;
 }
 
+/// Failures in a day that are worth hearing about even when the job has
+/// run fine since. Fewer than this, followed by a good run, were a blip.
+export const REPEATED_FAILURES = 3;
+
 /// What's wrong, one line per job, from the last day's runs: a job with no
-/// good run inside its window, and failures since the last check.
+/// good run inside its window, one whose latest run failed, and one that
+/// kept failing even if it has recovered since.
 export function problems(runs: RunRow[], now: Date, expected = EXPECTED): string[] {
   const out: string[] = [];
   const jobs = [...new Set([...Object.keys(expected), ...runs.map((r) => r.job)])];
@@ -67,8 +72,14 @@ export function problems(runs: RunRow[], now: Date, expected = EXPECTED): string
     if (minutes !== undefined && (lastOk === undefined || now.getTime() - lastOk > minutes * 60_000)) {
       out.push(lastOk === undefined ? `${job} hasn't finished a run in a day` : `${job} last finished ${ago(now.getTime() - lastOk)} ago`);
     } else if (failures.length > 0) {
+      const recovered = lastOk !== undefined && lastOk > Date.parse(failures[0].finished_at);
+      if (recovered && failures.length < REPEATED_FAILURES) continue;
       const what = failures[0].detail?.error;
-      out.push(`${job} failed ${failures.length === 1 ? "once" : `${failures.length} times`}${typeof what === "string" ? `: ${what.slice(0, 80)}` : ""}`);
+      out.push(
+        `${job} failed ${failures.length === 1 ? "once" : `${failures.length} times`}${recovered ? ", fine since" : ""}${
+          typeof what === "string" ? `: ${what.slice(0, 80)}` : ""
+        }`,
+      );
     }
   }
   return out;
