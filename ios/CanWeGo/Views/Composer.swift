@@ -10,7 +10,8 @@ import SwiftUI
 /// that look alike.
 ///
 /// While the field is empty a ticker of ideas stands in for the
-/// placeholder, one line at a time, until they start typing.
+/// placeholder, each one typed out from the caret, until they start
+/// typing themselves.
 struct Composer: View {
     @Binding var text: String
     @Binding var imageJPEG: Data?
@@ -166,26 +167,26 @@ struct Composer: View {
                     .accessibilityLabel("Link or name")
                     .background(alignment: .topLeading) {
                         if text.isEmpty {
-                            Text(Self.prompts[tickerIndex % Self.prompts.count])
+                            let prompt = Self.prompts[tickerIndex % Self.prompts.count]
+                            Text(prompt)
                                 .foregroundStyle(AppBackground.ink.opacity(0.6))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                                 .id(tickerIndex)
-                                // Rolls upward: the old line leaves at the top
-                                // as the new one rises from below.
-                                .transition(reduceMotion ? .opacity : .asymmetric(
-                                    insertion: .offset(y: 14).combined(with: .opacity),
-                                    removal: .offset(y: -14).combined(with: .opacity)
-                                ))
+                                // The old idea fades and the next is typed
+                                // in its place: the field suggesting what
+                                // to write, the way it would be written.
+                                .transition(reduceMotion ? .opacity : AnyTransition(TypedTransition(letters: prompt.count)))
                                 .allowsHitTesting(false)
                                 .accessibilityHidden(true)
                         }
                     }
-                    .clipped()
                     .task {
                         while !Task.isCancelled {
-                            try? await Task.sleep(for: .seconds(2.6))
+                            try? await Task.sleep(for: .seconds(3.2))
                             guard text.isEmpty else { continue }
+                            // The transition keeps its own time; this only
+                            // says the change is an animated one.
                             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.5)) {
                                 tickerIndex += 1
                             }

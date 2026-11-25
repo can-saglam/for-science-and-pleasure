@@ -179,3 +179,60 @@ struct TickerTransition: Transition {
         }
     }
 }
+
+/// A line of text being typed: its letters appear in order, each one
+/// coming up quickly as its turn arrives.
+struct TypedRenderer: TextRenderer, Animatable {
+    /// How much of the line has been typed, 0…1.
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        guard progress < 1 else {
+            for line in layout { context.draw(line) }
+            return
+        }
+        var letters: [Text.Layout.RunSlice] = []
+        for line in layout {
+            for run in line {
+                letters.append(contentsOf: run)
+            }
+        }
+        let typed = progress * Double(letters.count)
+        for (index, letter) in letters.enumerated() {
+            let shown = min(1, typed - Double(index))
+            guard shown > 0 else { break }
+            var copy = context
+            copy.opacity = shown
+            copy.draw(letter)
+        }
+    }
+}
+
+/// One suggestion giving way to the next: the old line fades, and the new
+/// one is typed out where it was. `letters` sets how long the typing takes.
+struct TypedTransition: Transition {
+    let letters: Int
+
+    /// Seconds a letter, a brisk typist's; and the pause before starting,
+    /// for the old line to clear.
+    private static let pace = 0.028
+    private static let pause = 0.22
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.transaction { transaction in
+            guard !transaction.disablesAnimations else { return }
+            transaction.animation = phase.isIdentity
+                ? .linear(duration: Double(max(letters, 1)) * Self.pace).delay(Self.pause)
+                : .easeOut(duration: 0.18)
+        } body: { view in
+            view
+                .textRenderer(TypedRenderer(progress: phase == .willAppear ? 0 : 1))
+                .opacity(phase == .didDisappear ? 0 : 1)
+        }
+    }
+}
