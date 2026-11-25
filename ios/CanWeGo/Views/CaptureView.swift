@@ -294,14 +294,14 @@ struct CaptureView: View {
     @ViewBuilder
     private var inputStage: some View {
         Text(Voice.whereGoing)
-            .font(.displaySmallBold(38, relativeTo: .largeTitle))
+            .font(.displaySmallBold(32, relativeTo: .title))
             .foregroundStyle(AppBackground.ink)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .matchedTitle(in: titleSpace)
             .accessibilityAddTraits(.isHeader)
             // Level with the close button, and clear of it.
-            .padding(.top, 14)
+            .padding(.top, 17)
             .padding(.trailing, 56)
 
         // Offline is said once, under the field, and the field's own button
