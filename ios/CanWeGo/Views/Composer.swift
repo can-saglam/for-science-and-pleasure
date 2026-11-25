@@ -1,10 +1,10 @@
 import PhotosUI
 import SwiftUI
 
-/// The one way anything gets typed into the app, as a Messages-style bar:
-/// + on the left for a photo, the camera or (where offered) a blank card,
-/// then the field with the round send button inside it. An attached
-/// picture sits in the field above the text.
+/// The one way anything gets typed into the app: a single bar of glass
+/// that gives under the finger. + on its left for a photo, the camera or
+/// (where offered) a blank card, then the field, then the round send
+/// button. An attached picture sits in the bar above the text.
 /// Shared by the add page, where it's docked on the keyboard, and the
 /// first-run's save page, so they are the same thing, not two things
 /// that look alike.
@@ -52,7 +52,13 @@ struct Composer: View {
         "That bar a friend swears by",
     ]
 
+    /// The + button's side, the bar's height on one line, and its corners:
+    /// a capsule on one line, a rounded card as the text grows.
     private static let control: CGFloat = 40
+    private static let height: CGFloat = 48
+    private static let corner: CGFloat = 24
+    /// Where the text starts, from the bar's leading edge.
+    private static let inset: CGFloat = 46
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || imageJPEG != nil
@@ -64,13 +70,10 @@ struct Composer: View {
                 Text(photoNote)
                     .font(.footnote)
                     .foregroundStyle(AppBackground.warning)
-                    .padding(.leading, Self.control + 24)
+                    .padding(.leading, Self.inset)
                     .transition(.opacity)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                moreMenu
-                field
-            }
+            field
         }
         .animation(.snappy, value: busy)
         .animation(.snappy, value: offline)
@@ -120,14 +123,13 @@ struct Composer: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.body.weight(.semibold))
+                .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(AppBackground.ink)
                 .frame(width: Self.control, height: Self.control)
                 .contentShape(.circle)
         }
         .menuOrder(.fixed)
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .circle)
         .disabled(busy)
         .accessibilityLabel("More ways to add")
     }
@@ -137,9 +139,14 @@ struct Composer: View {
             if let image = imageJPEG.flatMap(UIImage.init(data:)) {
                 attachedThumbnail(image)
                     .padding(.top, 10)
+                    .padding(.leading, 16)
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 2) {
+                moreMenu
+                    .padding(.leading, 4)
+                    .padding(.bottom, 4)
+
                 TextField("", text: $text, axis: .vertical)
                     .foregroundStyle(AppBackground.ink)
                     .lineLimit(1...5)
@@ -184,24 +191,21 @@ struct Composer: View {
                             }
                         }
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 13)
 
                 sendButton
-                    .padding(.bottom, 5)
+                    .padding(.leading, 6)
+                    .padding(.bottom, 9)
+                    .padding(.trailing, 9)
             }
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 5)
-        .frame(minHeight: Self.control)
-        .background(AppBackground.wash(0.10), in: .rect(cornerRadius: Self.control / 2, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Self.control / 2, style: .continuous)
-                .strokeBorder(AppBackground.ink.opacity(focused ? 0.24 : 0.12), lineWidth: 1)
-        )
+        .frame(minHeight: Self.height)
         // Anywhere on the bar counts as the field.
-        .contentShape(.rect(cornerRadius: Self.control / 2, style: .continuous))
+        .contentShape(.rect(cornerRadius: Self.corner, style: .continuous))
         .onTapGesture { focused = true }
-        .animation(.snappy, value: focused)
+        // Glass that answers a touch: it swells and catches the light
+        // under the finger, then settles.
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Self.corner, style: .continuous))
     }
 
     private func send() {
