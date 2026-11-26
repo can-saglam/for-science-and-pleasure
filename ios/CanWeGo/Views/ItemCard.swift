@@ -213,8 +213,9 @@ struct ItemCard: View {
         .multilineTextAlignment(.leading)
         .padding(.horizontal, compact ? 14 : 16)
         .padding(.vertical, compact ? 10 : 13)
-        // Keep text clear of the visible part of the photo.
-        .padding(.trailing, imageURL == nil ? 0 : 64)
+        // Keep text clear of the visible part of the photo: more of it
+        // shows on the papers, where the card colour clears sooner.
+        .padding(.trailing, imageURL == nil ? 0 : (AppBackground.theme.isLight ? 104 : 64))
         .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil,
                alignment: fillsHeight ? .topLeading : .leading)
         .background(alignment: .trailing) {
@@ -381,14 +382,17 @@ private struct MeltImage: View {
         }
     }
 
+    /// Room to the left of the photo for the papers' fade to start in.
+    private var runIn: CGFloat { AppBackground.theme.isLight ? 75 : 0 }
+
     var body: some View {
         ZStack {
             if let sharp, let blurred {
-                MeltLayers(sharp: sharp, blurred: blurred, cardBackground: cardBackground, width: 150)
+                MeltLayers(sharp: sharp, blurred: blurred, cardBackground: cardBackground, width: 150, runIn: runIn)
             }
         }
         .compositingGroup()
-        .frame(width: 150)
+        .frame(width: 150 + runIn)
         .clipped()
         .task(id: url) {
             guard loaded != url else { return }
@@ -415,18 +419,41 @@ struct MeltLayers: View {
     let cardBackground: Color
     let width: CGFloat
     var photoLeading = false
+    /// Extra width before the photo for the fade to begin in, filled with
+    /// a mirror of the blurred copy so there is no edge where the photo
+    /// starts. A fade squeezed into the photo's own width is steep, and
+    /// the eye draws a pale stripe where a flat card meets a steep ramp
+    /// (a Mach band); a longer, shallower ramp has none. Trailing photos
+    /// only.
+    var runIn: CGFloat = 0
+
+    private var total: CGFloat { width + runIn }
+
+    /// A place in the photo (0 its fading edge, 1 its far edge; negative
+    /// is in the run-in) as a gradient location across the whole view.
+    private func at(_ place: Double) -> Double {
+        min(max((runIn + place * width) / total, 0), 1)
+    }
 
     /// From the card colour to the photo.
     private var startPoint: UnitPoint { photoLeading ? .trailing : .leading }
     private var endPoint: UnitPoint { photoLeading ? .leading : .trailing }
 
     /// On the papers a photo dissolves into a light card through grey,
-    /// and whatever detail shows in that grey reads as a ghost: half a
-    /// poster's lettering, the edge of a face. So there the sharp photo
-    /// waits until the wash has nearly cleared, leaving only the blurred
-    /// copy to carry the fade, and both ramps are single eased curves
-    /// with no corners to show as bands.
+    /// which reads as haze where the dark themes' fade reads as shadow.
+    /// So there the blurred copy carries the start of the fade, the sharp
+    /// photo coming in behind it, and both ramps are single eased curves
+    /// with no corners to show as bands. The dark themes keep their own
+    /// stops, untouched.
     private var gentle: Bool { AppBackground.theme.isLight }
+
+    /// Where the papers' two ramps run, in the photo's own width (see
+    /// `at`). With a run-in the card colour starts clearing well before
+    /// the photo and is gone a third of the way in, so most of the photo
+    /// shows; without one (Siri's card, a city pick's chip) it has only
+    /// the photo's width to work in, and takes nearly all of it.
+    private var wash: (from: Double, to: Double) { runIn > 0 ? (-0.45, 0.37) : (0, 0.9) }
+    private var detail: (from: Double, to: Double) { runIn > 0 ? (0.15, 0.86) : (0.42, 0.92) }
 
     /// `count` stops along a smoothstep from `from` to `to`, each given
     /// how far along the ease it is (0…1).
@@ -439,12 +466,21 @@ struct MeltLayers: View {
     }
 
     var body: some View {
-        ZStack {
-            filled(Image(uiImage: blurred))
+        ZStack(alignment: photoLeading ? .leading : .trailing) {
+            if runIn > 0 {
+                HStack(spacing: 0) {
+                    filled(Image(uiImage: blurred)).scaleEffect(x: -1)
+                    filled(Image(uiImage: blurred))
+                }
+                .frame(width: total, alignment: .trailing)
+                .clipped()
+            } else {
+                filled(Image(uiImage: blurred))
+            }
             filled(Image(uiImage: sharp))
                 .mask(
                     LinearGradient(
-                        stops: gentle ? Self.eased(from: 0.42, to: 0.92) { .black.opacity($0) } : [
+                        stops: gentle ? Self.eased(from: detail.from, to: detail.to) { .black.opacity($0) } : [
                             .init(color: .clear, location: 0.25),
                             .init(color: .black, location: 0.8),
                         ],
@@ -457,16 +493,17 @@ struct MeltLayers: View {
             // and leaves the photo untouched at the right edge.
             LinearGradient(
                 stops: [
-                    .init(color: cardBackground, location: 0),
-                    .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: 0.45),
-                    .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: 0.95),
+                    .init(color: cardBackground, location: at(0)),
+                    .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: at(0.45)),
+                    .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: at(0.95)),
                 ],
                 startPoint: startPoint,
                 endPoint: endPoint
             )
+            .frame(width: total)
             .blendMode(.multiply)
             LinearGradient(
-                stops: gentle ? Self.eased(from: 0, to: 0.9) { cardBackground.opacity(1 - $0) } : [
+                stops: gentle ? Self.eased(from: at(wash.from), to: at(wash.to)) { cardBackground.opacity(1 - $0) } : [
                     .init(color: cardBackground, location: 0),
                     .init(color: cardBackground.opacity(0.95), location: 0.15),
                     .init(color: cardBackground.opacity(0.75), location: 0.3),
@@ -478,7 +515,9 @@ struct MeltLayers: View {
                 startPoint: startPoint,
                 endPoint: endPoint
             )
+            .frame(width: total)
         }
+        .frame(width: total)
     }
 
     private func filled(_ image: Image) -> some View {
