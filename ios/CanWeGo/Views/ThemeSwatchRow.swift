@@ -5,9 +5,6 @@ import SwiftUI
 /// first-run's "There it is." page and in Settings, so the two agree.
 struct ThemeSwatchRow: View {
     var title = "Choose your theme"
-    /// The disc to mark, when it isn't the theme on screen: Settings shows
-    /// one row for Light mode and one for Dark.
-    var selected: AppTheme?
     /// Runs on a pick of a *different* theme; the caller decides how to
     /// commit (the first run previews and commits, Settings also flips
     /// the home-screen icon).
@@ -23,11 +20,11 @@ struct ThemeSwatchRow: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(AppBackground.secondaryInk)
                 Spacer()
-                Text(marked.name)
+                Text(themes.current.name)
                     .font(.footnote)
                     .foregroundStyle(AppBackground.secondaryInk)
                     .contentTransition(.numericText())
-                    .animation(.snappy, value: marked)
+                    .animation(.snappy, value: themes.current)
             }
             // More discs than fit: open scrolled to the one in use. A scroll
             // position, not a ScrollViewReader: `scrollTo` also scrolls the
@@ -44,14 +41,12 @@ struct ThemeSwatchRow: View {
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
             .scrollPosition(id: $shown, anchor: .center)
-            .onAppear { shown = marked }
+            .onAppear { shown = themes.current }
         }
     }
 
-    private var marked: AppTheme { selected ?? themes.current }
-
     private func swatch(_ option: AppTheme) -> some View {
-        let on = marked == option
+        let on = themes.current == option
         return Button {
             guard !on else { return }
             Haptics.selection()

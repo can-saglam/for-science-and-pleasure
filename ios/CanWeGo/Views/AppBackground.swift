@@ -267,19 +267,6 @@ final class ThemeStore {
     /// Increase Contrast: quiet type goes to full ink and cards aim higher.
     private(set) var highContrast = UIAccessibility.isDarkerSystemColorsEnabled
 
-    /// On, the theme follows the phone: `day` in Light mode, `night` in
-    /// Dark. `current` is still whichever is on screen.
-    private(set) var followsSystem: Bool
-    private(set) var day: AppTheme
-    private(set) var night: AppTheme
-
-    /// The phone's own appearance. Not the windows': they carry the
-    /// theme's override, so a paper reads as light whatever the phone says.
-    private(set) var systemIsDark: Bool
-
-    /// Both themes, for the widget to choose between; nil with one theme.
-    var pair: (day: AppTheme, night: AppTheme)? { followsSystem ? (day, night) : nil }
-
     /// When false, `current` is a live preview only — no disk, widgets,
     /// or window-style flip. The onboarding slider uses this so a swipe
     /// does not stall on `WidgetCenter.reloadAllTimelines`.
@@ -290,68 +277,7 @@ final class ThemeStore {
         scheme = theme
         applyInterfaceStyle()
         #if !APP_EXTENSION
-        WidgetStore.writeTheme(theme, pair: pair)
-        #endif
-    }
-
-    // MARK: Light and dark
-
-    /// Turning it on moves nothing: the theme in use takes the slot the
-    /// phone is in now, and the other keeps its last pick. Off, the theme
-    /// on screen simply stays.
-    @MainActor
-    func setFollowsSystem(_ on: Bool) {
-        guard on != followsSystem else { return }
-        catchUpWithSystem()
-        if on {
-            if systemIsDark { night = current } else { day = current }
-        }
-        followsSystem = on
-        savePair()
-        writeWidgets()
-    }
-
-    /// A pick for Light or Dark mode. Only the one the phone is in now
-    /// repaints the app; the other waits for its turn.
-    @MainActor
-    func pick(_ theme: AppTheme, inDark: Bool) {
-        catchUpWithSystem()
-        if inDark { night = theme } else { day = theme }
-        savePair()
-        // `select` tells the widgets itself when it has something to change.
-        if inDark == systemIsDark, theme != current { select(theme) } else { writeWidgets() }
-    }
-
-    private func savePair() {
-        defaults?.set(followsSystem, forKey: "themeFollowsSystem")
-        defaults?.set(day.rawValue, forKey: "themeDay")
-        defaults?.set(night.rawValue, forKey: "themeNight")
-    }
-
-    private func writeWidgets() {
-        #if !APP_EXTENSION
-        WidgetStore.writeTheme(current, pair: pair)
-        #endif
-    }
-
-    /// The phone went light or dark, or the app came back to find it had.
-    func systemAppearance(isDark: Bool) {
-        systemIsDark = isDark
-        guard followsSystem else { return }
-        select(isDark ? night : day)
-    }
-
-    /// Catches up with the phone's appearance. Nothing in the app hears
-    /// it change: SwiftUI pins the theme's light or dark on the scene, so
-    /// every window's traits are the theme's. The screen sits above that
-    /// and still has the phone's own, so the app looks whenever it comes
-    /// to the front, and now and then while it stays there.
-    @MainActor
-    func catchUpWithSystem() {
-        #if !APP_EXTENSION
-        let scene = UIApplication.shared.connectedScenes.lazy.compactMap { $0 as? UIWindowScene }.first
-        guard let scene else { return }
-        systemAppearance(isDark: scene.screen.traitCollection.userInterfaceStyle == .dark)
+        WidgetStore.writeTheme(theme)
         #endif
     }
 
@@ -379,28 +305,10 @@ final class ThemeStore {
             ?? defaults?.string(forKey: "appTheme")
         // Retired themes hand over to their nearest: cream to oat, umber to
         // terracotta (saved, and its icon swapped on the next background).
-        let single = stored.flatMap(AppTheme.init(rawValue:))
+        let initial = stored.flatMap(AppTheme.init(rawValue:))
             ?? Self.successor(of: stored)
-        // A pair picks by the phone's appearance, which may have changed
-        // since the last run. Nothing is on screen yet, so the current
-        // traits are still the phone's own.
-        let dark = UITraitCollection.current.userInterfaceStyle == .dark
-        let pinned = ProcessInfo.processInfo.environment["CWG_THEME"] != nil
-        let follows = !pinned && defaults?.bool(forKey: "themeFollowsSystem") == true
-        let day = defaults?.string(forKey: "themeDay").flatMap(AppTheme.init(rawValue:))
-            ?? (single.isLight ? single : .oat)
-        let night = defaults?.string(forKey: "themeNight").flatMap(AppTheme.init(rawValue:))
-            ?? (single.isLight ? .midnight : single)
-        let initial = follows ? (dark ? night : day) : single
         current = initial
         scheme = initial
-        followsSystem = follows
-        self.day = day
-        self.night = night
-        systemIsDark = dark
-        if follows, stored != initial.rawValue {
-            defaults?.set(initial.rawValue, forKey: "appTheme")
-        }
         if stored == "umber", ProcessInfo.processInfo.environment["CWG_THEME"] == nil {
             defaults?.set(initial.rawValue, forKey: "appTheme")
             defaults?.set(true, forKey: "iconSyncPending")
@@ -411,9 +319,8 @@ final class ThemeStore {
         applyInterfaceStyle()
         #if !APP_EXTENSION
         let theme = current
-        let pair = pair
         DispatchQueue.main.async {
-            WidgetStore.writeTheme(theme, pair: pair)
+            WidgetStore.writeTheme(theme)
         }
         #endif
         NotificationCenter.default.addObserver(
@@ -480,17 +387,14 @@ final class ThemeStore {
         #endif
     }
 
-    /// Flips the home-screen icon to match the theme: the Light mode one
-    /// when the theme follows the phone, since iOS announces every icon
-    /// change with an alert and a pair would raise one twice a day. Safe
-    /// to call often:
+    /// Flips the home-screen icon to match the theme. Safe to call often:
     /// it does nothing when the icon already matches, and the system
     /// refuses the change while the app isn't active, so callers run it
     /// at moments the app is (a picker change, a sheet closing, onboarding
     /// finishing).
     func syncAppIcon() {
         #if !APP_EXTENSION
-        let wanted = (followsSystem ? day : current).iconName
+        let wanted = current.iconName
         guard UIApplication.shared.supportsAlternateIcons,
               UIApplication.shared.alternateIconName != wanted
         else { return }
