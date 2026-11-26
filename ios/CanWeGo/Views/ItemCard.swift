@@ -420,13 +420,31 @@ struct MeltLayers: View {
     private var startPoint: UnitPoint { photoLeading ? .trailing : .leading }
     private var endPoint: UnitPoint { photoLeading ? .leading : .trailing }
 
+    /// On the papers a photo dissolves into a light card through grey,
+    /// and whatever detail shows in that grey reads as a ghost: half a
+    /// poster's lettering, the edge of a face. So there the sharp photo
+    /// waits until the wash has nearly cleared, leaving only the blurred
+    /// copy to carry the fade, and both ramps are single eased curves
+    /// with no corners to show as bands.
+    private var gentle: Bool { AppBackground.theme.isLight }
+
+    /// `count` stops along a smoothstep from `from` to `to`, each given
+    /// how far along the ease it is (0…1).
+    private static func eased(from: Double, to: Double, count: Int = 14, _ stop: (Double) -> Color) -> [Gradient.Stop] {
+        (0...count).map { index in
+            let t = Double(index) / Double(count)
+            let ease = t * t * t * (t * (t * 6 - 15) + 10)
+            return Gradient.Stop(color: stop(ease), location: from + (to - from) * t)
+        }
+    }
+
     var body: some View {
         ZStack {
             filled(Image(uiImage: blurred))
             filled(Image(uiImage: sharp))
                 .mask(
                     LinearGradient(
-                        stops: [
+                        stops: gentle ? Self.eased(from: 0.42, to: 0.92) { .black.opacity($0) } : [
                             .init(color: .clear, location: 0.25),
                             .init(color: .black, location: 0.8),
                         ],
@@ -448,7 +466,7 @@ struct MeltLayers: View {
             )
             .blendMode(.multiply)
             LinearGradient(
-                stops: [
+                stops: gentle ? Self.eased(from: 0, to: 0.9) { cardBackground.opacity(1 - $0) } : [
                     .init(color: cardBackground, location: 0),
                     .init(color: cardBackground.opacity(0.95), location: 0.15),
                     .init(color: cardBackground.opacity(0.75), location: 0.3),

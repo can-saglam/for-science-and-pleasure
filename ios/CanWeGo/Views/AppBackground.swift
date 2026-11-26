@@ -231,16 +231,16 @@ enum AppTheme: String, CaseIterable, Identifiable {
     }
 
     /// The lift that separates a card from the page behind it. Dark
-    /// themes mix in their ink (white, or forest's cream). The papers go
-    /// toward white, well past the page: a lighter sheet laid on it, the
-    /// way their chips and buttons already sit. (A shade darker read as
-    /// muddy, most of all on stone.)
-    var cardLiftColor: Color { isLight ? .white : ink }
+    /// themes mix in their ink (white, or forest's cream); the papers mix
+    /// in black so cards sit *on* the page instead of bleaching out.
+    /// (Lifting them toward white was tried: a photo fading into a pale
+    /// card passes through a grey haze that the darker card hides.)
+    var cardLiftColor: Color { isLight ? .black : ink }
 
     var cardLiftAmount: Double {
         switch self {
         case .ink: 0.07
-        case .oat, .stone, .blush, .chalk: 0.45
+        case .oat, .stone, .blush, .chalk: 0.05
         default: 0.06
         }
     }
