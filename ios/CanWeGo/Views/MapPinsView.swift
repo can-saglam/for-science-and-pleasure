@@ -324,24 +324,21 @@ struct MapPinsView: View {
         .onBarsEdgeChange { barsEdge = $0 }
     }
 
-    /// "12 open · 3 not yet" with a switch to let the not-yet-open ones
-    /// onto the map. What the map is showing, and the way to show more,
-    /// in one pill — instead of a footnote explaining an absence.
+    /// Lets the events that haven't opened yet onto the map, or takes them
+    /// off again. It says what a tap does, in the words the list uses for
+    /// them, and the eye agrees with the verb.
     private var upcomingPill: some View {
-        Button {
+        let shown = showsUpcoming.wrappedValue
+        return Button {
             Haptics.tap()
             withAnimation(.snappy) { showsUpcoming.wrappedValue.toggle() }
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: showsUpcoming.wrappedValue ? "eye" : "eye.slash")
+                Image(systemName: shown ? "eye.slash" : "eye")
                     .font(.caption.weight(.semibold))
                     .contentTransition(.symbolEffect(.replace))
-                Text(showsUpcoming.wrappedValue
-                     ? "\(items.count) on the map"
-                     : items.isEmpty ? "\(upcoming) not open yet" : "\(items.count) open · \(upcoming) not yet")
+                Text(shown ? "Hide what\u{2019}s coming up" : "Show what\u{2019}s coming up")
                     .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
             }
             .foregroundStyle(AppBackground.ink.opacity(0.85))
             .padding(.horizontal, 12)
@@ -350,10 +347,7 @@ struct MapPinsView: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
-        .accessibilityLabel(showsUpcoming.wrappedValue
-            ? "Showing \(items.count) events including ones not open yet"
-            : "Showing \(items.count) open events. \(upcoming) not open yet are hidden")
-        .accessibilityHint(showsUpcoming.wrappedValue ? "Hides events not open yet" : "Shows events not open yet")
+        .accessibilityHint(upcoming == 1 ? "1 event that isn\u{2019}t open yet" : "\(upcoming) events that aren\u{2019}t open yet")
     }
 
     /// The ring around a cluster bubble: the members' colour when they
