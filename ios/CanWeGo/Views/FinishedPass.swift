@@ -375,7 +375,7 @@ struct FinishedPassSheet: View {
             Text(outcome)
                 .font(.displaySmallBold(28, relativeTo: .title2))
                 .accessibilityAddTraits(.isHeader)
-            Text(whereTheyAre)
+            whereTheyAre
                 .font(.subheadline)
                 .foregroundStyle(AppBackground.secondaryInk)
                 .padding(.top, 6)
@@ -394,28 +394,49 @@ struct FinishedPassSheet: View {
         .onAppear { landed = true }
     }
 
-    /// The pass in the answer's own words: "We went to 3 of 4".
+    /// What the pass came to, said the way you'd say it afterwards:
+    /// "Three to remember", not a count of rows moved.
     private var outcome: String {
-        let went = added.count, asked = items.count
-        if went == 0 { return "Can\u{2019}t make them all" }
-        if asked == 1 { return Voice.went + "!" }
-        if went < asked { return "\(Voice.went) to \(went) of \(asked)" }
-        return asked == 2 ? "\(Voice.went) to both" : "\(Voice.went) to all \(asked)"
+        guard !added.isEmpty else { return "Can\u{2019}t make them all" }
+        return "\(Self.spelled(added.count)) to remember"
     }
 
-    /// Where each lot is now, by the names the lists use.
-    private var whereTheyAre: String {
+    /// "One", "Three", "Twenty-three". English, as the rest of the copy is,
+    /// whatever the phone's language.
+    private static func spelled(_ count: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        formatter.locale = Locale(identifier: "en_GB")
+        let word = formatter.string(from: count as NSNumber) ?? "\(count)"
+        return word.prefix(1).uppercased() + word.dropFirst()
+    }
+
+    /// Where to find each lot, by the names the lists use. The names are
+    /// set apart in the ink's weight: "under We did go" in one voice reads
+    /// as a sentence that lost its way.
+    private var whereTheyAre: Text {
         let missed = items.count - added.count
+        let missedList = listName("Missed")
         if added.isEmpty {
-            return (missed == 1 ? "It stays under Missed." : "They stay under Missed.")
-                + " You won\u{2019}t be asked again."
+            return missed == 1
+                ? Text("It stays under \(missedList). No more questions.")
+                : Text("They stay under \(missedList). No more questions.")
         }
-        let went = "Now under \(Voice.didGoSection)."
+        let wentList = listName(Voice.didGoSection)
+        let find = added.count == 1
+            ? Text("Find it under \(wentList).")
+            : Text("Find them under \(wentList).")
         switch missed {
-        case 0: return went
-        case 1: return went + " The other one stays under Missed."
-        default: return went + " The rest stay under Missed."
+        case 0: return items.count == 1 ? find : Text("Not one missed. \(find)")
+        case 1: return Text("\(find) The other one stays under \(missedList).")
+        default: return Text("\(find) The rest stay under \(missedList).")
         }
+    }
+
+    private func listName(_ name: String) -> Text {
+        Text(name)
+            .fontWeight(.semibold)
+            .foregroundStyle(AppBackground.ink)
     }
 
     private func thumb(_ item: Item) -> some View {
