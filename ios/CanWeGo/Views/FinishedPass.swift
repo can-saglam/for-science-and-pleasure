@@ -155,19 +155,26 @@ struct FinishedPassSheet: View {
             }
     }
 
-    /// The photo with the day it finished on it, melting down into the
-    /// title and where, the way a list card's photo melts in from its edge.
-    /// The words sit at the foot of the card and the photo has the rest, so
-    /// a short title means more photo, not a gap under it.
+    /// The photo with the day it finished on it, fading into the card under
+    /// the title and where, as the details' photo fades into its sheet:
+    /// the photo left sharp, one long eased wash of the card's colour over
+    /// its foot, and the words sitting on the wash. The words keep to the
+    /// foot of the card and the photo has the rest, so a short title means
+    /// more photo, not a gap under it.
     private func card(_ item: Item, top: Bool) -> some View {
-        cardRoom
+        let background = ItemCard.background(item.accentColor)
+        return cardRoom
             .overlay {
                 VStack(alignment: .leading, spacing: 0) {
                     Color.clear
                         .frame(maxHeight: .infinity)
                         .overlay {
                             if let url = item.imageUrl.flatMap(URL.init(string:)) {
-                                MeltDown(url: url, cardBackground: ItemCard.background(item.accentColor))
+                                CachedImage(url: url, variant: .hero) { phase in
+                                    if case .success(let image) = phase {
+                                        image.resizable().scaledToFill()
+                                    }
+                                }
                             }
                         }
                         // No photo, or a dead one: the save's colour,
@@ -195,6 +202,8 @@ struct FinishedPassSheet: View {
                                     .opacity(top ? 1 - abs(pull) : 1)
                             }
                         }
+                        // On under the words, as far as the wash is solid.
+                        .padding(.bottom, -Self.washUnderWords)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.title)
                             .font(.displaySmall(24, relativeTo: .title3))
@@ -209,9 +218,7 @@ struct FinishedPassSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
-                    // Up into the foot of the photo, which is all card by
-                    // there.
-                    .padding(.top, -24)
+                    .background(alignment: .top) { wash(background) }
                 }
             }
         .background(ItemCard.background(item.accentColor))
@@ -239,7 +246,7 @@ struct FinishedPassSheet: View {
     private var cardRoom: some View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear
-                .frame(height: 200)
+                .frame(height: 176)
             VStack(alignment: .leading, spacing: 4) {
                 Text(" ")
                     .font(.displaySmall(24, relativeTo: .title3))
@@ -248,10 +255,41 @@ struct FinishedPassSheet: View {
                     .font(.subheadline)
             }
             .padding(16)
-            .padding(.top, -24)
         }
         .frame(maxWidth: .infinity)
         .hidden()
+        .accessibilityHidden(true)
+    }
+
+    /// How far the wash runs up the photo from the top of the words, and
+    /// how far down under them before it's solid.
+    private static let washOverPhoto: CGFloat = 104
+    private static let washUnderWords: CGFloat = 36
+
+    /// The card's colour coming up over the foot of the photo: the same
+    /// eased (smoothstep) ramp as the details' photo, solid by the title's
+    /// first line. A straight ramp reads as a line across a pale photo.
+    private func wash(_ color: Color) -> some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                stops: [
+                    .init(color: color.opacity(0), location: 0),
+                    .init(color: color.opacity(0.06), location: 0.15),
+                    .init(color: color.opacity(0.22), location: 0.3),
+                    .init(color: color.opacity(0.43), location: 0.455),
+                    .init(color: color.opacity(0.66), location: 0.606),
+                    .init(color: color.opacity(0.82), location: 0.727),
+                    .init(color: color.opacity(0.94), location: 0.848),
+                    .init(color: color.opacity(0.99), location: 0.94),
+                    .init(color: color, location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: Self.washOverPhoto + Self.washUnderWords)
+            color
+        }
+        .padding(.top, -Self.washOverPhoto)
         .accessibilityHidden(true)
     }
 
@@ -465,62 +503,6 @@ struct FinishedPassSheet: View {
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
                     .strokeBorder(AppBackground.sheet, lineWidth: 3)
             )
-    }
-}
-
-/// A card's photo across its top, sharp until its last stretch, where it
-/// dissolves into the card below: the list card's melt, turned downward.
-private struct MeltDown: View {
-    let url: URL
-    let cardBackground: Color
-
-    @State private var sharp: UIImage?
-    @State private var blurred: UIImage?
-
-    init(url: URL, cardBackground: Color) {
-        self.url = url
-        self.cardBackground = cardBackground
-        // Memory only, as the list's cards do: what's there draws in the
-        // sheet's first frame.
-        if let hit = ImageStore.cached(url, variant: .hero) ?? ImageStore.cached(url) {
-            _sharp = State(initialValue: hit)
-            _blurred = State(initialValue: ImageStore.cachedMelt(url) ?? hit)
-        }
-    }
-
-    var body: some View {
-        ZStack {
-            if let sharp, let blurred {
-                // The melt is a fixed stretch at the foot, however tall the
-                // photo has been left to be.
-                GeometryReader { box in
-                    MeltLayers(
-                        sharp: sharp, blurred: blurred, cardBackground: cardBackground,
-                        width: nil, downOver: min(1, 100 / max(box.size.height, 1))
-                    )
-                }
-            }
-        }
-        // Flat, so the multiply inside tints the photo and nothing under it.
-        .compositingGroup()
-        .task(id: url) {
-            // The card-size photo and its blur are usually in hand from the
-            // list; the full-size one takes their place when it lands.
-            async let full = ImageStore.fetch(url, variant: .hero)
-            guard let pair = await ImageStore.meltPair(url) else { return }
-            show(sharp ?? pair.sharp, over: pair.blurred)
-            if let full = await full { show(full, over: pair.blurred) }
-        }
-    }
-
-    /// Never animated: a late photo appears, it doesn't fade or grow in.
-    private func show(_ photo: UIImage, over blur: UIImage) {
-        var still = Transaction()
-        still.disablesAnimations = true
-        withTransaction(still) {
-            sharp = photo
-            blurred = blur
-        }
     }
 }
 
