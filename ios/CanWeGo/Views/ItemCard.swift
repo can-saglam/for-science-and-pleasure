@@ -408,17 +408,52 @@ private struct MeltImage: View {
 
 /// The melt itself, from images already in hand: the list card's, and
 /// Siri's, which is drawn once and can't wait for a load. A city pick's
-/// chip melts the other way, its photo at the leading edge.
+/// chip melts the other way, its photo at the leading edge; a "Did you
+/// go?" card's melts downward, its photo across the top.
 struct MeltLayers: View {
     let sharp: UIImage
     let blurred: UIImage
     let cardBackground: Color
-    let width: CGFloat
+    /// Nil fills whatever frame it's given.
+    let width: CGFloat?
     var photoLeading = false
+    /// A photo across the top of its card, melting down into it over this
+    /// share of its height; above that it's left as it is.
+    var downOver: CGFloat? = nil
 
     /// From the card colour to the photo.
-    private var startPoint: UnitPoint { photoLeading ? .trailing : .leading }
-    private var endPoint: UnitPoint { photoLeading ? .leading : .trailing }
+    private var startPoint: UnitPoint {
+        if downOver != nil { return .bottom }
+        return photoLeading ? .trailing : .leading
+    }
+
+    private var endPoint: UnitPoint {
+        if let downOver { return UnitPoint(x: 0.5, y: 1 - downOver) }
+        return photoLeading ? .leading : .trailing
+    }
+
+    /// Multiply pulls bright content toward the card color in the melt
+    /// zone — white posters tint instead of glaring — and leaves the photo
+    /// untouched at its far edge.
+    private var tint: [Gradient.Stop] {
+        let light = AppBackground.theme.isLight
+        let deep = cardBackground.mix(with: AppBackground.theme.ink, by: light ? 0.06 : 0.5)
+        // Downward on paper, the tint lets go inside the melt: past it is
+        // the whole photo, which a wash of the card colour would dull.
+        if downOver != nil, light {
+            return [
+                .init(color: cardBackground, location: 0),
+                .init(color: deep, location: 0.45),
+                .init(color: cardBackground, location: 0.7),
+                .init(color: .white, location: 1),
+            ]
+        }
+        return [
+            .init(color: cardBackground, location: 0),
+            .init(color: deep, location: 0.45),
+            .init(color: light ? cardBackground : .white, location: 0.95),
+        ]
+    }
 
     var body: some View {
         ZStack {
@@ -434,19 +469,8 @@ struct MeltLayers: View {
                         endPoint: endPoint
                     )
                 )
-            // Multiply pulls bright content toward the card color in
-            // the melt zone — white posters tint instead of glaring —
-            // and leaves the photo untouched at the right edge.
-            LinearGradient(
-                stops: [
-                    .init(color: cardBackground, location: 0),
-                    .init(color: cardBackground.mix(with: AppBackground.theme.ink, by: AppBackground.theme.isLight ? 0.06 : 0.5), location: 0.45),
-                    .init(color: AppBackground.theme.isLight ? cardBackground : .white, location: 0.95),
-                ],
-                startPoint: startPoint,
-                endPoint: endPoint
-            )
-            .blendMode(.multiply)
+            LinearGradient(stops: tint, startPoint: startPoint, endPoint: endPoint)
+                .blendMode(.multiply)
             LinearGradient(
                 stops: [
                     .init(color: cardBackground, location: 0),
@@ -463,12 +487,19 @@ struct MeltLayers: View {
         }
     }
 
+    @ViewBuilder
     private func filled(_ image: Image) -> some View {
-        image
-            .resizable()
-            .scaledToFill()
-            .frame(width: width)
-            .clipped()
+        if let width {
+            image
+                .resizable()
+                .scaledToFill()
+                .frame(width: width)
+                .clipped()
+        } else {
+            Color.clear
+                .overlay { image.resizable().scaledToFill() }
+                .clipped()
+        }
     }
 }
 
