@@ -421,6 +421,43 @@ struct MeltLayers: View {
     private var endPoint: UnitPoint { photoLeading ? .leading : .trailing }
 
     var body: some View {
+        if AppBackground.theme.isLight { paper } else { night }
+    }
+
+    /// On the papers: the photo sharp from edge to edge, tinted by the
+    /// card so a white poster is the card's own paper and not a white
+    /// block on it, under one eased wash of the card's colour. No blurred
+    /// copy underneath: fading to a dark card that reads as shadow, but
+    /// fading to a pale one it's haze, a smeared second image beside the
+    /// sharp one.
+    private var paper: some View {
+        ZStack {
+            filled(Image(uiImage: sharp))
+            cardBackground
+                .blendMode(.multiply)
+            LinearGradient(
+                stops: Self.easedWash(cardBackground, from: 0.15, to: 0.72),
+                startPoint: startPoint,
+                endPoint: endPoint
+            )
+        }
+    }
+
+    /// The card's colour, solid up to `from` and gone by `to`, on the
+    /// eased (smoothstep) ramp the details' photo uses: a straight ramp
+    /// that stops dead reads as a line across a pale photo.
+    private static func easedWash(_ color: Color, from: CGFloat, to: CGFloat) -> [Gradient.Stop] {
+        let ramp: [(at: CGFloat, opacity: Double)] = [
+            (0, 1), (0.06, 0.99), (0.152, 0.94), (0.273, 0.82), (0.394, 0.66),
+            (0.545, 0.43), (0.7, 0.22), (0.85, 0.06), (1, 0),
+        ]
+        return ramp.map { .init(color: color.opacity($0.opacity), location: from + $0.at * (to - from)) }
+    }
+
+    /// On the dark themes: a blurred copy under the photo, so sharp poster
+    /// edges soften before they fade, the sharp photo coming in over it,
+    /// and the card's colour multiplied and washed over both.
+    private var night: some View {
         ZStack {
             filled(Image(uiImage: blurred))
             filled(Image(uiImage: sharp))
