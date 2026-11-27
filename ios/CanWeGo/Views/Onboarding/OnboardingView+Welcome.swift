@@ -6,52 +6,75 @@ import SwiftUI
 import UserNotifications
 
 extension OnboardingView {
-    // MARK: Welcome
+    // MARK: Before sign-in
 
-    /// The front door: the wordmark, one line, and Sign in with Apple.
-    /// The same button whether this is a brand new account or a returning
+    /// The three pages before sign-in, one idea each over the moving demo:
+    /// saving from anywhere, the list knowing when, and sharing it. Sign
+    /// in with Apple comes on the third, once the app has been shown. The
+    /// same button whether this is a brand new account or a returning
     /// one, because Apple knows which and we don't until the session
     /// lands. New accounts arrive with a name, so the name page is never
     /// asked of them; returning ones skip the whole run.
+    var anywherePage: some View {
+        beatLayout(.anywhere) {
+            headline("Save it from anywhere.")
+            lede("Share a link from Instagram, Safari or Maps, or just type a name. It becomes a card with the date and the place.")
+        }
+    }
+
+    var whenPage: some View {
+        beatLayout(.when) {
+            headline("It knows when.")
+            lede("What\u{2019}s closing soon moves to the top of your list, and you get a nudge before it\u{2019}s gone.")
+        }
+    }
+
     var welcomePage: some View {
+        beatLayout(.welcome) {
+            if auth.sessionExpired && !preview {
+                headline("Welcome back.")
+                lede("Your session expired. Sign in again to keep syncing. Everything you saved is still here.")
+            } else {
+                headline("Better together.")
+                lede("One list with the people you go out with, instead of links lost in the group chat.")
+            }
+            if needsSignIn || unreachable || signingIn || preview || auth.signedIn {
+                signInBlock
+                    .padding(.top, tight ? 8 : 18)
+            }
+            legalLine
+                .frame(maxWidth: .infinity)
+        }
+        .animation(ease, value: signingIn)
+        .animation(ease, value: unreachable)
+    }
+
+    /// The demo over the words; on the open Duo, side by side.
+    func beatLayout<Words: View>(_ page: Page, @ViewBuilder words: () -> Words) -> some View {
         Group {
             if sideBySide {
-                // The fan on one side of the fold, the door on the other:
-                // the library's list and pane, before there's a library.
-                HStack(spacing: 0) {
-                    deckSlot(.welcome, height: 270)
-                    frontDoor
-                        .frame(maxWidth: .infinity)
+                HStack(alignment: .center, spacing: 48) {
+                    deckSlot(page, height: BeatDemo.height)
+                    VStack(alignment: .leading, spacing: 14) { words() }
+                        .frame(maxWidth: 340, alignment: .leading)
                 }
             } else {
-                VStack(spacing: 22) {
-                    deckSlot(.welcome, height: 250)
-                        .padding(.bottom, 18)
-                    frontDoor
+                VStack(alignment: .leading, spacing: 14) {
+                    deckSlot(page, height: tight ? BeatDemo.height * 0.72 : BeatDemo.height)
+                        .padding(.bottom, tight ? 6 : 20)
+                    words()
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        // A tall phone wants it a little above centre. iPhone Duo's
-        // displays are near square: dead centre, the home indicator's
-        // inset evened out.
-        .padding(Foldable.rotates(Foldable.sceneSize) ? .top : .bottom,
-                 Foldable.rotates(Foldable.sceneSize) ? 20 : 40)
-        .animation(ease, value: signingIn)
-        .animation(ease, value: unreachable)
-        .onAppear {
-            guard !dealt else { return }
-            if reduceMotion {
-                dealt = true
-                return
-            }
-            // Deal the hand, then let it breathe once the last card has
-            // settled.
-            dealt = true
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(1.3))
-                drift = true
-            }
+    }
+
+    /// The beat each page before sign-in shows.
+    var beat: Int? {
+        switch page {
+        case .anywhere: 0
+        case .when: 1
+        case .welcome: 2
+        default: nil
         }
     }
 
@@ -63,27 +86,6 @@ extension OnboardingView {
     /// Pro, ~580 on a mini, ~510 folded.
     var tight: Bool { sideBySide || pageHeight < 560 }
 
-    var frontDoor: some View {
-        VStack(spacing: 22) {
-            LogoTitle(height: 52, writes: .onboarding)
-            Text(auth.sessionExpired && !preview
-                 ? "Your session expired.\nSign in again to keep syncing.\nEverything you saved is still here."
-                 : "For all the places you\u{2019}ll go!")
-                .font(.displaySmallBold(23, relativeTo: .title3))
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if needsSignIn || unreachable || signingIn || preview || auth.signedIn {
-                signInBlock
-                    .frame(maxWidth: sideBySide ? 312 : nil)
-                    .padding(.top, 12)
-            }
-
-            legalLine
-        }
-    }
-
     /// The fan's seats, back to front: (tilt°, x, y). A cascade rather
     /// than a spread, so each card behind shows its title line above the
     /// one in front, and the front card sits straight and whole.
@@ -94,61 +96,14 @@ extension OnboardingView {
         (0.0, 12.0, 58.0),
     ]
 
-    /// The intro's row: the welcome four across the screen, then a few more
-    /// waiting off its right edge to drift in. Unscaled points, a card's
-    /// width plus a gap apart.
-    static let stripPitch: Double = 298
-    static let stripSeats: [(Double, Double, Double)] =
-        (0..<(sampleCards.count + stripExtras.count)).map { (0.0, (Double($0) - 1.5) * stripPitch, 0.0) }
-    static let stripScale: CGFloat = 0.74
-    /// One height for every card in the row, whatever lines it has.
-    static let stripCardHeight: CGFloat = 100
-
-    /// `x` brought into the loop's span, which starts at `start`.
-    static func wrapped(_ x: Double, in loop: Double, from start: Double) -> Double {
-        let r = (x - start).truncatingRemainder(dividingBy: loop)
-        return start + (r < 0 ? r + loop : r)
-    }
-
-    /// How far the strip has run. It sets off while the cards are still
-    /// landing, its speed rising along a smooth curve with no kick at
-    /// either end, so settling and drifting read as one motion.
-    func stripTravel(at date: Date) -> CGFloat {
-        guard let stripStart, !reduceMotion else { return 0 }
-        let t = date.timeIntervalSince(stripStart) - 0.35
-        guard t > 0 else { return 0 }
-        let speed = 36.0, ramp = 2.6
-        if t >= ramp { return CGFloat(speed * (t - ramp / 2)) }
-        let u = t / ramp
-        return CGFloat(speed * ramp * (u * u * u - u * u * u * u / 2))
-    }
-
-    /// Where the welcome cards sit on a page. The deck itself is drawn
-    /// above the pages and follows whichever slot is showing.
+    /// Where the demo sits on a page. The demo itself is drawn above the
+    /// pages and follows whichever slot is showing.
     func deckSlot(_ page: Page, height: CGFloat) -> some View {
         Color.clear
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .anchorPreference(key: DeckSlotKey.self, value: .bounds) { [page: $0] }
             .accessibilityHidden(true)
-    }
-
-    /// Loose on the front door; once signed in, a row that runs across
-    /// the screen on a loop. Above the pages, so a card pulled down
-    /// travels across the page rather than under it.
-    var showcaseDeck: some View {
-        let strip = page == .intro
-        return TimelineView(.animation(paused: !strip || reduceMotion)) { context in
-            cardFan(strip ? Self.sampleCards + Self.stripExtras : Self.sampleCards,
-                    seats: strip ? Self.stripSeats : Self.seats,
-                    dealt: dealt, key: 0, still: strip,
-                    slide: strip ? stripTravel(at: context.date) : 0,
-                    loop: strip ? Self.stripPitch * Double(Self.stripSeats.count) : 0)
-        }
-        // The cascade is ~340pt across; a small phone's margins hold
-        // less, so it shrinks to fit rather than bleed.
-        .scaleEffect(min(1, (pageWidth - 56) / 340) * (strip ? Self.stripScale : 1))
-        .accessibilityHidden(true)
     }
 
     /// Seats for up to three real cards, back to front: the welcome
@@ -187,21 +142,17 @@ extension OnboardingView {
         }
     }
 
-    /// Cards dealt into a loose stack, then drifting a little: welcome's
-    /// made-up saves, and the joined page's real ones. Real `ItemCard`s,
+    /// Cards dealt into a loose stack, then drifting a little: the saves
+    /// just made, and the ones a joined library already has. Real `ItemCard`s,
     /// so the look is exactly the library's — countdown badge, melt and
     /// all. Each one can be picked up and pulled about; it springs back to
     /// its seat. `items` and `seats` run back to front; `key` keeps each
     /// fan's pulls apart; cards in `reading` shimmer until their page is in.
     /// With `overlap`, the seats' heights are ignored: each card tucks that
     /// far under the one behind it, however many lines their titles run to.
-    /// `still` stops the drift, and the cards settle into new seats one
-    /// after another rather than all at once. With a `loop` length, the
-    /// seats run `slide` to the left and wrap round to the right.
     func cardFan(
         _ items: [Item], seats: [(Double, Double, Double)], dealt: Bool, key: Int, width: CGFloat = 280,
-        reading: Set<UUID> = [], overlap: CGFloat? = nil, still: Bool = false,
-        slide: CGFloat = 0, loop: Double = 0
+        reading: Set<UUID> = [], overlap: CGFloat? = nil
     ) -> some View {
         let count = min(items.count, seats.count)
         var seats = Array(seats.prefix(count))
@@ -219,20 +170,15 @@ extension OnboardingView {
                 seats[n].2 = Double(tops[n] + heights[n] / 2 - total / 2)
             }
         }
-        // A card wraps half a gap past the leftmost seat, out of sight.
-        let loopStart = (seats.map(\.1).min() ?? 0) - loop / Double(max(count, 1)) / 2
-        // A running row lines up the cards' tops (at the largest text
-        // sizes they keep their own heights).
-        return ZStack(alignment: loop > 0 ? .top : .center) {
+        return ZStack {
             ForEach(Array(items.prefix(count).enumerated()), id: \.offset) { index, item in
                 let i = key + index
                 let seat = seats[index]
                 let front = index == min(items.count, seats.count) - 1
-                let sway = front || still ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
+                let sway = front ? 0.0 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
                 let pull = pulled[i] ?? .zero
                 let held = lifted == i
-                let travel = loop > 0 ? Self.wrapped(seat.1 - slide, in: loop, from: loopStart) - seat.1 : 0
-                ItemCard(item: item, oneLineTitle: loop > 0, awayHint: false, fillsHeight: loop > 0)
+                ItemCard(item: item, awayHint: false)
                     .overlay {
                         if reading.contains(item.id) {
                             Shimmer(highlight: .white.opacity(themes.current.isLight ? 0.55 : 0.14))
@@ -242,8 +188,7 @@ extension OnboardingView {
                         }
                     }
                     .animation(ease, value: reading.contains(item.id))
-                    .frame(width: width,
-                           height: loop > 0 && !typeSize.isAccessibilitySize ? Self.stripCardHeight : nil)
+                    .frame(width: width)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         // A card's seat follows the heights, and moved a third
                         // of a point its own height can snap the other way: a
@@ -271,15 +216,7 @@ extension OnboardingView {
                         reduceMotion ? nil : .spring(duration: 0.7, bounce: 0.26).delay(Double(index) * 0.13),
                         value: dealt
                     )
-                    // Into new seats left to right, without overshoot.
-                    .animation(
-                        reduceMotion ? nil : .spring(duration: 1.0, bounce: 0).delay(Double(index) * 0.04),
-                        value: still
-                    )
                     .animation(reduceMotion ? nil : .spring(duration: 0.3), value: held)
-                    // Below the animations: the strip moves every frame and
-                    // wraps out of sight, so it must never spring.
-                    .offset(x: travel)
                     // Ahead of the page's scroll view, which has nothing
                     // to scroll here but would still claim a vertical pull.
                     .highPriorityGesture(
@@ -314,83 +251,6 @@ extension OnboardingView {
         .frame(height: overlap == nil ? nil : total)
     }
 
-    /// Four saves that read like a real week, back to front: an
-    /// exhibition with days left, a gig this week, a supper booked, and a
-    /// festival that's on today. Their photos come
-    /// from the bundle, handed to the image cache under made-up URLs so
-    /// the cards render them through the ordinary melt.
-    static let sampleCards: [Item] = {
-        let day = { (n: Int) in DayString.addingDays(n, to: DayString.today()) }
-        let photo = { (asset: String) -> String? in
-            let url = URL(string: "cwg-sample://\(asset.lowercased())")!
-            guard let image = UIImage(named: asset) else { return nil }
-            ImageStore.seed(image, for: url)
-            return url.absoluteString
-        }
-        let a = Item()
-        a.kind = Item.Kind.event
-        a.title = "Anish Kapoor"
-        a.venue = "Hayward Gallery"
-        a.area = "Southbank"
-        a.category = "exhibition"
-        a.startsOn = day(-40)
-        a.endsOn = day(9)
-        a.colorHex = "#B44A2C"
-        a.imageUrl = photo("SampleAnish")
-        let b = Item()
-        b.kind = Item.Kind.event
-        b.title = "Sessions Arts Club"
-        b.venue = "Sessions Arts Club"
-        b.area = "Clerkenwell"
-        b.category = "restaurant"
-        b.startsOn = day(6)
-        b.endsOn = day(6)
-        b.colorHex = "#2C7A6B"
-        b.imageUrl = photo("SampleSessions")
-        let c = Item()
-        c.kind = Item.Kind.event
-        c.title = "Open House Festival"
-        c.area = "London"
-        c.category = "festival"
-        c.startsOn = day(0)
-        c.endsOn = day(0)
-        c.colorHex = "#7A4FB4"
-        c.imageUrl = photo("SampleOpenHouse")
-        let d = Item()
-        d.kind = Item.Kind.event
-        d.title = "Poliça"
-        d.venue = "EartH"
-        d.area = "Dalston"
-        d.category = "gig"
-        d.startsOn = day(4)
-        d.endsOn = day(4)
-        d.colorHex = "#B8892E"
-        d.imageUrl = photo("SampleGig")
-        return [a, d, b, c]
-    }()
-
-    /// More for the intro's strip, drifting in after the welcome four.
-    /// Like them, each has a photo and a date, so every card in the row
-    /// fills its three lines.
-    static let stripExtras: [Item] = {
-        let day = { (n: Int) in DayString.addingDays(n, to: DayString.today()) }
-        let a = Item()
-        a.kind = Item.Kind.event
-        a.title = "Salman Toor"
-        a.venue = "Courtauld Gallery"
-        a.area = "Strand"
-        a.category = "exhibition"
-        a.startsOn = day(-20)
-        a.endsOn = day(23)
-        a.colorHex = "#3F6E4A"
-        let url = URL(string: "cwg-sample://sampletoor")!
-        if let image = UIImage(named: "SampleToor") {
-            ImageStore.seed(image, for: url)
-            a.imageUrl = url.absoluteString
-        }
-        return [a]
-    }()
-
     /// The two links App Review looks for under a sign-in button. The
     /// pages ship in the bundle, so this works offline too.
     var legalLine: some View {
@@ -409,7 +269,7 @@ extension OnboardingView {
     var signInBlock: some View {
         VStack(spacing: 14) {
             if unreachable {
-                Label("Signed in, but your library couldn't be reached. Check the connection and try again.",
+                Label("Signed in, but your list couldn\u{2019}t be reached. Check the connection and try again.",
                       systemImage: "wifi.exclamationmark")
                     .font(.footnote)
                     .foregroundStyle(AppBackground.warning)
@@ -423,7 +283,7 @@ extension OnboardingView {
                 // on by itself to the first unanswered question.
                 HStack(spacing: 10) {
                     ProgressView().tint(AppBackground.ink)
-                    Text("Opening your library…")
+                    Text("Opening your list…")
                         .font(.subheadline)
                         .foregroundStyle(AppBackground.secondaryInk)
                 }

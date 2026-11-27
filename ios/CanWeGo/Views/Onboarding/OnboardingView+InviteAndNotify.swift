@@ -88,26 +88,6 @@ extension OnboardingView {
         }
     }
 
-    // MARK: Done
-
-    /// The close: the three ways things get in from now on, the share
-    /// sheet first because it's the one people don't find on their own.
-    var donePage: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            headline("See it? Save it. Sort it.")
-            lede("Next time something catches your eye, here\u{2019}s how to keep it.")
-
-            VStack(alignment: .leading, spacing: 16) {
-                row("square.and.arrow.up", "Share from anywhere",
-                    "Tap Share in Instagram, Maps or Safari, then pick us from the row (or under More).")
-                row("square.grid.2x2", "A widget for what's on",
-                    "Hold the Home Screen, tap Edit, then Add Widget.")
-                row("waveform", "Ask Siri",
-                    "\u{201C}Add something to Can We Go?\u{201D} or \u{201C}What's closing soon in Can We Go?\u{201D}")
-            }
-        }
-    }
-
     // MARK: Notify
 
     /// "Joyce", or "Joyce or Sam" in a bigger group: who the new-save

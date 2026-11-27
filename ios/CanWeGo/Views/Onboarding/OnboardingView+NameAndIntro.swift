@@ -78,48 +78,4 @@ extension OnboardingView {
         .modifier(ColumnClip(on: sideBySide))
         .padding(.top, 4)
     }
-
-    // MARK: Intro
-
-    /// Straight after sign-in, before any question: what the app is for,
-    /// ending on sharing so the next page's question has its context.
-    var introPage: some View {
-        let points = [
-            ("square.and.arrow.down", "Save it from anywhere",
-             "Share a link from Instagram, TikTok, Safari or Maps, snap a poster, or search. It becomes a card with the dates."),
-            ("hourglass", "See what\u{2019}s closing",
-             "What ends soon rises to the top, and you can get a nudge before it\u{2019}s gone."),
-            ("person.2.fill", "Share it with your people",
-             "Keep one list with a partner or friends, so plans stop getting lost in the group chat."),
-        ]
-        return VStack(alignment: .leading, spacing: 18) {
-            deckSlot(.intro, height: 80)
-                .padding(.top, tight ? 8 : 24)
-                .padding(.bottom, tight ? 8 : 16)
-            headline(firstName.map { "Hi \($0).\nHere\u{2019}s the idea." } ?? "Here\u{2019}s\nthe idea.")
-            lede("One list for the exhibitions, gigs, restaurants and bars you mean to get to.")
-
-            VStack(alignment: .leading, spacing: 20) {
-                ForEach(Array(points.enumerated()), id: \.offset) { i, point in
-                    row(point.0, point.1, point.2)
-                        // In one by one once the cards have squared up.
-                        .opacity(introShown ? 1 : 0)
-                        .offset(y: introShown ? 0 : 10)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.5).delay(0.55 + Double(i) * 0.15),
-                                   value: introShown)
-                }
-            }
-            .padding(.top, 8)
-        }
-        .onAppear {
-            dealt = true
-            introShown = true
-            stripStart = .now
-        }
-        .onDisappear { stripStart = nil }
-    }
-
-    var firstName: String? {
-        trimmedName.split(separator: " ").first.map(String.init)
-    }
 }

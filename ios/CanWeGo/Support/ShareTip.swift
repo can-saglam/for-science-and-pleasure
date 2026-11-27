@@ -2,9 +2,9 @@ import SwiftUI
 import TipKit
 
 /// The one thing worth teaching after the first run: saves can come from
-/// the share sheet. Held back until the second launch, so the first is
-/// about the library itself, and never shown to someone who has already
-/// shared something in.
+/// the share sheet. Shown on the list from the first launch, where the
+/// first run used to end on a page about it, and never to someone who
+/// has already shared something in.
 struct ShareTip: Tip {
     /// One donation per launch, from `ContentView`.
     static let appOpened = Event(id: "appOpened")
@@ -18,12 +18,12 @@ struct ShareTip: Tip {
     var image: Image? { Image(systemName: "square.and.arrow.up") }
 
     var rules: [Rule] {
-        #Rule(Self.appOpened) { $0.donations.count >= 2 }
+        #Rule(Self.appOpened) { $0.donations.count >= 1 }
         #Rule(Self.$hasShared) { $0 == false }
     }
 
-    /// The first run's closing page shows the share sheet and the widget,
-    /// so neither tip is needed after it.
+    /// Set by first runs that ended on a page showing the share sheet and
+    /// the widget, so neither tip is needed after one of those.
     static var taughtInOnboarding: Bool {
         get { UserDefaults.standard.bool(forKey: "tips.taughtInOnboarding") }
         set { UserDefaults.standard.set(newValue, forKey: "tips.taughtInOnboarding") }

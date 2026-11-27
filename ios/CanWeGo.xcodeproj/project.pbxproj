@@ -81,6 +81,7 @@
 				Support/SiriLists.swift,
 				Support/VisualSearch.swift,
 				Views/AskLibraryRow.swift,
+				Views/Onboarding/OnboardingBeats.swift,
 				Views/Onboarding/OnboardingShowcase.swift,
 				"Views/Onboarding/OnboardingView+FirstSave.swift",
 				"Views/Onboarding/OnboardingView+Home.swift",

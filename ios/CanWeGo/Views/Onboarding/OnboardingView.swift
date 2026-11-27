@@ -46,13 +46,15 @@ enum OnboardingGate {
     }
 }
 
-/// First run. One question a page, centred on a soft wash of the theme:
-/// a welcome, Sign in with Apple, then only what the account still lacks
-/// (a name if Apple didn't hand one over, a home city), the person's own
+/// First run, on a soft wash of the theme. Three pages show what the app
+/// does before anything is asked (saving from anywhere, the list knowing
+/// when, sharing it), the third with Sign in with Apple. Then one
+/// question a page, only what the account still lacks: who it's for, a
+/// name if Apple didn't hand one over, a home city, the person's own
 /// first saves (typed, or ticked from the city's picks), the invite for
-/// someone starting a shared library, the ask for notifications once
-/// there's a real card to be notified about, and a close that shows the
-/// three ways in: the share sheet, the widget, Siri.
+/// someone starting a shared list, and the ask for notifications once
+/// there's a real card to be notified about. The share sheet is taught
+/// by a tip on the list itself.
 ///
 /// The look is not a question: a fresh install takes a theme from the
 /// system appearance, and the page that shows the first real card offers
@@ -84,8 +86,13 @@ struct OnboardingView: View {
     @State var themes = ThemeStore.shared
     @State var auth = SupabaseAuth.shared
 
-    enum Page: String, Hashable { case welcome, intro, together, home, name, save, joined, invite, notify, done }
-    @State var pages: [Page] = [.welcome, .together, .name, .home, .save, .notify, .done]
+    enum Page: String, Hashable {
+        case anywhere, when, welcome, together, home, name, save, joined, invite, notify
+
+        /// Before sign-in: the three pages that show what it does.
+        var isBeat: Bool { [.anywhere, .when, .welcome].contains(self) }
+    }
+    @State var pages: [Page] = [.anywhere, .when, .welcome, .together, .name, .home, .save, .notify]
     @State var index = 0
 
     // Sign in (the welcome page is the front door when there's no session)
@@ -155,10 +162,6 @@ struct OnboardingView: View {
     // Welcome
     @State var legal: LegalPage?
     @State var drift = false
-    /// Welcome's card fan has been dealt (once per run of the flow).
-    @State var dealt = false
-    @State var introShown = false
-    @State var stripStart: Date?
     /// The joined page's fan of the group's own saves, dealt on arrival.
     @State var joinedDealt = false
     @State var savedDealt = false
@@ -198,7 +201,7 @@ struct OnboardingView: View {
                     pageBody
                         .id(page)
                         .transition(.opacity)
-                        .frame(maxWidth: sideBySide && page != .welcome ? 440 : .infinity)
+                        .frame(maxWidth: sideBySide && !page.isBeat ? 440 : .infinity)
                         .padding(.horizontal, 28)
                         .padding(.top, topInset(in: geo.size.height))
                         .padding(.top, sideBySide ? 36 : 0)
@@ -211,22 +214,22 @@ struct OnboardingView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .scrollIndicators(.hidden)
-                // The front door is a single screen. The later pages still
-                // scroll, so a keyboard can get out of the way.
-                .scrollDisabled(page == .welcome)
+                // The pages before sign-in are single screens. The later
+                // pages scroll, so a keyboard can get out of the way.
+                .scrollDisabled(page.isBeat)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
             }
             // Open, iPhone Duo is short for its width: the tiles and a code
             // only fit with less air over the bar.
-            .safeAreaPadding(.bottom, page == .welcome ? 0 : sideBySide ? 24 : 84)
-            // The welcome cards live above the pages and follow a slot on
-            // each, so signing in squares the same fan into the intro's stack.
+            .safeAreaPadding(.bottom, page.isBeat ? 0 : sideBySide ? 24 : 84)
+            // The demo lives above the pages and follows a slot on each,
+            // so its cards carry over from one page to the next.
             .overlayPreferenceValue(DeckSlotKey.self) { slots in
                 GeometryReader { proxy in
-                    if let anchor = slots[page] {
+                    if let anchor = slots[page], let beat {
                         let rect = proxy[anchor]
-                        showcaseDeck
+                        BeatDemo(beat: beat, still: reduceMotion)
                             .frame(width: rect.width, height: rect.height)
                             .position(x: rect.midX, y: rect.midY)
                             .animation(reduceMotion ? nil : .spring(duration: 1.0, bounce: 0), value: page)
@@ -237,10 +240,13 @@ struct OnboardingView: View {
 
             if preview {
                 closeButton
+            } else if page == .anywhere || page == .when {
+                skipButton
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if page != .welcome { bottomBar }
+            // Signed in, the welcome page has nothing behind it to go back to.
+            if page != .welcome || index > 0 { bottomBar }
         }
         .foregroundStyle(AppBackground.ink)
         .tint(AppBackground.accent)
@@ -345,6 +351,31 @@ struct OnboardingView: View {
         .transition(.opacity)
     }
 
+    /// Past the two pages that show it, straight to signing in.
+    var skipButton: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    Haptics.tap()
+                    guard let i = pages.firstIndex(of: .welcome) else { return }
+                    withAnimation(ease) { index = i }
+                } label: {
+                    Text("Skip")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .capsule)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 12)
+    }
+
     var closeButton: some View {
         VStack {
             HStack {
@@ -398,20 +429,23 @@ struct OnboardingView: View {
                 notNowButton
                     .padding(.trailing, 2)
             } else {
-                // Until there's a session the step count isn't known (the
-                // account may already answer most of it), so no dots yet.
+                // The pages before sign-in count among themselves. After
+                // it, the questions do, once there's a session: until then
+                // the step count isn't known (the account may already
+                // answer most of it).
+                let steps = dotSteps
                 HStack(spacing: 6) {
-                    ForEach(pages.indices, id: \.self) { i in
+                    ForEach(steps, id: \.self) { i in
                         Capsule()
                             .fill(AppBackground.ink.opacity(i == index ? 0.9 : 0.3))
                             .frame(width: i == index ? 20 : 6, height: 6)
                     }
                 }
                 .animation(ease, value: index)
-                .opacity(needsSignIn ? 0 : 1)
+                .opacity(needsSignIn && !page.isBeat ? 0 : 1)
                 .accessibilityElement()
-                .accessibilityLabel("Step \(index + 1) of \(pages.count)")
-                .accessibilityHidden(needsSignIn)
+                .accessibilityLabel("Step \((steps.firstIndex(of: index) ?? 0) + 1) of \(steps.count)")
+                .accessibilityHidden(needsSignIn && !page.isBeat)
 
                 Spacer()
             }
@@ -429,18 +463,22 @@ struct OnboardingView: View {
         .ignoresSafeArea(.container, edges: .horizontal)
     }
 
+    var dotSteps: [Int] {
+        pages.indices.filter { pages[$0].isBeat == page.isBeat }
+    }
+
     static let control: CGFloat = 56
     /// Clears the preview's close button with room to spare.
     static let headlineTop: CGFloat = 100
 
     var centred: Bool {
-        [.welcome, .notify, .done].contains(page) || sideBySide && page != .home
+        page == .notify || sideBySide && page != .home
     }
 
     func topInset(in height: CGFloat) -> CGFloat {
         if centred { return 0 }
         return switch page {
-        case .intro: tight ? 52 : 76
+        case .anywhere, .when, .welcome: tight ? 8 : 24
         case .home: max(Self.headlineTop, height * 0.34)
         default: tight ? Self.headlineTop - 28 : Self.headlineTop
         }
@@ -515,7 +553,7 @@ struct OnboardingView: View {
         switch page {
         case .welcome:
             return Forward(title: "Get started", disabled: needsSignIn || unreachable, run: advance)
-        case .intro, .joined:
+        case .anywhere, .when, .joined:
             return Forward(run: advance)
         case .together:
             switch together {
@@ -555,9 +593,7 @@ struct OnboardingView: View {
             if notifyStatus == .notDetermined {
                 return Forward(title: "Notify me") { Task { await askNotifications() } }
             }
-            return Forward(title: "Continue", run: advance)
-        case .done:
-            return Forward(title: "Start", run: finish)
+            return Forward(title: isLast ? "Start" : "Continue", run: advance)
         }
     }
 
@@ -576,8 +612,9 @@ struct OnboardingView: View {
     @ViewBuilder
     var pageBody: some View {
         switch page {
+        case .anywhere: anywherePage
+        case .when: whenPage
         case .welcome: welcomePage
-        case .intro: introPage
         case .together: togetherPage
         case .name: namePage
         case .home: homePage
@@ -585,7 +622,6 @@ struct OnboardingView: View {
         case .joined: joinedPage
         case .invite: invitePage
         case .notify: notifyPage
-        case .done: donePage
         }
     }
 
@@ -760,21 +796,25 @@ struct OnboardingView: View {
     /// rest when it can be guessed; pages the account already answers are
     /// dropped (never in preview, which shows them all). An invite link
     /// opens the question already answered, on the code. Starting a
-    /// shared library adds the invite after the first save.
+    /// shared list adds the invite after the first save. The two pages
+    /// that show the app come before sign-in, and not for someone whose
+    /// session merely expired.
     func pageOrder() -> [Page] {
         var order: [Page] = locationAllowed
-            ? [.welcome, .home, .name, .save, .notify, .done]
-            : [.welcome, .name, .home, .save, .notify, .done]
+            ? [.welcome, .home, .name, .save, .notify]
+            : [.welcome, .name, .home, .save, .notify]
         if preview || JoinGate.pendingCode != nil || !alreadyShared {
             order.insert(.together, at: 1)
         }
-        order.insert(.intro, at: 1)
         if together == .start, !joined, preview || !alreadyShared, let i = order.firstIndex(of: .notify) {
             order.insert(.invite, at: i)
         }
         if !preview {
             if OnboardingGate.hasName { order.removeAll { $0 == .name } }
             if OnboardingGate.hasHome { order.removeAll { $0 == .home } }
+        }
+        if preview || needsSignIn && !auth.sessionExpired {
+            order.insert(contentsOf: [.anywhere, .when], at: 0)
         }
         return order
     }
@@ -809,7 +849,7 @@ struct OnboardingView: View {
     }
 
     func saveResume() {
-        guard !preview, let key = resumeKey, page != .welcome else { return }
+        guard !preview, let key = resumeKey, !page.isBeat else { return }
         let state = Resume(page: page.rawValue, name: name, codeDraft: codeDraft,
                            cityDraft: cityDraft, linkDraft: linkDraft,
                            together: together?.rawValue, codeChoice: nil)
@@ -908,8 +948,6 @@ struct OnboardingView: View {
             // system's "you changed the icon" alert, is what comes next.
             themes.deferIconSync()
             clearResume()
-            // The closing page taught the share sheet and the widget.
-            ShareTip.taughtInOnboarding = true
         }
         onFinished()
     }
