@@ -20,9 +20,9 @@ extension OnboardingView {
             switch homeVariant {
             case .finding: headline("Finding\nyour city…")
             case .confirm: headline("Looks like\n\(picked?.locality ?? ""), right?")
-            case .manual: headline("Where's home?")
+            case .manual: headline("Where do you\ngo out?")
             }
-            lede("The city you go out in. It sets the clock on your cards and where the map opens.")
+            lede("Your picks come from this city, and the map opens on it.")
 
             switch homeVariant {
             case .finding:

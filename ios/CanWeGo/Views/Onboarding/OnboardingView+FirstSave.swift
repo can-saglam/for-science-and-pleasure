@@ -30,7 +30,7 @@ extension OnboardingView {
         VStack(alignment: .leading, spacing: 18) {
             if !savedPicks.isEmpty {
                 headline(savedPicks.count == 1 ? "There it is." : "There they are.")
-                lede("Everything you add lands in the library looking like this. The details fill in as we read each page.")
+                lede("Everything you add lands in your list looking like this. The details fill in as we read each page.")
                 let shown = Array(savedPicks.prefix(3))
                 // First pick in front: the fan runs back to front.
                 cardFan(shown.reversed(), seats: Self.joinedSeats(shown.count), dealt: savedDealt, key: 200, width: 320,
@@ -55,8 +55,8 @@ extension OnboardingView {
             } else if let parsed {
                 headline("There it is.")
                 lede(tickedPicks.isEmpty
-                     ? "A real save. Everything you add lands in the library looking like this."
-                     : "A real save, and the \(tickedPicks.count == 1 ? "one" : "\(tickedPicks.count)") you ticked go in with it. Everything you add lands in the library looking like this.")
+                     ? "Everything you add lands in your list looking like this."
+                     : "And the \(tickedPicks.count == 1 ? "one" : "\(tickedPicks.count)") you ticked go in with it. Everything you add lands in your list looking like this.")
                 ItemCard(item: parsed, awayHint: false)
                 quiet("Try another") {
                     self.parsed = nil
@@ -67,8 +67,8 @@ extension OnboardingView {
                 }
                 themeSwatches
             } else {
-                headline("What would you\ngo to first?")
-                lede("Paste a link or name it: a gig, a show, somewhere to eat. We look it up and make the card. Or tap a few from your city.")
+                headline("What do you want\nto go to first?")
+                lede("Paste a link or type a name. We find the date and the place. Or tap a few picks from your city.")
 
                 if parsing {
                     formingCard
@@ -106,7 +106,7 @@ extension OnboardingView {
                     }
 
                     // The share-sheet lesson isn't here: it arrives as a
-                    // tip in the library on the second launch (ShareTip).
+                    // tip on the list (ShareTip).
                 }
             }
 

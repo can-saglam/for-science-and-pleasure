@@ -11,12 +11,12 @@ extension OnboardingView {
     /// What this run saved first: the typed one, else the first ticked.
     var firstSave: Item? { parsed ?? savedPicks.first }
 
-    /// Only for someone who chose to start a shared library, right after
+    /// Only for someone who chose to start a shared list, right after
     /// their first saves, so the invite has something in it worth opening.
     var invitePage: some View {
         VStack(alignment: .leading, spacing: 18) {
             headline("Now bring\nthem in")
-            lede("Send this to whoever you go out with. It opens the app on their phone and puts them straight into your library.")
+            lede("Send this to whoever you go out with. It opens the app on their phone and puts them straight into your list.")
 
             if let firstSave {
                 ItemCard(item: firstSave, awayHint: false)

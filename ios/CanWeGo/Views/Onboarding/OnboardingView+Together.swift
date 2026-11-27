@@ -8,28 +8,40 @@ import UserNotifications
 extension OnboardingView {
     // MARK: Together
 
-    /// Who it's for and, for a shared library, which side of the invite
-    /// they're on, as one question. A code opens its field under the tile.
+    /// Who it's for: two answers, and under them the way in for someone
+    /// who was sent an invite. The invite opens its field in place.
     var togetherPage: some View {
         VStack(alignment: .leading, spacing: 18) {
-            headline("Who\u{2019}s coming\nalong?")
-            lede("Keep a list of your own, or share one with your partner or friends. You can switch later in Settings.")
+            headline("Who\u{2019}s it for?")
+            lede("You can change this any time in Settings.")
 
             choiceTile("person.fill", "Just me",
-                       "A list of your own, for every place you can\u{2019}t wait to try.",
+                       "A list of your own.",
                        selected: together == .solo) { chooseTogether(.solo) }
                 .disabled(joined)
-            choiceTile("person.2.fill", "Me and my people",
-                       "One list with your partner or friends. We\u{2019}ll help you invite them next.",
+            choiceTile("person.2.fill", "Me and others",
+                       "One list you share with a partner or friends. You\u{2019}ll invite them next.",
                        selected: together == .start) { chooseTogether(.start) }
                 .disabled(joined)
-            choiceTile("envelope.open.fill", "I\u{2019}ve got an invite",
-                       "Paste the link a friend sent you, or their code, like KV7-P2M, and you\u{2019}re in.",
-                       selected: together == .code) { chooseTogether(.code) }
 
             if together == .code {
                 codeEntry
+                    .padding(.top, 6)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                Button {
+                    Haptics.tap()
+                    chooseTogether(.code)
+                } label: {
+                    Text("Got an invite? \(Text("Enter the link or code").fontWeight(.semibold).underline())")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(frozen)
+                .transition(.opacity)
             }
 
             noteLine
@@ -70,7 +82,7 @@ extension OnboardingView {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// Starting a shared library puts the invite page after the first
+    /// Starting a shared list puts the invite page after the first
     /// save; the other answers take it out.
     func chooseTogether(_ choice: Together) {
         note = nil
@@ -126,7 +138,7 @@ extension OnboardingView {
             }
 
             if preview, codePreview != nil, !joined {
-                lede("Preview: any code opens Joyce's library. Nothing is joined for real.")
+                lede("Preview: any code opens Joyce\u{2019}s list. Nothing is joined for real.")
             }
         }
     }
@@ -236,7 +248,7 @@ extension OnboardingView {
         return GroupStore.JoinPreview(
             status: "ok",
             inviter: names.first,
-            name: "\(names.first ?? "Joyce")'s library",
+            name: "\(names.first ?? "Joyce")\u{2019}s list",
             homeLocality: "London",
             capacity: max(2, names.count + 1),
             isPlus: names.count > 1,
@@ -290,7 +302,7 @@ extension OnboardingView {
             _ = try await group.join(code: code, keepCopy: false)
             let landed = await SupabaseSync.replaceLibrary(context: context)
             guard landed else {
-                note = "You're in the group, but this phone couldn't refresh the library. Open the app again when you're online."
+                note = "You\u{2019}re in, but this phone couldn\u{2019}t load the list. Open the app again when you\u{2019}re online."
                 return
             }
             await members.refresh()
@@ -310,7 +322,7 @@ extension OnboardingView {
     }
 
     /// A join answers "what's the first thing you'd go to?" better than
-    /// any typed link could: the library is already full of their saves.
+    /// any typed link could: the list is already full of their saves.
     /// The save page gives way to a look at it.
     func showJoined() {
         let all = (try? context.fetch(FetchDescriptor<Item>())) ?? []
@@ -362,7 +374,7 @@ extension OnboardingView {
                      : "Nothing saved yet — you'll be the first. Anything either of you shares into the app lands here for both of you.")
             } else {
                 let who = groupmates.isEmpty ? "they" : Self.listed(groupmates, "and")
-                lede("Some of what \(who) \(groupmates.count > 1 || groupmates.isEmpty ? "have" : "has") saved so far. It's your library now too: edit anything, add anything.")
+                lede("Some of what \(who) \(groupmates.count > 1 || groupmates.isEmpty ? "have" : "has") saved so far. It\u{2019}s your list now too: edit anything, add anything.")
                 let shown = Array(groupCards.prefix(3))
                 let seats = Self.joinedSeats(shown.count)
                 // Newest in front: the fan runs back to front.
